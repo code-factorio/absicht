@@ -51,9 +51,14 @@ code.
   web and MCP surfaces a week rather than a rewrite.
 - **`ab` is the binary, `.absicht/` is the store**, sitting alongside
   `.rohrpost/`.
-- **The design store is its own repo.** A ticket belongs to a codebase; a
-  design belongs to a system, and a system is a composition. `system.yaml`
-  pins the units it composes, like a lockfile.
+- **The store's location is a mode, and `.absicht` carries it.** A directory
+  is embedded: the store lives in the repo it describes, which is where a
+  single-repo project starts. A file is reference: the store is its own repo
+  and the file is a marker pointing at it, which is where a composite ends up,
+  because a ticket belongs to a codebase but a design belongs to a system and a
+  system is a composition. `system.yaml` pins the units it composes, like a
+  lockfile, either way. The modes are exclusive because the filesystem makes
+  them so: one name is one directory entry.
 - **Watermarks are hints, not pins.** They over-claim in practice — a merge
   stamps `M003` because the work was declared done — so the gap always reads
   smaller than it is. That is survivable because the watermark was never the

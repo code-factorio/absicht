@@ -1,6 +1,6 @@
 # absicht — CLI surface
 
-Binary: `ab`. Store: `.absicht/` unless told otherwise.
+Binary: `ab`. Store: `.absicht` unless told otherwise.
 
 Two audiences with different needs. A human runs these to author and look
 around. An agent or CI runs them to get bounded work in and verification out —
@@ -14,7 +14,7 @@ required to hand an agent useful work.
 
 | Flag | Meaning |
 | --- | --- |
-| `--store PATH` | Design store root. Default `.absicht`, then `$ABSICHT_STORE` |
+| `--store PATH` | Design store root. Default: `.absicht/` as a directory (embedded), else `.absicht` as a file (reference, resolved to the store it names), else no store. Then `$ABSICHT_STORE` |
 | `--rev REF` | Read the store at a git revision instead of the working tree |
 | `--json` | Machine output on stdout. Diagnostics stay on stderr. Also accepted on the command itself — `ab check --json` and `ab --json check` are the same thing. See [ADR-0001](../adr/0001-json-on-every-command.md) |
 | `--quiet` `-q` | Errors only |
@@ -41,10 +41,19 @@ a broken pipeline.
 
 ### `ab init`
 
-Scaffold a store.
+Scaffold a store. The mode is chosen, not inferred.
 
+- `--embedded` store as `.absicht/` in this repo. Default
+- `--reference URL` write an `.absicht` file pointing at the store at `URL`;
+  `ab marker sync` fills in the units
 - `--name NAME` system name
-- `--force` write into a non-empty directory
+- `--force` write into an existing `.absicht/`. Adds files, deletes none
+
+`init` never overwrites. An existing `.absicht` stops it: a marker in reference
+mode, a store in embedded mode, and either one where the other mode wants the
+name, since one name is one directory entry. `--force` relaxes only the
+empty-store case. Switching modes is `ab extract`, or a deletion you make
+yourself.
 
 ### `ab new KIND SLUG`
 
@@ -225,6 +234,10 @@ Reports units behind design head, which decisions and seam changes landed since
 each watermark, seams whose consumers have not caught up, components with no
 implementation reference, and milestones with unmet `done_when`.
 
+That is the reference-mode report. Embedded, design and code land in the same
+commit and nothing can be behind, so what is left is implementation coverage and
+unmet `done_when`.
+
 A watermark is a hint, not proof — it tends to over-claim, since a merge stamps
 it whether or not the work was finished.
 
@@ -259,6 +272,10 @@ authoritative; markers are regenerable hints.
 
 ## Later
 
+- `ab extract --to URL` move `.absicht/` out to a new store repo and leave a
+  populated `.absicht` file behind. This is the transition a hand-migration gets
+  wrong — the marker has to name the right units and paths, and carry a
+  watermark for the commit that split them — which is why it is a command
 - `ab import --repo PATH` brownfield extraction: structure from code,
   everything intent-shaped lands as `observed` or `unknown`
 - `ab mine --repo PATH` candidate decisions from git history, PRs and ADR

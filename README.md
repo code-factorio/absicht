@@ -27,7 +27,9 @@ you may make freely, these things we genuinely have not decided.
 
 ## Shape
 
-Files in a repo, validated, rendered, queried.
+Files in a repo, validated, rendered, queried. The tree below is the embedded
+case, the store sitting in the repo it describes. It can also live in a repo of
+its own; see [Discovery and watermarks](#discovery-and-watermarks).
 
 ```
 .absicht/
@@ -86,9 +88,23 @@ monoliths into libraries into services; the ID survives the move.
 
 ## Discovery and watermarks
 
-The design store lives in its own repo, because a design spans several
-codebases. Each implementing repo carries a small `.absicht` marker so an agent
-dropped into that repo can find its design without being told where to look:
+`.absicht` is overloaded by filesystem type, and the type is the mode:
+
+- **`.absicht/`, a directory** — embedded. The store lives in this repo, next to
+  the code it describes. The single-repo case.
+- **`.absicht`, a file** — reference. The design lives in its own repo. The file
+  is a discovery hint: where the store is, which units this repo implements, and
+  a watermark per unit.
+- **Neither** — not an absicht repo.
+
+One `stat` distinguishes them, and one name is one directory entry, so the two
+cannot both be present. This is how projects actually grow: start single-repo
+with the design beside the code and no ceremony, and when a component gets
+extracted into a repo of its own, the store moves out and a marker is left
+behind. Same layout, no migration.
+
+In reference mode the marker is what an agent dropped into an implementing repo
+reads to find its design without being told where to look:
 
 ```yaml
 # .absicht
@@ -119,6 +135,10 @@ the work — evidence, produced by the thing that produced the change.
 
 Across a composite this is what `ab status` computes: which units are behind,
 how far, and whether a seam moved underneath a consumer that has not caught up.
+
+Watermarks are a reference-mode concern only. Embedded, design and code move in
+the same commit, so nothing can be behind; `ab status` there reports
+implementation coverage and unmet `done_when` instead of drift.
 
 A watermark is a hint about where to look, not proof of conformance. Merged code
 is not correct code. `at: M003` means someone shipped something claiming to be
