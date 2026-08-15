@@ -171,7 +171,7 @@ pytest_add_cli_args = ["-q", "--no-header"]
 do_not_mutate = [
     "src/absicht/__init__.py",
     "src/absicht/__main__.py",
-    "src/absicht/cli.py",
+    "src/absicht/cli/*.py",
 ]
 
 [tool.coverage.run]
