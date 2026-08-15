@@ -21,6 +21,7 @@ classifiers = [
     "Typing :: Typed",
 ]
 dependencies = [
+    "pydantic>=2.13.4",
     "typer>=0.27.1",
 ]
 
@@ -142,7 +143,7 @@ include_external_packages = true
 #   absicht.resolve
 #   absicht.load
 #   absicht.codec
-#   absicht.model                            # imports nothing of ours
+#   absicht.models                           # imports nothing of ours
 #
 # Only the layers that exist are listed: import-linter fails on a named module
 # that is not there, and a contract nobody can run is worse than none.
@@ -152,6 +153,7 @@ type = "layers"
 layers = [
     "absicht.__main__",
     "absicht.cli",
+    "absicht.models",
 ]
 
 [tool.mutmut]
