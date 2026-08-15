@@ -83,11 +83,26 @@ check_test() {
 	uv run pytest --cov=absicht --cov-report=term-missing
 }
 
+# The modules where a silent wrong answer is the whole failure mode: a packet
+# that quietly drops a `must_hold` ADR passes every other check in this file.
+# Everything else — the CLI, the renderer — is not worth the runtime.
+MUTATION_SCOPE=(src/absicht/model src/absicht/check.py src/absicht/packet.py)
+
 # Mutation testing takes minutes, not seconds, and it is the most valuable tool
 # here: it is the only one that answers "do these tests assert anything", which
 # is exactly how agent-written tests fail. It is not part of the default suite;
 # CI runs it nightly and you run it here when you have changed tests.
 check_mutation() {
+	local path present=()
+	for path in "${MUTATION_SCOPE[@]}"; do
+		[[ -e $path ]] && present+=("$path")
+	done
+	if [[ ${#present[@]} -eq 0 ]]; then
+		echo "mutation: nothing in scope yet — none of ${MUTATION_SCOPE[*]} exist."
+		echo "mutation: this check arms itself when they land; see docs/maintainers/verification.md."
+		return 0
+	fi
+
 	rm -f mutants/mutmut-cicd-stats.json
 	uv run mutmut run || return 1
 	uv run mutmut export-cicd-stats || return 1

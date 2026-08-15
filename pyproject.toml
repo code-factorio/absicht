@@ -164,8 +164,10 @@ source_paths = ["src/absicht"]
 pytest_add_cli_args_test_selection = ["tests"]
 pytest_add_cli_args = ["-q", "--no-header"]
 # The entry points are argument plumbing: a mutant there survives or dies on
-# Typer's behaviour, not ours. Mutate the code that decides things.
+# Typer's behaviour, not ours. `__init__.py` is a version constant. Mutate the
+# code that decides things.
 do_not_mutate = [
+    "src/absicht/__init__.py",
     "src/absicht/__main__.py",
     "src/absicht/cli.py",
 ]
