@@ -22,6 +22,7 @@ classifiers = [
 ]
 dependencies = [
     "pydantic>=2.13.4",
+    "rohrpost",
     "typer>=0.27.1",
 ]
 
@@ -192,3 +193,6 @@ exclude_lines = [
 # story. The real gate is diff coverage on the pull request, and — once the
 # checker exists — a fixture per validation rule that trips it.
 fail_under = 60
+
+[tool.uv.sources]
+rohrpost = { git = "https://github.com/code-factorio/rohrpost.git" }

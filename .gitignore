@@ -19,3 +19,4 @@ site/
 # `ab build` output: deterministic, schema-versioned and disposable. The files
 # under .absicht/ are the truth; this is a fold over them.
 build.json
+.rohrpost/tickets.jsonl
