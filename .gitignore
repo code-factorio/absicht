@@ -1,0 +1,21 @@
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.hypothesis/
+.pyscn/
+mutants/
+.mutmut-cache
+.coverage
+coverage.xml
+htmlcov/
+reports/
+site/
+# `ab build` output: deterministic, schema-versioned and disposable. The files
+# under .absicht/ are the truth; this is a fold over them.
+build.json

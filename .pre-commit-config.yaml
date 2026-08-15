@@ -1,0 +1,50 @@
+# Two stages, split by what you can bear to wait for.
+#
+# pre-commit gets what answers in under a second: formatting, lint, and the
+# file-shape fixers. Nothing else. The moment a commit hook costs four seconds
+# people start using `--no-verify` and the whole mechanism is gone — and
+# "commit often" is only advice you can follow if committing is cheap.
+#
+# pre-push gets the types and the tests, because that is the last point before
+# other people and CI see the work. Everything slower — the import contracts,
+# complexity, pyscn, mutation — lives in CI, where it can fail in its own job
+# with its own name.
+#
+# Every local hook shells out to scripts/verify.sh. The hooks add no flags of
+# their own, so there is exactly one definition of each check.
+
+default_install_hook_types: [pre-commit, pre-push]
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    # Fixers and file-shape checks, not gates: they repair the file, or refuse
+    # a broken one, and let you commit again. Only worth running against what
+    # is about to be committed.
+    hooks:
+      - id: end-of-file-fixer
+        stages: [pre-commit]
+      - id: trailing-whitespace
+        stages: [pre-commit]
+      - id: check-merge-conflict
+        stages: [pre-commit]
+      - id: check-toml
+        stages: [pre-commit]
+      - id: check-yaml
+        stages: [pre-commit]
+
+  - repo: local
+    hooks:
+      - id: verify-quick
+        name: verify quick (format, lint)
+        entry: scripts/verify.sh quick
+        language: script
+        pass_filenames: false
+        stages: [pre-commit]
+
+      - id: verify-push
+        name: verify (types, tests)
+        entry: scripts/verify.sh types test
+        language: script
+        pass_filenames: false
+        stages: [pre-push]

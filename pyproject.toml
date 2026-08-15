@@ -1,0 +1,190 @@
+[project]
+name = "absicht"
+version = "0.1.0"
+description = "The design truth of a system, as files. What the code can never tell you."
+readme = "README.md"
+license = { text = "MIT" }
+authors = [
+    { name = "code-factorio" },
+]
+requires-python = ">=3.14"
+keywords = ["agent", "architecture", "code-factory", "design", "intent"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.14",
+    "Programming Language :: Python :: Implementation :: CPython",
+    "Typing :: Typed",
+]
+dependencies = [
+    "typer>=0.27.1",
+]
+
+[project.urls]
+Homepage = "https://github.com/code-factorio/absicht"
+Repository = "https://github.com/code-factorio/absicht"
+Issues = "https://github.com/code-factorio/absicht/issues"
+
+[project.scripts]
+ab = "absicht.cli:app"
+
+[build-system]
+requires = ["uv_build>=0.9.26,<0.10.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+# Everything the verification suite needs. `uv sync` installs it by default;
+# `uv sync --no-dev` gets you the runtime alone.
+#
+# Deliberately not here: `ty` (pre-1.0, not a gate) and `radon` (xenon is the
+# enforcing half; the report was never the thing that failed a build). pyright
+# is present because the editor runs it, not because CI does — see
+# CONTEXT.md for why the gate is one type checker rather than three.
+dev = [
+    "bandit>=1.9",
+    "deptry>=0.23",
+    "diff-cover>=9.2",
+    "hypothesis>=6.140",
+    "import-linter>=2.5",
+    "mutmut>=3.3",
+    "mypy>=2.3",
+    "pre-commit>=4.6",
+    "pyright>=1.1.411",
+    "pyscn>=1.29",
+    "pytest>=8.4",
+    "pytest-cov>=6.2",
+    "ruff>=0.12",
+    "syrupy>=4.9",
+    "xenon>=0.9.3",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py314"
+src = ["src", "tests"]
+extend-exclude = [".venv", "build", "dist"]
+
+[tool.ruff.lint]
+select = [
+    "E",
+    "W",
+    "F",
+    "I",
+    "UP",
+    "B",
+    "SIM",
+    "C4",
+    "PERF",
+    "PT",
+    "N",
+    "RUF",
+]
+ignore = [
+    "E501",
+]
+
+[tool.ruff.format]
+docstring-code-format = true
+
+[tool.pytest.ini_options]
+minversion = "8.4"
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-ra --strict-markers --strict-config --showlocals"
+filterwarnings = ["error"]
+
+# One type checker gates the build. mypy strict is it.
+[tool.mypy]
+python_version = "3.14"
+strict = true
+files = ["src/absicht"]
+warn_unreachable = true
+
+# Not a gate — this is what the editor's language server reads, so it lives
+# next to the code rather than in anyone's dotfiles.
+[tool.pyright]
+include = ["src/absicht"]
+pythonVersion = "3.14"
+typeCheckingMode = "strict"
+venvPath = "."
+venv = ".venv"
+
+[tool.bandit]
+# Asserts (B101) are narrowing invariants, never input validation. Every other
+# check runs at full sensitivity; one-off exceptions are `# nosec <id>` at the
+# site, with a reason.
+skips = ["B101"]
+
+[tool.deptry]
+known_first_party = ["absicht"]
+
+[tool.importlinter]
+root_package = "absicht"
+include_external_packages = true
+
+# The layer stack, bottom to top: a module may import anything below it and
+# nothing above. This is the rule that keeps the file format swappable and the
+# core reusable behind a web or MCP surface later, so it is enforced from the
+# first commit rather than asserted in a doc.
+#
+# The stack it grows into, once those modules exist:
+#
+#   absicht.__main__
+#   absicht.cli
+#   absicht.status | absicht.markers
+#   absicht.render | absicht.packet          # the resolved graph, read-only
+#   absicht.build
+#   absicht.check
+#   absicht.resolve
+#   absicht.load
+#   absicht.codec
+#   absicht.model                            # imports nothing of ours
+#
+# Only the layers that exist are listed: import-linter fails on a named module
+# that is not there, and a contract nobody can run is worse than none.
+[[tool.importlinter.contracts]]
+name = "Absicht layers"
+type = "layers"
+layers = [
+    "absicht.__main__",
+    "absicht.cli",
+]
+
+[tool.mutmut]
+# Mutation testing answers "do these tests assert anything", which is the
+# failure mode that matters here: a packet that silently drops a `must_hold`
+# ADR passes every other check in this file. Narrow it to `model/`, `check.py`
+# and `packet.py` the moment they exist — the renderer and the CLI are not
+# worth the runtime.
+source_paths = ["src/absicht"]
+pytest_add_cli_args_test_selection = ["tests"]
+pytest_add_cli_args = ["-q", "--no-header"]
+# The entry points are argument plumbing: a mutant there survives or dies on
+# Typer's behaviour, not ours. Mutate the code that decides things.
+do_not_mutate = [
+    "src/absicht/__main__.py",
+    "src/absicht/cli.py",
+]
+
+[tool.coverage.run]
+source = ["absicht"]
+branch = true
+relative_files = true
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
+exclude_lines = [
+    "pragma: no cover",
+    "raise NotImplementedError",
+    "if TYPE_CHECKING:",
+]
+# A repo-wide percentage is a weak signal and a ratchet that teaches you to
+# test getters. It is here as a floor against collapse, not as the coverage
+# story. The real gate is diff coverage on the pull request, and — once the
+# checker exists — a fixture per validation rule that trips it.
+fail_under = 60
