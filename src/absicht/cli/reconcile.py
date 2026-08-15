@@ -18,6 +18,7 @@ from absicht.cli._app import app
 from absicht.cli._common import (
     DEFAULT_DIFF_BASE,
     DocFormat,
+    JsonOption,
     Kind,
     PlainFormat,
     ReportFormat,
@@ -63,6 +64,7 @@ def verify(
         Path | None,
         typer.Option("--report", metavar="PATH", help="Write the reconciliation report."),
     ] = None,
+    json_output: JsonOption = False,
 ) -> None:
     """Check the change against the packet it was handed.
 
@@ -93,6 +95,7 @@ def status(
         typer.Option("--fail-on-drift", help="Non-zero when anything is behind. For CI."),
     ] = False,
     output_format: Annotated[PlainFormat, typer.Option("--format")] = PlainFormat.TEXT,
+    json_output: JsonOption = False,
 ) -> None:
     """Where the code stands against the design.
 
@@ -118,6 +121,7 @@ def diff(
     ] = None,
     kind: Annotated[Kind | None, typer.Option("--kind")] = None,
     output_format: Annotated[DocFormat, typer.Option("--format")] = DocFormat.TEXT,
+    json_output: JsonOption = False,
 ) -> None:
     """What changed in the design between two revisions, as elements rather than lines.
 
@@ -131,6 +135,7 @@ def diff(
 def marker_sync(
     ctx: typer.Context,
     repo: Annotated[Path, typer.Option("--repo", metavar="PATH")],
+    json_output: JsonOption = False,
 ) -> None:
     """Write or update a repo's marker from the store."""
     unimplemented(ctx)
@@ -140,6 +145,7 @@ def marker_sync(
 def marker_check(
     ctx: typer.Context,
     repo: Annotated[Path, typer.Option("--repo", metavar="PATH")],
+    json_output: JsonOption = False,
 ) -> None:
     """Fail if a marker disagrees with the store."""
     unimplemented(ctx)
@@ -151,6 +157,7 @@ def marker_stamp(
     repo: Annotated[Path, typer.Option("--repo", metavar="PATH")],
     unit: Annotated[str, typer.Option("--unit", metavar="REF")],
     milestone: Annotated[str, typer.Option("--milestone", metavar="REF")],
+    json_output: JsonOption = False,
 ) -> None:
     """Move the watermark. Run from the commit that lands the work."""
     unimplemented(ctx)

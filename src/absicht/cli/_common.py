@@ -15,10 +15,10 @@ from __future__ import annotations
 
 import os
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import IntEnum, StrEnum
 from pathlib import Path
-from typing import NoReturn
+from typing import Annotated, NoReturn
 
 import typer
 
@@ -154,11 +154,30 @@ class GlobalOptions:
     color: bool = True
 
 
+JSON_HELP = "Machine output on stdout. Diagnostics stay on stderr."
+
+JsonOption = Annotated[bool, typer.Option("--json", help=JSON_HELP)]
+"""``--json`` again, on the command itself.
+
+Click only accepts a group's options ahead of the subcommand, and `ab --json
+check` is the wrong way round for the caller this flag exists for. Every command
+declares this so `ab check --json` parses; `options` folds it into the global
+one, so a body never has to look in two places. Declare it under exactly this
+parameter name — that is the hook `options` reads. See docs/adr/0001.
+"""
+
+
 def options(ctx: typer.Context) -> GlobalOptions:
-    """The resolved global flags for this invocation."""
+    """The resolved global flags for this invocation.
+
+    ``--json`` is accepted on either side of the command name and means the same
+    thing on both, so the two are or-ed rather than one shadowing the other.
+    """
     resolved = ctx.find_object(GlobalOptions)
     if resolved is None:  # pragma: no cover - the root callback always sets it
-        return GlobalOptions()
+        resolved = GlobalOptions()
+    if ctx.params.get("json_output") and not resolved.json_output:
+        return replace(resolved, json_output=True)
     return resolved
 
 

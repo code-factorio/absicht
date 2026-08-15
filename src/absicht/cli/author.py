@@ -17,6 +17,7 @@ from absicht.cli._app import app
 from absicht.cli._common import (
     DEFAULT_DIFF_BASE,
     DEFAULT_SCHEMA_OUT,
+    JsonOption,
     Kind,
     ReportFormat,
     Severity,
@@ -36,6 +37,7 @@ def init(
         bool,
         typer.Option("--force", help="Write into a non-empty directory."),
     ] = False,
+    json_output: JsonOption = False,
 ) -> None:
     """Scaffold a store."""
     unimplemented(ctx)
@@ -54,6 +56,7 @@ def new(
         bool,
         typer.Option("--print", help="Write to stdout instead of the store."),
     ] = False,
+    json_output: JsonOption = False,
 ) -> None:
     """Create an element from a template, with a generated id."""
     unimplemented(ctx)
@@ -90,6 +93,7 @@ def check(
             "--explain", metavar="ID", help="Print what a rule checks and why, then exit."
         ),
     ] = None,
+    json_output: JsonOption = False,
 ) -> None:
     """Validate the store: schema, integrity, policy.
 
@@ -110,6 +114,7 @@ def schema(
         bool,
         typer.Option("--check", help="Fail if the committed schema is stale."),
     ] = False,
+    json_output: JsonOption = False,
 ) -> None:
     """Emit JSON Schema for the file formats.
 
@@ -124,6 +129,7 @@ def migrate(
     ctx: typer.Context,
     to: Annotated[int | None, typer.Option("--to", metavar="N", help="Default: latest.")] = None,
     dry_run: Annotated[bool, typer.Option("--dry-run")] = False,
+    json_output: JsonOption = False,
 ) -> None:
     """Migrate the store to a newer schema version."""
     unimplemented(ctx)

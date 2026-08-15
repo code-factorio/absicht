@@ -17,7 +17,7 @@ import typer
 from typer.testing import CliRunner
 
 from absicht import __version__
-from absicht.cli import app, author
+from absicht.cli import app, author, handoff, query, reconcile
 from absicht.cli._common import ExitCode, GlobalOptions, options
 from absicht.models import SCHEMA_VERSION
 
@@ -175,7 +175,8 @@ def seen(monkeypatch: pytest.MonkeyPatch) -> list[GlobalOptions]:
         captured.append(options(ctx))
         raise typer.Exit()
 
-    monkeypatch.setattr(author, "unimplemented", record)
+    for module in (author, query, handoff, reconcile):
+        monkeypatch.setattr(module, "unimplemented", record)
     return captured
 
 
@@ -200,3 +201,29 @@ def test_the_store_falls_back_to_the_environment(seen: list[GlobalOptions]) -> N
 
     assert result.exit_code == ExitCode.OK
     assert [o.store for o in seen] == [Path("/srv/design")]
+
+
+@pytest.mark.parametrize("argv", [argv for argv, _ in SURFACE.values()], ids=list(SURFACE))
+def test_json_is_accepted_after_the_command_name(
+    argv: list[str], seen: list[GlobalOptions]
+) -> None:
+    """`ab check --json`, not only `ab --json check`. See docs/adr/0001.
+
+    Parametrized over the whole surface because the fold in `options` keys off
+    the parameter name: a command that spells it differently would accept the
+    flag and then quietly ignore it.
+    """
+    result = runner.invoke(app, [*argv, "--json"])
+
+    assert result.exit_code == ExitCode.OK
+    assert [o.json_output for o in seen] == [True]
+
+
+def test_json_means_the_same_thing_on_either_side_of_the_command(
+    seen: list[GlobalOptions],
+) -> None:
+    """Both positions, and both at once, are one boolean — not a shadowed pair."""
+    for argv in (["--json", "check"], ["check", "--json"], ["--json", "check", "--json"]):
+        runner.invoke(app, argv)
+
+    assert [o.json_output for o in seen] == [True, True, True]

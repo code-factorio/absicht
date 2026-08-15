@@ -16,7 +16,7 @@ required to hand an agent useful work.
 | --- | --- |
 | `--store PATH` | Design store root. Default `.absicht`, then `$ABSICHT_STORE` |
 | `--rev REF` | Read the store at a git revision instead of the working tree |
-| `--json` | Machine output on stdout. Diagnostics stay on stderr |
+| `--json` | Machine output on stdout. Diagnostics stay on stderr. Also accepted on the command itself — `ab check --json` and `ab --json check` are the same thing. See [ADR-0001](../adr/0001-json-on-every-command.md) |
 | `--quiet` `-q` | Errors only |
 | `--verbose` `-v` | Repeatable |
 | `--no-color` | Also implied by `NO_COLOR` and a non-tty stdout |
@@ -269,6 +269,10 @@ authoritative; markers are regenerable hints.
 
 `--json` output is versioned and additive. Agents parse it, so a field never
 changes meaning — it gets deprecated and a new one appears.
+
+Where a command also has `--format` with a `json` member, an explicit `--format`
+wins; `--json` selects json only when `--format` was left at its default. It is
+a shorthand, never an override.
 
 No command mutates the store as a side effect of reading. `check`, `build`,
 `packet`, `verify` and `status` are all safe to run anywhere, any number of

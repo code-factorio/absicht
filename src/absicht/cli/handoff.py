@@ -17,6 +17,7 @@ from absicht.cli._app import app
 from absicht.cli._common import (
     DEFAULT_FEATURES_DIR,
     DEFAULT_PACKET_DIR,
+    JsonOption,
     PacketFormat,
     unimplemented,
 )
@@ -68,6 +69,7 @@ def packet(
         bool,
         typer.Option("--seal", help="Write packet.lock so ab verify can run offline later."),
     ] = False,
+    json_output: JsonOption = False,
 ) -> None:
     """Assemble the brief for one milestone.
 
@@ -88,6 +90,7 @@ def features(
         bool,
         typer.Option("--check", help="Fail if emitted output differs from what is on disk."),
     ] = False,
+    json_output: JsonOption = False,
 ) -> None:
     """Render behavioural criteria to Gherkin, without the rest of the packet.
 

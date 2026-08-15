@@ -20,6 +20,7 @@ from absicht.cli._common import (
     DEFAULT_SITE_OUT,
     DiagramFormat,
     DocFormat,
+    JsonOption,
     Kind,
     ListFormat,
     Overlay,
@@ -42,6 +43,7 @@ def build(
         bool,
         typer.Option("--check", help="Diff against the existing artifact; non-zero if it moved."),
     ] = False,
+    json_output: JsonOption = False,
 ) -> None:
     """Fold the store into one normalized JSON document.
 
@@ -61,6 +63,7 @@ def show(
         typer.Option("--depth", metavar="N", help="How far to follow refs."),
     ] = 1,
     body: Annotated[bool, typer.Option("--body/--no-body", help="Include the prose body.")] = True,
+    json_output: JsonOption = False,
 ) -> None:
     """One element, resolved: its own fields, what points at it, what it points at."""
     unimplemented(ctx)
@@ -86,6 +89,7 @@ def list_elements(
         ListFormat,
         typer.Option("--format", help="ids for piping."),
     ] = ListFormat.TEXT,
+    json_output: JsonOption = False,
 ) -> None:
     """List elements of one kind, filtered."""
     unimplemented(ctx)
@@ -102,6 +106,7 @@ def gaps(
         typer.Option("--blocking", metavar="REF", help="Only gaps blocking this element."),
     ] = None,
     output_format: Annotated[PlainFormat, typer.Option("--format")] = PlainFormat.TEXT,
+    json_output: JsonOption = False,
 ) -> None:
     """Everything unfinished, as a worklist.
 
@@ -122,6 +127,7 @@ def trace(
     up: Annotated[bool, typer.Option("--up", help="Default: both directions.")] = False,
     down: Annotated[bool, typer.Option("--down", help="Default: both directions.")] = False,
     output_format: Annotated[TraceFormat, typer.Option("--format")] = TraceFormat.TEXT,
+    json_output: JsonOption = False,
 ) -> None:
     """Traceability paths through the graph.
 
@@ -151,6 +157,7 @@ def render(
         str | None,
         typer.Option("--scope", metavar="REF", help="Render one subtree."),
     ] = None,
+    json_output: JsonOption = False,
 ) -> None:
     """Generate the read-only site: element pages, traceability, gaps, diagrams."""
     unimplemented(ctx)
@@ -172,6 +179,7 @@ def layout(
         bool,
         typer.Option("--check", help="Fail if any element has no position."),
     ] = False,
+    json_output: JsonOption = False,
 ) -> None:
     """Manage diagram positions.
 

@@ -19,6 +19,7 @@ import typer
 from absicht import __version__
 from absicht.cli._common import (
     DEFAULT_STORE,
+    JSON_HELP,
     STORE_ENVVAR,
     GlobalOptions,
     color_enabled,
@@ -63,10 +64,7 @@ def _root(
             help="Read the store at a git revision instead of the working tree.",
         ),
     ] = None,
-    json_output: Annotated[
-        bool,
-        typer.Option("--json", help="Machine output on stdout. Diagnostics stay on stderr."),
-    ] = False,
+    json_output: Annotated[bool, typer.Option("--json", help=JSON_HELP)] = False,
     quiet: Annotated[bool, typer.Option("--quiet", "-q", help="Errors only.")] = False,
     verbose: Annotated[
         int,
