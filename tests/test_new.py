@@ -19,7 +19,6 @@ import json
 from pathlib import Path
 
 import pytest
-from absicht.new import NewError, scaffold
 from typer.testing import CliRunner
 
 from absicht.cli import app
@@ -27,6 +26,7 @@ from absicht.cli._common import ExitCode, Kind
 from absicht.codec import dump_element, parse_element
 from absicht.load import load_store
 from absicht.models import SCHEMA_VERSION, Component
+from absicht.new import NewError, scaffold
 from absicht.resolve import Index, resolve
 
 runner = CliRunner()
@@ -62,7 +62,7 @@ def test_new_writes_exactly_one_file_with_the_expected_front_matter(store: Path)
     )
 
     assert result.exit_code == ExitCode.OK
-    assert [path.name for path in store.iterdir()] == ["system.yaml", "components"]
+    assert sorted(path.name for path in store.iterdir()) == ["components", "system.yaml"]
     written = store / "components" / "cancellation-flow.md"
     assert [path.name for path in (store / "components").iterdir()] == ["cancellation-flow.md"]
     assert parse_element(
@@ -189,6 +189,19 @@ def test_edit_opens_the_written_file_in_the_editor(
     written = store / "components" / "orders.md"
     assert written.is_file()
     assert called_with.read_text(encoding="utf-8").strip() == str(written)
+
+
+def test_an_editor_that_fails_is_reported_not_swallowed(
+    store: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The file is written either way; a silent non-edit is the failure."""
+    monkeypatch.setenv("EDITOR", "false")
+
+    result = new(store, "component", "orders", "--edit")
+
+    assert result.exit_code == ExitCode.USAGE
+    assert "exited with" in result.stderr
+    assert (store / "components" / "orders.md").is_file()
 
 
 def test_edit_and_print_together_is_a_usage_error(store: Path) -> None:

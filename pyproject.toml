@@ -161,6 +161,7 @@ layers = [
     "absicht.__main__",
     "absicht.cli",
     "absicht.init",
+    "absicht.new",
     "absicht.migrate",
     "absicht.check",
     "absicht.resolve",

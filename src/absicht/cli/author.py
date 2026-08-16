@@ -24,10 +24,12 @@ from absicht.cli._common import (
     options,
     unimplemented,
 )
+from absicht.codec import dump_element
 from absicht.findings import ExitCode, Severity
 from absicht.init import InitError, init_embedded, init_reference
 from absicht.migrate import MigrationError, migrate_store
 from absicht.models import SCHEMA_VERSION, State
+from absicht.new import NewError, create, scaffold
 from absicht.schema import stale_schemas, write_schemas
 
 PANEL = "Step 1 — author and validate"
@@ -98,7 +100,39 @@ def new(
     json_output: JsonOption = False,
 ) -> None:
     """Create an element from a template, with a generated id."""
-    unimplemented(ctx)
+    if edit and to_stdout:
+        typer.echo(
+            "--edit opens $EDITOR on the file it writes; there is no file with --print",
+            err=True,
+        )
+        raise typer.Exit(ExitCode.USAGE)
+    opts = options(ctx)
+    try:
+        element = scaffold(kind.value, slug, title=title, state=state, owner=owner)
+        if not to_stdout:
+            path = create(opts.store, element, edit=edit)
+    except NewError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(ExitCode.USAGE) from exc
+    if to_stdout:
+        if opts.json_output:
+            typer.echo(
+                json.dumps(
+                    {
+                        "schema_version": SCHEMA_VERSION,
+                        "id": element.id,
+                        "element": dump_element(element),
+                    }
+                )
+            )
+        else:
+            typer.echo(dump_element(element))
+    elif opts.json_output:
+        typer.echo(
+            json.dumps({"schema_version": SCHEMA_VERSION, "id": element.id, "path": str(path)})
+        )
+    else:
+        typer.echo(f"wrote {element.id} to {path}")
 
 
 @app.command(rich_help_panel=PANEL)
