@@ -21,9 +21,9 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from absicht.markers import MarkerError, sync
 
 from absicht.codec import dump_singleton, parse_singleton
+from absicht.markers import MarkerError, sync
 from absicht.models import Component, Design, Marker, System, UnitWatermark
 
 
