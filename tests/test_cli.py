@@ -27,7 +27,7 @@ runner = CliRunner()
 # spec lists for it. The positional arguments are placeholders — a command that
 # has no body yet never looks at them.
 SURFACE: dict[str, tuple[list[str], list[str]]] = {
-    "init": (["init"], ["--name", "--force"]),
+    "init": (["init"], ["--embedded", "--reference", "--name", "--force"]),
     "new": (
         ["new", "component", "some-slug"],
         ["--title", "--state", "--owner", "--edit", "--print"],
@@ -117,6 +117,15 @@ SURFACE: dict[str, tuple[list[str], list[str]]] = {
 # across lines and make a substring search lie.
 WIDE = {"COLUMNS": "200"}
 
+# Commands whose bodies have landed. The two parametrizations that assume a
+# bodyless command — exiting INTERNAL through `unimplemented`, and recording
+# the globals through the `seen` fixture's monkeypatched `unimplemented` —
+# skip them here; a landed command covers the same ground against its real
+# behaviour in its own test module (the `--json` fold included, per
+# docs/adr/0001). The flag-presence test stays over the whole surface.
+IMPLEMENTED = {"init"}
+NOT_IMPLEMENTED = [name for name in SURFACE if name not in IMPLEMENTED]
+
 
 @pytest.mark.parametrize(("name", "flags"), [(n, f) for n, (_, f) in SURFACE.items()])
 def test_command_offers_every_documented_flag(name: str, flags: list[str]) -> None:
@@ -129,7 +138,9 @@ def test_command_offers_every_documented_flag(name: str, flags: list[str]) -> No
     assert not missing, f"`ab {name}` is missing {missing}"
 
 
-@pytest.mark.parametrize("argv", [argv for argv, _ in SURFACE.values()], ids=list(SURFACE))
+@pytest.mark.parametrize(
+    "argv", [SURFACE[name][0] for name in NOT_IMPLEMENTED], ids=NOT_IMPLEMENTED
+)
 def test_command_parses_its_arguments_and_reports_no_body_yet(argv: list[str]) -> None:
     """Every command parses its arguments and says what it is, rather than crashing.
 
@@ -203,7 +214,9 @@ def test_the_store_falls_back_to_the_environment(seen: list[GlobalOptions]) -> N
     assert [o.store for o in seen] == [Path("/srv/design")]
 
 
-@pytest.mark.parametrize("argv", [argv for argv, _ in SURFACE.values()], ids=list(SURFACE))
+@pytest.mark.parametrize(
+    "argv", [SURFACE[name][0] for name in NOT_IMPLEMENTED], ids=NOT_IMPLEMENTED
+)
 def test_json_is_accepted_after_the_command_name(
     argv: list[str], seen: list[GlobalOptions]
 ) -> None:
