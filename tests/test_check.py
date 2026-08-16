@@ -308,6 +308,7 @@ def test_brownfield_reports_exactly_its_policy_findings() -> None:
     assert unrealized.rule_id == "policy/requirement-needs-realizer"
     assert unrealized.severity is Severity.WARN
     assert unrealized.ref == "requirement:audit-trail"
+    assert unrealized.source == "requirements/audit-trail.md"
     assert unrealized.message == "requirement:audit-trail is realized by no component"
 
 
