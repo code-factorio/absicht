@@ -22,7 +22,7 @@ classifiers = [
 ]
 dependencies = [
     "pydantic>=2.13.4",
-    "rohrpost",
+    "pyyaml>=6.0.2",
     "typer>=0.27.1",
 ]
 
@@ -45,7 +45,9 @@ build-backend = "uv_build"
 # Deliberately not here: `ty` (pre-1.0, not a gate) and `radon` (xenon is the
 # enforcing half; the report was never the thing that failed a build). pyright
 # is present because the editor runs it, not because CI does — see
-# CONTEXT.md for why the gate is one type checker rather than three.
+# CONTEXT.md for why the gate is one type checker rather than three. rohrpost
+# is here rather than above because nothing in the package imports it: it is
+# the ticket workflow's CLI, run as `uv run rp`.
 dev = [
     "bandit>=1.9",
     "deptry>=0.23",
@@ -59,8 +61,10 @@ dev = [
     "pyscn>=1.29",
     "pytest>=8.4",
     "pytest-cov>=6.2",
+    "rohrpost",
     "ruff>=0.12",
     "syrupy>=4.9",
+    "types-pyyaml>=6.0.12",
     "xenon>=0.9.3",
 ]
 
@@ -154,6 +158,7 @@ type = "layers"
 layers = [
     "absicht.__main__",
     "absicht.cli",
+    "absicht.codec",
     "absicht.models",
 ]
 

@@ -11,6 +11,7 @@ from __future__ import annotations
 from datetime import date
 
 import pytest
+
 from absicht.codec import (
     CodecError,
     dump_element,
@@ -18,7 +19,6 @@ from absicht.codec import (
     parse_element,
     parse_singleton,
 )
-
 from absicht.models import (
     Component,
     Criterion,
@@ -55,6 +55,7 @@ ELEMENTS: dict[str, tuple[Element, str]] = {
     "requirement": (
         Requirement(
             id="requirement:cancel-orders",
+            source="requirements/cancel-orders.md",
             title="Orders can be cancelled",
             state=State.SPECIFIED,
             realized_by=("component:cancellation",),
@@ -65,6 +66,7 @@ ELEMENTS: dict[str, tuple[Element, str]] = {
     "nfr": (
         NonFunctional(
             id="nfr:cancel-latency",
+            source="non_functionals/cancel-latency.md",
             title="Cancellation stays fast under load",
             attribute=QualityAttribute.LATENCY,
             scope=("component:cancellation",),
@@ -77,6 +79,7 @@ ELEMENTS: dict[str, tuple[Element, str]] = {
     "story": (
         Story(
             id="story:cancel-order",
+            source="stories/cancel-order.md",
             title="Cancel an order",
             actor="customer",
             outcome="the order is cancelled and the refund starts",
@@ -94,6 +97,7 @@ ELEMENTS: dict[str, tuple[Element, str]] = {
     "component": (
         Component(
             id="component:cancellation",
+            source="components/cancellation.md",
             title="Cancellation",
             responsibility="Decide whether an order can still be cancelled",
             consumes=("seam:order-events", "external:stripe"),
@@ -105,6 +109,7 @@ ELEMENTS: dict[str, tuple[Element, str]] = {
     "seam": (
         Seam(
             id="seam:order-events",
+            source="seams/order-events.md",
             title="Order events",
             style=SeamStyle.EVENT,
             provider="component:orders",
@@ -116,6 +121,7 @@ ELEMENTS: dict[str, tuple[Element, str]] = {
     "data": (
         DataEntity(
             id="data:order",
+            source="data/order.md",
             title="Order",
             owner_component="component:orders",
             fields=(
@@ -129,6 +135,7 @@ ELEMENTS: dict[str, tuple[Element, str]] = {
     "decision": (
         Decision(
             id="decision:event-log",
+            source="decisions/event-log.md",
             title="Event log over in-place updates",
             status=DecisionStatus.ACCEPTED,
             decided_on=date(2026, 1, 15),
@@ -141,6 +148,7 @@ ELEMENTS: dict[str, tuple[Element, str]] = {
     "rejection": (
         Rejection(
             id="rejection:sagas",
+            source="rejections/sagas.md",
             title="No sagas for cancellation",
             applies_to=("component:cancellation",),
             rejected_on=date(2026, 2, 1),
@@ -151,6 +159,7 @@ ELEMENTS: dict[str, tuple[Element, str]] = {
     "question": (
         Question(
             id="question:refund-window",
+            source="questions/refund-window.md",
             title="How long is the refund window?",
             method=ResolutionMethod.MEASURE,
             blocks=("story:cancel-order",),
@@ -161,6 +170,7 @@ ELEMENTS: dict[str, tuple[Element, str]] = {
     "milestone": (
         Milestone(
             id="milestone:m1",
+            source="milestones/m1.md",
             title="Cancellation MVP",
             includes=("story:cancel-order",),
             scope=("component:cancellation",),
@@ -171,6 +181,7 @@ ELEMENTS: dict[str, tuple[Element, str]] = {
     "external": (
         External(
             id="external:stripe",
+            source="externals/stripe.md",
             title="Stripe",
             external_kind=ExternalKind.SERVICE,
             version="2026-03",
