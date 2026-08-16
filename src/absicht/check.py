@@ -18,18 +18,28 @@ rejects a misanchored criterion at parse time, so it can only ever surface
 as a ``schema/validation`` load error; its id stays registered, marked
 handled upstream, for ``--explain`` to answer with.
 
-The policy layer lands in this same module (task 14); the CLI wiring —
-flags, formats, exit codes — is task 15's.
+The policy layer passes judgement on the same resolved artifact — states,
+staleness and accountability rather than structure. Its severities are a
+posture, not a fact: the unowned ``unknown`` and the rationale-less
+``one_way`` decision are errors because the spec's own wording is "needs",
+while the unrealized requirement and the expired external assumption are
+warnings — incomplete-but-honest and stale-but-routine are the states
+``observed``-heavy brownfield stores legitimately hold, and a checker that
+errors on them teaches people to stop recording them. The clock is injected
+(``today`` is a parameter, never read inside a rule), so a run answers
+"expired as of when" and stays reproducible. The CLI wiring — flags,
+formats, exit codes — is task 15's.
 """
 
 from __future__ import annotations
 
 from collections.abc import Iterator
+from datetime import date
 from graphlib import CycleError, TopologicalSorter
 
 from absicht.findings import RULES, Finding, Severity, finding
 from absicht.load import LoadedStore, LoadErrorReason
-from absicht.models import Design, Ref
+from absicht.models import Design, Ref, Reversibility, State
 from absicht.resolve import Index, iter_references
 
 RULES.update(
@@ -199,3 +209,155 @@ def _cycles(graph: dict[Ref, tuple[Ref, ...]]) -> Iterator[tuple[Ref, ...]]:
             yield tuple(cycle)
         else:
             return
+
+
+# --- the policy layer --------------------------------------------------------
+
+RULES.update(
+    {
+        "policy/unknown-needs-owner": (
+            "An element in state unknown must name an owner. Error, not warn: "
+            "unknown means ask, spike or mark blocking — never invent — and with "
+            "nobody accountable there is nobody to ask, which makes this a real "
+            "gap rather than an incomplete-but-honest state."
+        ),
+        "policy/requirement-needs-realizer": (
+            "A requirement must be realized by at least one component "
+            "(realized_by). Warn, not error: a requirement still waiting for its "
+            "realizer is incomplete but honest — the state brownfield stores "
+            "legitimately hold — so the finding nudges rather than blocks. It "
+            "asks for a realizing component, not for the requirement's removal."
+        ),
+        "policy/one-way-needs-rationale": (
+            "A one_way decision must carry a rationale body; whitespace is not "
+            "one. Error, not warn: the spec's wording is 'needs a rationale "
+            "body', and the argument is the point of a decision that cannot be "
+            "revisited — once the door is closed, the why is the only thing "
+            "anyone can still read."
+        ),
+        "policy/external-assumptions-expired": (
+            "An external's expires_on is in the past relative to the run's "
+            "today: the assumptions were verified only until then, so re-check "
+            "before trusting them. Warn, not error: expiry is staleness about a "
+            "third party, not a break in the design — re-checking is routine "
+            "maintenance, and erroring would teach deleting the date."
+        ),
+    }
+)
+
+# Considered and declined, per the policy spec's own "optional extensions"
+# clause. An overdue unresolved Question and a Milestone.unresolved entry a
+# decision has already resolved_by are not rules: a Question that is unknown
+# and unowned is already caught by policy/unknown-needs-owner, and neither
+# overdue-ness nor staleness has a spec line to hang a rule id from — add them
+# when one does. Orphaned elements (nothing points at them) are likewise not
+# a finding: neither the integrity nor the policy spec models them, the same
+# concern under two rule ids is exactly what the specs warn against, and
+# `ab list --orphaned` / `ab gaps` already answer it as a query.
+
+
+def policy_findings(design: Design, index: Index, *, today: date) -> tuple[Finding, ...]:
+    """The four policy rules, in the order the spec lists them.
+
+    ``index`` must be ``Index.from_design(design)``: the unknown-owner rule
+    walks ``index.by_id`` — the one enumeration of every element — so a
+    mismatched pair would judge a different design than the one handed in.
+    ``today`` anchors the expiry rule and is injected rather than read from
+    the clock, so runs are reproducible and a future ``--rev`` run can ask
+    "expired as of when" without a rewrite.
+    """
+    return (
+        *_unknown_needs_owner_findings(index),
+        *_requirement_needs_realizer_findings(design),
+        *_one_way_needs_rationale_findings(design),
+        *_external_assumptions_expired_findings(design, today=today),
+    )
+
+
+def _unknown_needs_owner_findings(index: Index) -> tuple[Finding, ...]:
+    """Every element — not only questions — that is ``unknown`` and unowned.
+
+    Error: the README's posture for ``unknown`` is "ask, spike, or mark
+    blocking; never invent", and an unknown with nobody accountable for it is
+    a question nobody will ever ask.
+    """
+    return tuple(
+        finding(
+            "policy/unknown-needs-owner",
+            severity=Severity.ERROR,
+            message=f"{element.id} is unknown and has no owner",
+            ref=element.id,
+            # The loader-set store path; None for elements that never had one.
+            source=element.source or None,
+        )
+        for element in index.by_id.values()
+        if element.state is State.UNKNOWN and element.owner is None
+    )
+
+
+def _requirement_needs_realizer_findings(design: Design) -> tuple[Finding, ...]:
+    """A requirement no component realizes — unconditionally, for now.
+
+    The spec line carries no state carve-out ("a requirement needs a realizing
+    component"), so none is implemented: an ``unknown`` requirement that is
+    also unrealized is honest about being early, and the warn severity is
+    what keeps that honesty from reading as breakage. If the fixtures ever
+    show this as wrong noise rather than a fair nudge, the carve-out is the
+    change to make — not before then.
+    """
+    return tuple(
+        finding(
+            "policy/requirement-needs-realizer",
+            severity=Severity.WARN,
+            message=f"{requirement.id} is realized by no component",
+            ref=requirement.id,
+            source=requirement.source or None,
+        )
+        for requirement in design.requirements
+        if not requirement.realized_by
+    )
+
+
+def _one_way_needs_rationale_findings(design: Design) -> tuple[Finding, ...]:
+    """A ``one_way`` decision whose body carries no argument.
+
+    Error: reversibility is what earns it — a decision that cannot be
+    revisited and cannot be explained is a gap nobody can repair later,
+    because later is exactly what ``one_way`` forecloses. Decisions cheap or
+    costly to revisit may go unexplained without a finding.
+    """
+    return tuple(
+        finding(
+            "policy/one-way-needs-rationale",
+            severity=Severity.ERROR,
+            message=f"{decision.id} is a one_way decision with no rationale body",
+            ref=decision.id,
+            source=decision.source or None,
+        )
+        for decision in design.decisions
+        if decision.reversibility is Reversibility.ONE_WAY and not decision.body.strip()
+    )
+
+
+def _external_assumptions_expired_findings(design: Design, *, today: date) -> tuple[Finding, ...]:
+    """An external whose assumptions were verified only until ``expires_on``,
+    with that day strictly in the past relative to the injected ``today``.
+
+    Strictly: ``expires_on`` means "after this, re-check", so the day itself
+    is still within what was verified. Warn: staleness about a third party is
+    routine maintenance, not a break in the design.
+    """
+    return tuple(
+        finding(
+            "policy/external-assumptions-expired",
+            severity=Severity.WARN,
+            message=(
+                f"{external.id}'s assumptions expired on {external.expires_on.isoformat()}"
+                " — re-check before trusting"
+            ),
+            ref=external.id,
+            source=external.source or None,
+        )
+        for external in design.externals
+        if external.expires_on is not None and external.expires_on < today
+    )
