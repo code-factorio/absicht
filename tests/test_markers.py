@@ -14,6 +14,16 @@ What these tests pin, per docs/tasks/44-marker-sync.md:
   single-repo spelling that speaks for every repo;
 - a ``.absicht/`` directory (embedded mode) or an unreadable marker file is
   refused rather than converted or clobbered.
+
+``check``, the read-only twin docs/tasks/45-marker-check.md specifies:
+
+- a marker fresh from ``sync`` agrees with the store, and watermark drift —
+  ``at``/``design_rev`` behind the design — is not a disagreement: how far
+  behind a marker is ``ab status``'s subject, not a correctness problem;
+- a unit the store gained or dropped, or a unit the marker carries at a
+  path the store no longer names, is a finding;
+- no marker at all, an embedded ``.absicht/`` directory or an unreadable
+  file is refused, each in its own words.
 """
 
 from __future__ import annotations
@@ -23,7 +33,8 @@ from pathlib import Path
 import pytest
 
 from absicht.codec import dump_singleton, parse_singleton
-from absicht.markers import MarkerError, sync
+from absicht.findings import Severity
+from absicht.markers import MarkerError, check, sync
 from absicht.models import Component, Design, Marker, System, UnitWatermark
 
 
@@ -188,3 +199,108 @@ def test_an_unreadable_marker_is_refused_not_clobbered(tmp_path: Path) -> None:
 def test_a_repo_that_is_not_a_directory_is_refused(tmp_path: Path) -> None:
     with pytest.raises(MarkerError, match="no such directory"):
         sync(_design(), tmp_path / "nowhere", design_url="../design")
+
+
+def test_a_marker_fresh_from_sync_agrees_with_the_store(tmp_path: Path) -> None:
+    repo = _repo(tmp_path, "acme/r")
+    design = _design(_component("component:a", "acme/r#src/a"))
+    sync(design, repo, design_url="../design")
+
+    assert check(design, repo) == ()
+
+
+def test_watermark_drift_is_not_a_marker_disagreement(tmp_path: Path) -> None:
+    """How far a watermark is behind the design is `ab status`'s whole
+    subject: `marker check` judges the marker's shape — which units, which
+    paths — and never reads `at`/`design_rev`."""
+    repo = _repo(tmp_path, "acme/r")
+    design = _design(_component("component:a", "acme/r#src/a"))
+    sync(design, repo, design_url="../design")
+    (repo / ".absicht").write_text(
+        dump_singleton(
+            Marker(
+                design="../design",
+                units=(
+                    UnitWatermark(
+                        id="component:a", path="src/a", at="milestone:m0", design_rev="ancient"
+                    ),
+                ),
+            )
+        ),
+        encoding="utf-8",
+    )
+
+    assert check(design, repo) == ()
+
+
+def test_a_unit_the_store_gained_is_reported_missing(tmp_path: Path) -> None:
+    """The spec's own simulation: sync, add an `implemented_by` entry, do
+    not resync — the marker under-reports what the repo implements."""
+    repo = _repo(tmp_path, "acme/r")
+    sync(_design(_component("component:a", "acme/r#src/a")), repo, design_url="../design")
+
+    (missing,) = check(_design(_component("component:a", "acme/r#src/a", "acme/r#src/new")), repo)
+
+    assert missing.rule_id == "marker/missing-unit"
+    assert missing.severity is Severity.ERROR
+    assert missing.ref == "component:a"
+    assert "src/new" in missing.message
+
+
+def test_a_unit_the_store_dropped_is_reported_stray(tmp_path: Path) -> None:
+    repo = _repo(tmp_path, "acme/r")
+    sync(
+        _design(
+            _component("component:a", "acme/r#src/a"),
+            _component("component:b", "acme/r#src/b"),
+        ),
+        repo,
+        design_url="../design",
+    )
+
+    (stray,) = check(_design(_component("component:a", "acme/r#src/a")), repo)
+
+    assert stray.rule_id == "marker/stray-unit"
+    assert stray.severity is Severity.ERROR
+    assert stray.ref == "component:b"
+    assert "src/b" in stray.message
+
+
+def test_a_repathed_unit_is_reported_as_the_move_it_is(tmp_path: Path) -> None:
+    """A component that moved is one finding about the move, not a missing
+    unit plus a stray one saying the same thing twice."""
+    repo = _repo(tmp_path, "acme/r")
+    sync(_design(_component("component:a", "acme/r#src/old")), repo, design_url="../design")
+
+    (moved,) = check(_design(_component("component:a", "acme/r#src/new")), repo)
+
+    assert moved.rule_id == "marker/moved-unit"
+    assert moved.severity is Severity.ERROR
+    assert moved.ref == "component:a"
+    assert "src/old" in moved.message
+    assert "src/new" in moved.message
+
+
+def test_a_repo_without_a_marker_is_refused(tmp_path: Path) -> None:
+    repo = _repo(tmp_path, "r")
+
+    with pytest.raises(MarkerError, match="no marker to check"):
+        check(_design(), repo)
+
+
+def test_an_embedded_repo_is_refused_for_checking_too(tmp_path: Path) -> None:
+    """`marker check` on a store's own repo does not make sense either: an
+    embedded `.absicht/` directory carries no marker file to compare."""
+    repo = _repo(tmp_path, "r")
+    (repo / ".absicht").mkdir()
+
+    with pytest.raises(MarkerError, match="is a directory"):
+        check(_design(), repo)
+
+
+def test_an_unreadable_marker_is_refused_for_checking(tmp_path: Path) -> None:
+    repo = _repo(tmp_path, "r")
+    (repo / ".absicht").write_text("design: [an unclosed\n", encoding="utf-8")
+
+    with pytest.raises(MarkerError, match="not a readable"):
+        check(_design(), repo)
