@@ -126,10 +126,11 @@ def neighbourhood(design: Design, ref: str, *, depth: int) -> Neighbourhood:
     ``depth`` bounds the *outgoing* side only — "how far to follow refs" reads
     as following the element's own refs, while "what points at it" stays a
     neighbourhood view by stopping at one hop; expanding both directions would
-    make ``show`` the pathfinder ``ab trace`` owns. A ref whose target is not
-    an element resolves to no neighbour on either side, the same policy
-    ``Index.referenced_by`` already holds — reporting dangling refs is ``ab
-    check``'s job, not a query's.
+    make ``show`` the pathfinder ``ab trace`` owns. ``depth 0`` therefore
+    follows nothing out, leaving the element and whoever points at it. A ref
+    whose target is not an element resolves to no neighbour on either side,
+    the same policy ``Index.referenced_by`` already holds — reporting dangling
+    refs is ``ab check``'s job, not a query's.
     """
     index = Index.from_design(design)
     element = index.by_id.get(ref)
@@ -137,10 +138,16 @@ def neighbourhood(design: Design, ref: str, *, depth: int) -> Neighbourhood:
         raise UnknownRefError(f"unknown ref {ref!r}: no element in this store has that id")
     return Neighbourhood(
         element=element,
-        outgoing=tuple(
-            _hop(index, edge, remaining=depth - 1)
-            for edge in index.references_from.get(ref, ())
-            if edge.target in index.by_id
+        # The first hop costs one unit of budget like every hop after it, so
+        # the whole side is empty at depth 0 rather than quietly meaning 1.
+        outgoing=(
+            tuple(
+                _hop(index, edge, remaining=depth - 1)
+                for edge in index.references_from.get(ref, ())
+                if edge.target in index.by_id
+            )
+            if depth > 0
+            else ()
         ),
         incoming=tuple(
             Link(field=edge.field, other=index.by_id[edge.source])
