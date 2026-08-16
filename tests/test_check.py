@@ -148,9 +148,11 @@ def test_broken_reports_exactly_its_dangling_ref_and_its_contains_cycle() -> Non
 
     assert cycle.rule_id == "integrity/cycle"
     assert cycle.severity is Severity.ERROR
-    assert "contains" in cycle.message
-    assert "component:loop-a" in cycle.message
-    assert "component:loop-b" in cycle.message
+    # Pinned exactly, not as substrings: the finding text is user-facing and
+    # must stay deterministic — same store, same line, closed path included.
+    assert cycle.message == (
+        "contains edges form a cycle: component:loop-a -> component:loop-b -> component:loop-a"
+    )
 
 
 @pytest.mark.parametrize("name", ["clean", "brownfield"])
@@ -213,9 +215,9 @@ def test_a_milestone_depends_on_cycle_is_its_own_graphs_problem() -> None:
     (only,) = integrity_findings(design, Index.from_design(design))
 
     assert only.rule_id == "integrity/cycle"
-    assert "depends_on" in only.message
-    assert "milestone:m1" in only.message
-    assert "milestone:m2" in only.message
+    assert only.message == (
+        "depends_on edges form a cycle: milestone:m1 -> milestone:m2 -> milestone:m1"
+    )
 
 
 def test_a_dangling_external_on_the_system_is_the_generic_dangling_ref() -> None:
