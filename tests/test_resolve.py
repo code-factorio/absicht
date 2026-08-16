@@ -24,18 +24,13 @@ What these tests pin, per ``docs/tasks/03-resolve.md``:
 
 from __future__ import annotations
 
-from dataclasses import fields
 from pathlib import Path
 
 import pytest
 
-# `absicht.resolve` does not exist yet at this commit, so ruff cannot classify
-# it as first-party and isort groups it here; the implementation commit moves
-# it down with the rest of absicht.
-from absicht.resolve import Index, Reference, ResolveError, iter_references, resolve
-
 from absicht.load import load_store
-from absicht.models import Component, Design, Requirement, System
+from absicht.models import Component, Design, Requirement, Story, System
+from absicht.resolve import Index, Reference, ResolveError, iter_references, resolve
 
 FIXTURES = Path(__file__).parent / "fixtures" / "systems"
 
@@ -63,12 +58,10 @@ def test_each_fixture_resolves_to_its_expected_counts(name: str) -> None:
 
     assert design.system is not None
     expected = EXPECTED_COUNTS[name]
-    for kind_tuple in fields(Design):
-        if kind_tuple.name in ("schema_version", "system"):
+    for kind in Design.model_fields:
+        if kind in ("schema_version", "system"):
             continue
-        assert len(getattr(design, kind_tuple.name)) == expected.get(kind_tuple.name, 0), (
-            kind_tuple.name
-        )
+        assert len(getattr(design, kind)) == expected.get(kind, 0), kind
 
 
 def test_a_store_without_a_system_cannot_resolve(tmp_path: Path) -> None:
@@ -91,7 +84,7 @@ def test_by_id_holds_every_element_including_the_system() -> None:
 
     index = Index.from_design(design)
 
-    assert len(index.by_id) == 10  # the system plus nine elements
+    assert len(index.by_id) == 11  # the system plus ten elements
     assert index.by_id["system:acme"] is design.system
     assert index.by_id["seam:order-events"] is design.seams[0]
 
@@ -138,6 +131,7 @@ def test_a_dangling_target_is_absent_from_the_index_not_an_error() -> None:
 def test_orphaned_reports_the_one_element_nothing_points_at() -> None:
     design = Design(
         system=System(id="system:tiny", title="Tiny"),
+        stories=(Story(id="story:s", title="S", satisfies=("requirement:r",)),),
         components=(
             Component(id="component:kept", title="Kept"),
             Component(id="component:loner", title="Loner"),
@@ -147,5 +141,9 @@ def test_orphaned_reports_the_one_element_nothing_points_at() -> None:
 
     index = Index.from_design(design)
 
-    assert index.orphaned() == ("system:tiny", "component:loner")
-    assert index.orphaned("component") == ("component:loner")
+    # Every finite design has unreferenced sources — here the story no
+    # milestone includes — and the system is the root, so pointing at it is
+    # nobody's job either. The kind filter is what isolates the one genuine
+    # orphan `ab list --orphaned` exists to surface.
+    assert index.orphaned() == ("system:tiny", "story:s", "component:loner")
+    assert index.orphaned("component") == ("component:loner",)
