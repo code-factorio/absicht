@@ -128,6 +128,34 @@ def test_a_dangling_target_is_absent_from_the_index_not_an_error() -> None:
     ) in tuple(iter_references(design))
 
 
+def test_references_from_lists_outgoing_edges_in_field_order() -> None:
+    """The mirror of `referenced_by`, which `ab show` walks for "what it points
+    at": one entry per outgoing edge, in the model's field declaration order —
+    the order the whole index is deterministic in."""
+
+    index = Index.from_design(resolve(load_store(FIXTURES / "clean")))
+
+    assert index.references_from["component:orders"] == (
+        Reference(source="component:orders", field="contains", target="component:catalog"),
+        Reference(source="component:orders", field="provides", target="seam:order-events"),
+        Reference(source="component:orders", field="owns_data", target="data:order"),
+    )
+
+
+def test_references_from_keeps_a_dangling_edge_for_check_to_report() -> None:
+    """The one asymmetry with `referenced_by`: a source is always an element,
+    so an outgoing edge exists even when its target does not. Dropping it here
+    would hide the ghost from every future consumer of the index, while
+    `referenced_by` cannot hold it — nothing was pointed at."""
+
+    index = Index.from_design(resolve(load_store(FIXTURES / "broken")))
+
+    assert (
+        Reference(source="component:dangling", field="contains", target="component:ghost")
+        in index.references_from["component:dangling"]
+    )
+
+
 def test_orphaned_reports_the_one_element_nothing_points_at() -> None:
     design = Design(
         system=System(id="system:tiny", title="Tiny"),
