@@ -30,7 +30,16 @@ subject) nor the marker's `design` field (where a marker points is
 discovery, and the store was never asked). Disagreements are findings at
 error severity; the README calls a mismatch an error outright.
 
-Refusal is a feature in both halves: a `.absicht/` directory at the repo
+`ab marker stamp` (docs/tasks/46-marker-stamp.md) is the advancing hand: it
+moves exactly one unit's `at`/`design_rev` and never the marker's shape,
+which is sync's to write. The README's Discovery section calls the pair
+evidence — "a runner bumps both in the commit that lands the work" — so the
+watermark stays a claim rather than proof (`done_when` satisfaction is
+nobody's guess here, by design). A unit the marker does not carry has no
+watermark to move, and a repo with no marker has nothing to move at all:
+stamping is not a way to widen the marker, `ab marker sync` is.
+
+Refusal is a feature in all three: a `.absicht/` directory at the repo
 root means embedded mode, and sync never converts a store's own repo into
 a marker-holding one — nor does check compare against one, since a store's
 own repo carries no marker at all. A marker file that does not parse is
@@ -46,7 +55,7 @@ from pathlib import Path, PurePosixPath
 
 from absicht.codec import CodecError, dump_singleton, parse_singleton
 from absicht.findings import RULES, Finding, Severity, finding
-from absicht.models import Component, Design, Marker, UnitWatermark
+from absicht.models import Component, Design, Marker, Ref, UnitWatermark
 
 _MARKER = ".absicht"
 """The discovery file's name, overloaded by filesystem type per the README:
@@ -133,6 +142,38 @@ def check(design: Design, repo: Path) -> tuple[Finding, ...]:
     marker = _read(marker_path, refusal="check cannot compare what it cannot read")
     expected = _expected(design, repo, design_url=marker.design, previous=marker)
     return _disagreements(marker.units, expected.units)
+
+
+def stamp(repo: Path, unit: Ref, milestone: Ref, *, design_rev: str) -> Marker:
+    """Move one unit's watermark to `milestone`/`design_rev`, writing the
+    marker back.
+
+    `design_rev` is spelled by the caller (the CLI) — the design store's HEAD
+    at invocation time, the README's Discovery section's "design head at the
+    time it landed" — so this stays the one blunt move. A unit implemented at
+    several paths is one unit: every watermark carrying its id moves, or `ab
+    status` would read the stale half as the unit being behind.
+    """
+    marker_path = repo / _MARKER
+    if not marker_path.is_file():
+        raise MarkerError(f"{marker_path}: no marker to stamp — `ab marker sync` writes one")
+    marker = _read(marker_path, refusal="stamp will not rewrite what it cannot read")
+    if all(watermark.id != unit for watermark in marker.units):
+        raise MarkerError(
+            f"--unit {unit}: the marker carries no such unit — "
+            "`ab marker sync` writes the units the store names"
+        )
+    moved = tuple(
+        (
+            watermark.model_copy(update={"at": milestone, "design_rev": design_rev})
+            if watermark.id == unit
+            else watermark
+        )
+        for watermark in marker.units
+    )
+    fresh = Marker(design=marker.design, units=moved)
+    marker_path.write_text(dump_singleton(fresh), encoding="utf-8")
+    return fresh
 
 
 def _read(marker_path: Path, *, refusal: str) -> Marker:

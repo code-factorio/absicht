@@ -33,10 +33,11 @@ from absicht.cli._common import (
 from absicht.cli.query import _design
 from absicht.diff import diff as diff_store
 from absicht.findings import ExitCode, Report
-from absicht.git import GitError
+from absicht.git import GitError, current_rev
 from absicht.load import StoreResolutionError, resolve_store
 from absicht.markers import MarkerError
 from absicht.markers import check as check_marker
+from absicht.markers import stamp as stamp_marker
 from absicht.markers import sync as sync_marker
 from absicht.models import SCHEMA_VERSION
 from absicht.render import UnknownRefError
@@ -297,4 +298,32 @@ def marker_stamp(
     json_output: JsonOption = False,
 ) -> None:
     """Move the watermark. Run from the commit that lands the work."""
-    unimplemented(ctx)
+    opts = options(ctx)
+    root, design = _design(opts)
+    if not any(m.id == milestone for m in design.milestones):
+        # A stamp is evidence; a claim about a milestone that does not exist
+        # is garbage a later `ab status` could not make sense of.
+        typer.echo(f"--milestone {milestone!r}: no milestone in this store has that id", err=True)
+        raise typer.Exit(ExitCode.USAGE)
+    try:
+        # The design store's HEAD, not --repo's: the watermark records where
+        # the design had got to when the work landed, and --repo is the
+        # implementing repo receiving the stamp — two different repos in
+        # reference mode.
+        design_rev = current_rev(root)
+        marker = stamp_marker(repo, unit, milestone=milestone, design_rev=design_rev)
+    except (MarkerError, GitError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(ExitCode.USAGE) from exc
+    if opts.json_output:
+        typer.echo(
+            json.dumps(
+                {
+                    "schema_version": SCHEMA_VERSION,
+                    "out": str(repo / ".absicht"),
+                    "units": [watermark.model_dump(mode="json") for watermark in marker.units],
+                }
+            )
+        )
+    else:
+        typer.echo(f"stamped {unit} at {milestone} in {repo / '.absicht'}")
