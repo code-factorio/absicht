@@ -39,7 +39,7 @@ from graphlib import CycleError, TopologicalSorter
 
 from absicht.findings import RULES, Finding, Severity, finding
 from absicht.load import LoadedStore, LoadErrorReason
-from absicht.models import Design, Ref, Reversibility, State
+from absicht.models import Design, External, Ref, Reversibility, State
 from absicht.resolve import Index, iter_references
 
 RULES.update(
@@ -339,6 +339,20 @@ def _one_way_needs_rationale_findings(design: Design) -> tuple[Finding, ...]:
     )
 
 
+def expired_externals(design: Design, *, today: date) -> tuple[External, ...]:
+    """Externals whose ``expires_on`` is strictly past the injected ``today``.
+
+    The one spelling of "expired": ``ab gaps``' worklist reuses it rather than
+    re-deriving the comparison, so the checker's finding and the worklist's
+    entry can never disagree about when trust in an assumption lapses.
+    """
+    return tuple(
+        external
+        for external in design.externals
+        if external.expires_on is not None and external.expires_on < today
+    )
+
+
 def _external_assumptions_expired_findings(design: Design, *, today: date) -> tuple[Finding, ...]:
     """An external whose assumptions were verified only until ``expires_on``,
     with that day strictly in the past relative to the injected ``today``.
@@ -347,8 +361,13 @@ def _external_assumptions_expired_findings(design: Design, *, today: date) -> tu
     is still within what was verified. Warn: staleness about a third party is
     routine maintenance, not a break in the design.
     """
-    return tuple(
-        finding(
+
+    def as_finding(external: External) -> Finding:
+        # The non-None `expires_on` is guaranteed by `expired_externals`' own
+        # filter, out of the type checker's sight — narrowed here rather than
+        # trusted.
+        assert external.expires_on is not None
+        return finding(
             "policy/external-assumptions-expired",
             severity=Severity.WARN,
             message=(
@@ -358,6 +377,5 @@ def _external_assumptions_expired_findings(design: Design, *, today: date) -> tu
             ref=external.id,
             source=external.source or None,
         )
-        for external in design.externals
-        if external.expires_on is not None and external.expires_on < today
-    )
+
+    return tuple(as_finding(external) for external in expired_externals(design, today=today))

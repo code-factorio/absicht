@@ -1,12 +1,11 @@
 """Read-only projections of a resolved ``Design``, shared by every renderer.
 
-Today that is one thing: the element view behind ``ab show REF`` — the element,
-what points at it, what it points at — in the three spellings the command
-offers. ``docs/tasks/26-render-site.md`` builds the site's element pages on
-this same view ("literally reuse 21-show.md's function, don't re-derive it"),
-which is why the view and its rendering live here rather than in
-``absicht.cli``: the CLI sits at the top of the import stack, and the site
-generator cannot import up.
+Two things today, both living here for the same reason: the site generator
+``docs/tasks/26-render-site.md`` builds on them and cannot import up the stack
+— the element view behind ``ab show REF`` ("literally reuse 21-show.md's
+function, don't re-derive it") and the gaps worklist behind ``ab gaps``
+("a gaps page, reusing 23-gaps.md's worklist"). The CLI stays a thin adapter
+over both; the projections and their reasoning live here.
 
 Rendering is deterministic because the data under it is: neighbours keep the
 order ``Index`` indexed them in, which is ``models.py``'s field declaration
@@ -18,9 +17,11 @@ from __future__ import annotations
 import json
 from collections.abc import Iterator
 from dataclasses import dataclass
+from datetime import date
 from typing import Any
 
-from absicht.models import SCHEMA_VERSION, Design, Element
+from absicht.check import expired_externals
+from absicht.models import SCHEMA_VERSION, Design, Element, Question, State
 from absicht.resolve import Index, Reference
 
 
@@ -216,3 +217,85 @@ def _hop_json(hop: Hop) -> dict[str, object]:
         "target": _fields_of(hop.other),
         "deeper": [_hop_json(deeper) for deeper in hop.deeper],
     }
+
+
+# --- the gaps worklist --------------------------------------------------------
+
+UNFINISHED_STATES = frozenset({State.UNKNOWN, State.OBSERVED, State.DELEGATED})
+"""The states that put an element on the worklist: the ones the README calls
+legitimate and expected rather than done. `specified`, `constrained` and
+`out_of_scope` are not unfinished — the last is a decision, not a gap."""
+
+# The reason vocabulary `ab gaps` spells on its worklist. Constants rather
+# than literals at each use site: `ab gaps --overdue` and the text renderer
+# match on these strings, and a drift there would fail silently — the filter
+# would quietly answer nothing. The `state=<state>` reason is spelled where
+# it is built; nothing keys on its value.
+UNOWNED = "unowned"
+QUESTION_OPEN = "question-open"
+QUESTION_OVERDUE = "question-overdue"
+EXTERNAL_EXPIRED = "external-expired"
+
+
+@dataclass(frozen=True, slots=True)
+class Gap:
+    """One worklist entry: an element plus every reason it is unfinished.
+
+    Distinct from a bare `Element` on purpose — the command's whole point is
+    the *why*. `due_on` is carried only for question gaps (the one reason with
+    a deadline) and `expires_on` only for expired externals (the one reason
+    about a lapsed date), so a consumer can prioritize without re-reading the
+    element; both stay `None` elsewhere rather than copying a date over.
+    """
+
+    element: Element
+    reasons: tuple[str, ...]
+    due_on: date | None = None
+    expires_on: date | None = None
+
+
+def worklist(design: Design, *, today: date) -> tuple[Gap, ...]:
+    """Everything unfinished in one worklist, one entry per element, in id order.
+
+    Four sources, unioned: an unfinished state, an unresolved `Question` (the
+    whole kind is a gap by construction — "an `unknown` with an owner and a
+    way out", and one a decision has `resolved_by` is closed), no owner, and
+    an expired external assumption (`absicht.check`'s one spelling of
+    "expired", reused). An element can arrive through several sources at once;
+    the entry then carries every reason, in the order the sources are listed
+    here — deterministic, like the id order the entries come in.
+
+    "Unowned" is scoped to the unfinished states, deliberately narrower than
+    "any element without an owner": a store that simply sets no owners (the
+    fixtures never do) would land on the worklist whole and drown it, and the
+    spec's own `clean/` expectation — empty, meant to be complete — pins the
+    same reading. Who owns a finished element is `ab list --owner`'s question.
+    """
+    expired_on = {
+        external.id: external.expires_on for external in expired_externals(design, today=today)
+    }
+    gaps: list[Gap] = []
+    for element in sorted(Index.from_design(design).by_id.values(), key=lambda e: e.id):
+        reasons: list[str] = []
+        unfinished = element.state in UNFINISHED_STATES
+        if unfinished:
+            reasons.append(f"state={element.state.value}")
+            if element.owner is None:
+                reasons.append(UNOWNED)
+        due_on: date | None = None
+        if isinstance(element, Question) and element.resolved_by is None:
+            overdue = element.due_on is not None and element.due_on < today
+            reasons.append(QUESTION_OVERDUE if overdue else QUESTION_OPEN)
+            due_on = element.due_on
+        if element.id in expired_on:
+            reasons.append(EXTERNAL_EXPIRED)
+        if reasons:
+            gaps.append(
+                Gap(
+                    element=element,
+                    reasons=tuple(reasons),
+                    due_on=due_on,
+                    expires_on=expired_on.get(element.id),
+                )
+            )
+    return tuple(gaps)

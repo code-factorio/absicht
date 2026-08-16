@@ -175,7 +175,7 @@ def test_worklist_marks_delegated_elements_unfinished() -> None:
     decided-elsewhere is still unfinished, and without an owner the element is
     on the list twice over."""
     design = Design(
-        system=System(id="system:tiny", title="Tiny"),
+        system=System(id="system:tiny", title="Tiny", state=State.SPECIFIED, owner="a"),
         components=(
             Component(id="component:outsourced", title="Outsourced", state=State.DELEGATED),
         ),
@@ -193,7 +193,7 @@ def test_worklist_questions_turn_overdue_strictly_after_their_due_date() -> None
     decision has already resolved is nobody's worklist entry, whatever its
     state says."""
     design = Design(
-        system=System(id="system:tiny", title="Tiny"),
+        system=System(id="system:tiny", title="Tiny", state=State.SPECIFIED, owner="a"),
         questions=(
             Question(id="question:today", title="Today", owner="a", due_on=TODAY),
             Question(
@@ -229,7 +229,7 @@ def test_worklist_expires_an_external_strictly_after_its_expiry_date() -> None:
     because the worklist reuses that module's one spelling of "expired"
     rather than re-deriving the comparison."""
     design = Design(
-        system=System(id="system:tiny", title="Tiny"),
+        system=System(id="system:tiny", title="Tiny", state=State.SPECIFIED, owner="a"),
         externals=(
             External(
                 id="external:today",

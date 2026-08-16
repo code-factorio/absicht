@@ -10,6 +10,7 @@ the rest of this group are projections of it.
 from __future__ import annotations
 
 import json
+from datetime import date
 from pathlib import Path
 from typing import Annotated
 
@@ -37,8 +38,25 @@ from absicht.cli._common import (
 from absicht.findings import ExitCode
 from absicht.git import GitError
 from absicht.load import StoreResolutionError, resolve_store
-from absicht.models import SCHEMA_VERSION, Confidence, Design, Element, Ref, State
-from absicht.render import UnknownRefError, neighbourhood
+from absicht.models import (
+    SCHEMA_VERSION,
+    Confidence,
+    Design,
+    Element,
+    Milestone,
+    Question,
+    Ref,
+    State,
+)
+from absicht.render import (
+    EXTERNAL_EXPIRED,
+    QUESTION_OPEN,
+    QUESTION_OVERDUE,
+    Gap,
+    UnknownRefError,
+    neighbourhood,
+    worklist,
+)
 from absicht.resolve import Index
 
 PANEL = "Step 2 — build, query, look at it"
@@ -268,6 +286,46 @@ def list_elements(
             )
 
 
+def _blocks(element: Element, target: Element) -> bool:
+    """Whether the gap ``element`` blocks ``target``, directly.
+
+    Two edges say "blocks": a question's own ``blocks``, and — for a milestone
+    target — the gaps its ``unresolved`` knowingly leaves open. Nothing
+    transitive: the spec's "only gaps that block this element or milestone"
+    names no closure, and walking the ref graph outward would soon claim most
+    of the store blocks the rest.
+    """
+    if isinstance(element, Question) and target.id in element.blocks:
+        return True
+    return isinstance(target, Milestone) and element.id in target.unresolved
+
+
+def _reasons_text(gap: Gap) -> str:
+    """Every reason on one stretch of a worklist line, the dated ones with
+    their date — the fact a reader triages on."""
+    parts: list[str] = []
+    for reason in gap.reasons:
+        if reason in (QUESTION_OPEN, QUESTION_OVERDUE) and gap.due_on is not None:
+            parts.append(f"{reason} (due {gap.due_on.isoformat()})")
+        elif reason == EXTERNAL_EXPIRED and gap.expires_on is not None:
+            parts.append(f"{reason} (expired {gap.expires_on.isoformat()})")
+        else:
+            parts.append(reason)
+    return ", ".join(parts)
+
+
+def _gap_json(gap: Gap) -> dict[str, object]:
+    """One worklist entry as json: the annotation first, the element it is
+    about alongside, so a consumer never has to re-read it with `ab show`."""
+    return {
+        "ref": gap.element.id,
+        "reasons": list(gap.reasons),
+        "due_on": gap.due_on.isoformat() if gap.due_on is not None else None,
+        "expires_on": gap.expires_on.isoformat() if gap.expires_on is not None else None,
+        "element": gap.element.model_dump(mode="json"),
+    }
+
+
 @app.command(rich_help_panel=PANEL)
 def gaps(
     ctx: typer.Context,
@@ -276,7 +334,9 @@ def gaps(
     overdue: Annotated[bool, typer.Option("--overdue")] = False,
     blocking: Annotated[
         str | None,
-        typer.Option("--blocking", metavar="REF", help="Only gaps blocking this element."),
+        typer.Option(
+            "--blocking", metavar="REF", help="Only gaps blocking this element or milestone."
+        ),
     ] = None,
     output_format: Annotated[PlainFormat, typer.Option("--format")] = PlainFormat.TEXT,
     json_output: JsonOption = False,
@@ -286,7 +346,40 @@ def gaps(
     `unknown`, `observed` and `delegated` elements, open questions, unowned
     elements, and expired external assumptions.
     """
-    unimplemented(ctx)
+    opts = options(ctx)
+    design = _design(opts)
+    target: Element | None = None
+    if blocking is not None:
+        target = Index.from_design(design).by_id.get(blocking)
+        if target is None:
+            typer.echo(f"--blocking {blocking!r}: no element in this store has that id", err=True)
+            raise typer.Exit(ExitCode.USAGE)
+    # Every filter is a predicate AND over the unioned worklist, applied in
+    # the id order `worklist` produces — the same stable answer `list` gives.
+    selected = [
+        gap
+        for gap in worklist(design, today=date.today())
+        if (kind is None or gap.element.id.startswith(f"{kind.value}:"))
+        and (owner is None or gap.element.owner == owner)
+        and (not overdue or QUESTION_OVERDUE in gap.reasons)
+        and (target is None or _blocks(gap.element, target))
+    ]
+    output = effective_format(ctx, output_format, opts.json_output, json_member=PlainFormat.JSON)
+    if output is PlainFormat.JSON:
+        typer.echo(
+            json.dumps(
+                {"schema_version": SCHEMA_VERSION, "gaps": [_gap_json(gap) for gap in selected]}
+            )
+        )
+    elif selected:
+        # Empty stays silent, like `list`: no blank line where a row would be.
+        width = max(len(gap.element.id) for gap in selected)
+        typer.echo(
+            "\n".join(
+                f"{gap.element.id.ljust(width)}  {_reasons_text(gap)}  {gap.element.title}"
+                for gap in selected
+            )
+        )
 
 
 @app.command(rich_help_panel=PANEL)
