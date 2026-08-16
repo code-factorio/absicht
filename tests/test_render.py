@@ -1,12 +1,13 @@
 """``absicht.render``: the read-only projections behind ``ab show``,
-``ab gaps`` and ``ab trace`` — and, later, the site's pages.
+``ab gaps`` and ``ab trace``, and the site those pages become.
 
 The command contracts — exit codes, flags, the bytes on stdout — live in
-``tests/test_show_cli.py``, ``tests/test_gaps_cli.py`` and
-``tests/test_trace_cli.py``. What is pinned here is the projections
-themselves, the shapes ``docs/tasks/26-render-site.md`` builds on
-("literally reuse" the show view; "a gaps page, reusing 23-gaps.md's
-worklist"):
+``tests/test_show_cli.py``, ``tests/test_gaps_cli.py``,
+``tests/test_trace_cli.py`` and ``tests/test_render_cli.py``. What is pinned
+here is the projections themselves, the shapes ``docs/tasks/26-render-site.md``
+builds on ("literally reuse" the show view; "a gaps page, reusing 23-gaps.md's
+worklist") and the machinery the CLI tests cannot reach without a socket or
+a clock:
 
 - ``--depth`` bounds the *outgoing* side only; the inbound side is one hop at
   any depth, because expanding both directions is the pathfinding ``ab trace``
@@ -26,13 +27,19 @@ worklist"):
   question a decision has already resolved leaves the worklist;
 - the trace walk's cycle guard: a hop onto an element already on the current
   path is declined rather than followed, so a cyclic graph answers a bounded
-  set of simple paths and says the guard fired instead of hanging.
+  set of simple paths and says the guard fired instead of hanging;
+- the site's byte determinism, with the clock injected rather than read, and
+  the preview server's change detection and socket behaviour, decoupled from
+  the poll loop's timing — the two things ``docs/tasks/26-render-site.md``
+  names as too flaky to test through the loop itself.
 """
 
 from __future__ import annotations
 
+import os
 from datetime import date, timedelta
 from pathlib import Path
+from urllib.request import urlopen
 
 import pytest
 
@@ -47,7 +54,16 @@ from absicht.models import (
     State,
     System,
 )
-from absicht.render import UnknownRefError, neighbourhood, trace_paths, worklist
+from absicht.render import (
+    SiteServer,
+    UnknownRefError,
+    generate_site,
+    neighbourhood,
+    store_changed,
+    store_snapshot,
+    trace_paths,
+    worklist,
+)
 from absicht.resolve import resolve
 
 FIXTURES = Path(__file__).parent / "fixtures" / "systems"
@@ -289,3 +305,84 @@ def test_an_unknown_to_ref_raises_rather_than_answering_empty(clean: Design) -> 
     not an answer anyone should be able to mistake for a route check."""
     with pytest.raises(UnknownRefError, match="decision:never"):
         trace_paths(clean, "requirement:cancel-orders", to="decision:never-made")
+
+
+# --- the site --------------------------------------------------------------------
+
+
+def test_an_unknown_scope_ref_raises_rather_than_rendering_everything(
+    clean: Design, tmp_path: Path
+) -> None:
+    """An ignored `--scope` would quietly render the whole store — the same
+    empty-answer trap `show` and `trace` refuse, so the site refuses it too."""
+    with pytest.raises(UnknownRefError, match="component:ghost"):
+        generate_site(clean, tmp_path, today=TODAY, scope="component:ghost")
+
+
+def _site_bytes(out: Path) -> dict[str, bytes]:
+    """The site as ``path → bytes``: the shape a determinism claim compares."""
+    return {
+        path.relative_to(out).as_posix(): path.read_bytes() for path in sorted(out.rglob("*.html"))
+    }
+
+
+def test_the_site_is_byte_identical_across_runs(clean: Design, tmp_path: Path) -> None:
+    """`today` is injected rather than read, so nothing between the store and
+    the bytes reads a clock: the same design spells the same site twice — the
+    property `docs/maintainers/verification.md`'s determinism job cross-checks
+    from a clean checkout."""
+
+    generate_site(clean, tmp_path / "first", today=TODAY)
+    generate_site(clean, tmp_path / "second", today=TODAY)
+
+    first = _site_bytes(tmp_path / "first")
+    assert first == _site_bytes(tmp_path / "second")
+    assert len(first) == 15  # twelve element pages, index, traceability, gaps
+
+
+def test_the_change_detection_notices_edits_additions_and_removals(tmp_path: Path) -> None:
+    """The poll loop's whole judgement in one pair of functions, decoupled from
+    the loop: docs/tasks/26-render-site.md asks for exactly this unit test
+    instead of a timing-dependent one on the server itself."""
+
+    store = tmp_path / "store"
+    (store / "requirements").mkdir(parents=True)
+    element = store / "requirements" / "r.md"
+    element.write_text("---\nid: requirement:r\n---\n", encoding="utf-8")
+
+    before = store_snapshot(store)
+    assert not store_changed(store, before)
+
+    # A touch far from any plausible real mtime, so the verdict is the
+    # detection's, not the filesystem's.
+    os.utime(element, ns=(2**40, 2**40))
+    assert store_changed(store, before)
+
+    (store / "system.yaml").write_text("id: system:s\n", encoding="utf-8")
+    assert store_changed(store, before)
+
+    after = store_snapshot(store)
+    element.unlink()
+    assert store_changed(store, after)
+
+
+def test_the_preview_server_serves_the_site_and_stops_cleanly(
+    clean: Design, tmp_path: Path
+) -> None:
+    """The spec's `--serve` minimum: starts, serves the index page (and a
+    nested element page, proving the directory mapping), shuts down cleanly.
+    Port 0 asks for an ephemeral one so the test never collides."""
+    out = tmp_path / "site"
+    generate_site(clean, out, today=TODAY)
+    server = SiteServer(out, 0)
+
+    server.start()
+    try:
+        assert server.port > 0
+        with urlopen(f"http://127.0.0.1:{server.port}/index.html") as response:
+            assert response.status == 200
+            assert response.read() == (out / "index.html").read_bytes()
+        with urlopen(f"http://127.0.0.1:{server.port}/elements/component/orders.html") as nested:
+            assert nested.status == 200
+    finally:
+        server.stop()

@@ -65,8 +65,12 @@ SURFACE: dict[str, tuple[list[str], list[str]]] = {
     ),
     "gaps": (["gaps"], ["--kind", "--owner", "--overdue", "--blocking", "--format"]),
     "trace": (["trace", "component:x"], ["--to", "--up", "--down", "--format"]),
+    # `render` is one command behind two tasks: the site half landed with
+    # docs/tasks/26-render-site.md, the diagram half is 27-render-diagrams.md's.
+    # The argv asks for the diagram half so the "not implemented" parametrization
+    # below keeps exercising what is genuinely still missing.
     "render": (
-        ["render"],
+        ["render", "--overlay", "state"],
         ["--out", "--serve", "--port", "--overlay", "--format", "--scope"],
     ),
     "layout": (["layout"], ["--recompute", "--recompute-all", "--seed", "--check"]),
