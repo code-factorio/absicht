@@ -30,18 +30,41 @@ The integrity layer reads the resolved artifact instead of the load errors:
   here: ``Story``'s own validator rejects a misanchored criterion at parse
   time. The rule id stays registered, marked handled upstream, so
   ``--explain`` still answers for it.
+
+The policy layer is the judgement layer, and its severities are the contract:
+
+- an ``unknown`` with no owner and a ``one_way`` decision with no rationale
+  are errors — the spec's own "needs" wording — while an unrealized
+  requirement and an expired external assumption are warnings:
+  incomplete-but-honest and stale-but-routine are brownfield's legitimate
+  states, not breakage. ``observed`` alone is never a finding.
+- the clock is injected: ``today`` is a parameter of the run, never read
+  inside a rule, so an expiry is "past as of when the caller says", and the
+  tests never depend on the real date.
 """
 
 from __future__ import annotations
 
+from datetime import date
 from pathlib import Path
 
 import pytest
 
-from absicht.check import integrity_findings, schema_findings
+from absicht.check import integrity_findings, policy_findings, schema_findings
 from absicht.findings import RULES, Finding, Severity
 from absicht.load import LoadedStore, LoadError, LoadErrorReason, load_store
-from absicht.models import Component, Design, Milestone, System
+from absicht.models import (
+    Component,
+    Decision,
+    Design,
+    External,
+    ExternalKind,
+    Milestone,
+    Question,
+    Reversibility,
+    State,
+    System,
+)
 from absicht.resolve import Index, resolve
 
 FIXTURES = Path(__file__).parent / "fixtures" / "systems"
@@ -247,6 +270,205 @@ def test_criteria_anchoring_is_registered_as_handled_upstream() -> None:
     for the spec line rather than silently dropping it."""
 
     assert "integrity/criteria-anchored" in RULES
+
+
+# --- the policy layer --------------------------------------------------------
+
+
+def _policy(name: str, *, today: date) -> tuple[Finding, ...]:
+    """Run `policy_findings` over one fixture store, resolved and indexed.
+
+    `today` is injected, never read from the clock: the expiry rule is
+    relative to "now", and a test that depends on the real date breaks the day
+    after it was written.
+    """
+    design = resolve(load_store(FIXTURES / name))
+    return policy_findings(design, Index.from_design(design), today=today)
+
+
+def test_brownfield_reports_exactly_its_policy_findings() -> None:
+    """`brownfield/` is the honest reading of a legacy system, and the negative
+    case this layer must not get wrong: every element but one is `observed`,
+    and `observed` alone is never a finding — unexplained is that store's
+    honest default, not a violation. The one real gap is
+    `requirement:audit-trail`, unknown and unowned. It is also unrealized and
+    still gets the realizer finding despite being `unknown`: the spec reads "a
+    requirement needs a realizing component" unconditionally, and the warning
+    severity — not silence — is what keeps that honesty from reading as
+    breakage."""
+
+    (unowned, unrealized) = _policy("brownfield", today=date(2026, 8, 16))
+
+    assert unowned.rule_id == "policy/unknown-needs-owner"
+    assert unowned.severity is Severity.ERROR
+    assert unowned.ref == "requirement:audit-trail"
+    assert unowned.source == "requirements/audit-trail.md"
+    assert unowned.message == "requirement:audit-trail is unknown and has no owner"
+
+    assert unrealized.rule_id == "policy/requirement-needs-realizer"
+    assert unrealized.severity is Severity.WARN
+    assert unrealized.ref == "requirement:audit-trail"
+    assert unrealized.message == "requirement:audit-trail is realized by no component"
+
+
+def test_clean_has_no_policy_findings() -> None:
+    """`clean/` is complete by construction — every requirement realized, its
+    one decision `costly` (not `one_way`) with a real rationale body, no
+    externals to expire — so the judgement layer has nothing to say at any
+    severity."""
+
+    assert _policy("clean", today=date(2026, 8, 16)) == ()
+
+
+def test_broken_reports_exactly_its_three_policy_defects() -> None:
+    """One finding per deliberately broken policy case in `broken/` — the
+    unowned unknown, the rationale-less `one_way` decision, the expired
+    external — and nothing else: the two files the schema layer refused never
+    reach the `Design`, and the dangling ref and the `contains` cycle are the
+    integrity layer's findings, not policy's. The clock is fixed after the
+    fixture's `expires_on` (2026-01-10): the date on disk stays put while
+    "today" moves."""
+
+    (unowned, bare, expired) = _policy("broken", today=date(2026, 8, 16))
+
+    assert (unowned.rule_id, bare.rule_id, expired.rule_id) == (
+        "policy/unknown-needs-owner",
+        "policy/one-way-needs-rationale",
+        "policy/external-assumptions-expired",
+    )
+    assert (unowned.severity, bare.severity, expired.severity) == (
+        Severity.ERROR,
+        Severity.ERROR,
+        Severity.WARN,
+    )
+    assert unowned.ref == "question:unowned-unknown"
+    assert unowned.source == "questions/unowned-unknown.md"
+    assert bare.ref == "decision:one-way-no-why"
+    assert bare.source == "decisions/one-way-no-why.md"
+    assert expired.ref == "external:expired"
+    assert expired.source == "externals/expired.md"
+    assert "2026-01-10" in expired.message
+
+
+@pytest.mark.parametrize(
+    ("today", "expired"),
+    [
+        (date(2026, 1, 9), False),  # before the expiry: still within what was verified
+        (date(2026, 1, 10), False),  # the expiry day itself is not yet "in the past"
+        (date(2026, 1, 11), True),  # the day after: re-check before trusting
+    ],
+)
+def test_an_external_expires_only_once_today_is_past_it(today: date, expired: bool) -> None:
+    """Both directions of the injected clock, boundary included: `expires_on`
+    means "after this, re-check" (`models.py`), so the finding fires strictly
+    after the date, never on it. An external with no `expires_on` never fires —
+    no expiry was promised, so none can have lapsed. States are `specified` so
+    the unknown-owner rule, which this test is not about, stays quiet."""
+
+    design = Design(
+        system=System(id="system:tiny", title="Tiny", state=State.SPECIFIED),
+        externals=(
+            External(
+                id="external:bank",
+                title="Bank API",
+                state=State.SPECIFIED,
+                external_kind=ExternalKind.SERVICE,
+                expires_on=date(2026, 1, 10),
+            ),
+            External(
+                id="external:clock",
+                title="NTP",
+                state=State.SPECIFIED,
+                external_kind=ExternalKind.SERVICE,
+            ),
+        ),
+    )
+
+    findings = policy_findings(design, Index.from_design(design), today=today)
+
+    if expired:
+        (only,) = findings
+        assert only.rule_id == "policy/external-assumptions-expired"
+        assert only.severity is Severity.WARN
+        assert only.ref == "external:bank"
+        assert only.message == (
+            "external:bank's assumptions expired on 2026-01-10 — re-check before trusting"
+        )
+    else:
+        assert findings == ()
+
+
+def test_a_one_way_decision_needs_a_real_rationale_body() -> None:
+    """The fixture covers the empty body; this pins the rest of the rule's
+    reach: whitespace-only prose is no rationale (an ADR whose argument is
+    blank lines), a `one_way` decision that does argue its case is fine, and a
+    rationale-less decision that is `cheap` to revisit is fine too — the rule
+    is about reversibility, not about bodies for their own sake. States are
+    `specified` so only this rule can speak; an element the loader never saw
+    carries no path, and its finding's `source` is None."""
+
+    design = Design(
+        system=System(id="system:tiny", title="Tiny", state=State.SPECIFIED),
+        decisions=(
+            Decision(
+                id="decision:argued",
+                title="Argued",
+                state=State.SPECIFIED,
+                reversibility=Reversibility.ONE_WAY,
+                body="We cannot afford dual writes; the argument is the whole point.",
+            ),
+            Decision(
+                id="decision:bare",
+                title="Bare",
+                state=State.SPECIFIED,
+                reversibility=Reversibility.ONE_WAY,
+                body="  \n\t\n",
+            ),
+            Decision(id="decision:cheap", title="Cheap", state=State.SPECIFIED, body=""),
+        ),
+    )
+
+    (only,) = policy_findings(design, Index.from_design(design), today=date(2026, 8, 16))
+
+    assert only.rule_id == "policy/one-way-needs-rationale"
+    assert only.severity is Severity.ERROR
+    assert only.ref == "decision:bare"
+    assert only.source is None
+    assert only.message == "decision:bare is a one_way decision with no rationale body"
+
+
+def test_an_unknown_with_an_owner_is_not_a_finding() -> None:
+    """The rule's other direction, which no fixture holds: `unknown` is a
+    legitimate, expected state, and the gap the rule names is that nobody is
+    accountable for resolving it — an unknown with an owner is a question on
+    someone's desk, not a wish."""
+
+    design = Design(
+        system=System(id="system:tiny", title="Tiny", state=State.SPECIFIED),
+        questions=(
+            Question(id="question:owned", title="Owned", state=State.UNKNOWN, owner="vinz"),
+        ),
+    )
+
+    assert policy_findings(design, Index.from_design(design), today=date(2026, 8, 16)) == ()
+
+
+@pytest.mark.parametrize(
+    "rule_id",
+    [
+        "policy/unknown-needs-owner",
+        "policy/requirement-needs-realizer",
+        "policy/one-way-needs-rationale",
+        "policy/external-assumptions-expired",
+    ],
+)
+def test_every_policy_rule_is_registered_with_its_reasoning(rule_id: str) -> None:
+    """`--explain ID` answers per rule id, and this is the one layer whose
+    severity is a judgement call — so every policy id must sit in the catalog
+    with the reasoning, the same pin the integrity layer keeps for its
+    handled-upstream id."""
+
+    assert rule_id in RULES
 
 
 def _write(root: Path, rel: str, text: str) -> None:
