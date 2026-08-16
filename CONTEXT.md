@@ -38,9 +38,10 @@ code.
   whose context is `["performance", "vendor_lock_in"]` has thrown away the
   argument — and the argument is the non-derivable half this project exists to
   hold.
-- **Schema in exactly one place.** msgspec structs under `model/`. The
-  validator, the JSON Schema in `schema/` and the reference docs are generated
-  from them. Committing the JSON Schema gives YAML editors autocomplete and
+- **Schema in exactly one place.** pydantic models in
+  `src/absicht/models.py` (an earlier draft said msgspec under `model/`;
+  pydantic won). The validator, the JSON Schema in `schema/` and the
+  reference docs are generated from them. Committing the JSON Schema gives YAML editors autocomplete and
   inline errors on `.absicht/` files, which is most of what an authoring UI
   would have bought. Every artifact carries `schema_version`.
 - **A library with a thin CLI over it, from the first commit.** Not a CLI to

@@ -160,15 +160,19 @@ none is a plugin of the others.
 
 ## Status
 
-Nothing is built. This document is the argument, not a description.
+Under construction, command by command — see
+[docs/tasks/](docs/tasks/README.md) for the per-task state and
+[docs/spec/ABSICHT-MODEL-ADDENDUM.md](docs/spec/ABSICHT-MODEL-ADDENDUM.md)
+for the behaviors / resources / notes additions to the model.
 
 | Step | Contents | State |
 | --- | --- | --- |
-| **0** | Hand-written packets for three real slices; measure agent output against them | next |
-| **1** | Schema, file layout, `ab check` — link integrity, orphans, ungoverned elements | after 0 |
-| **2** | `ab build` and a generated read-only site: pages, traceability, gaps, stable-layout SVG | |
-| **3** | Milestones as selections; `ab packet` with a one-ring context horizon | |
+| **0** | Hand-written packets for three real slices; measure agent output against them | |
+| **1** | Schema, file layout, `ab check` — link integrity, orphans, ungoverned elements | done |
+| **2** | `ab build` and a generated read-only site: pages, traceability, gaps, stable-layout SVG | queries done; site in progress |
+| **3** | Milestones as selections; `ab packet` with a one-ring context horizon | in progress |
 | **4** | Source correlation: `.absicht` markers, watermarks, seam contract tests, `ab status` in CI | |
+| **addendum** | Behaviors, observations, resources, notes, run store — [tasks 50–60](docs/tasks/README.md) | proposed |
 | **later** | Brownfield extraction, decision mining from git history, drag-to-reposition | |
 
 Step 0 is the falsification. If a hand-written packet does not measurably

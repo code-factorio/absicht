@@ -1,6 +1,8 @@
 # absicht — model addendum: behaviors, resources, notes
 
 **Status:** Proposal · Nothing implemented · Date: 2026-08-16
+**Implementation plan:** [docs/tasks/50–60](../tasks/README.md) — start with
+[`50-addendum-conventions.md`](../tasks/50-addendum-conventions.md)
 
 Four additions to the model. Three are elements; one is deliberately not.
 

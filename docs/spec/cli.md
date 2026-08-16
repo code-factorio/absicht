@@ -60,13 +60,40 @@ yourself.
 Create an element from a template, with a generated id.
 
 Kinds: `component` `seam` `data` `requirement` `nfr` `story` `decision`
-`rejection` `question` `milestone` `external`
+`rejection` `question` `milestone` `external` `resource` `behavior`
+
+`resource` and `behavior` come from the
+[model addendum](ABSICHT-MODEL-ADDENDUM.md): a resource is an addressable
+thing the system depends on but does not design (kind `store` / `endpoint` /
+`stream`, technology as free text); a behavior is an expectation about how the
+system acts, carrying observations (`behavior:slug#obs-1`) the way a story
+carries criteria.
 
 - `--title TEXT`
 - `--state STATE` default `unknown`
 - `--owner WHO`
 - `--edit` open `$EDITOR`
 - `--print` write to stdout instead of the store
+
+### `ab note`
+
+Capture a thought against the store with near-zero friction — see the
+[model addendum §6](ABSICHT-MODEL-ADDENDUM.md#6-note). Notes are **not
+elements**: they are outside the resolved graph, carry no state, and are never
+packet input — an agent never sees a note. They are committed, under
+`.absicht/notes/`, so a colleague can promote one.
+
+- `ab note add [TEXT]` — body from the argument, stdin, or `--edit`; the id is
+  generated (`note:a1b2c3`), never asked for
+  - `--ref REF` optional anchor to an element
+- `ab note list` — the inbox: unpromoted notes, with age surfaced
+  ("14 notes, oldest 3 months"), not just a count
+  - `--ref REF` `--all` (include promoted) `--format {text,json,ids}`
+- `ab note show ID`
+- `ab note promote ID KIND SLUG` — it became a question, decision, requirement
+  or behavior: creates the element (same machinery as `ab new`), records
+  `promoted_to` on the note, which removes it from the inbox
+- `ab note drop ID` — it never mattered; deletes the file
 
 ### `ab check`
 
@@ -77,6 +104,14 @@ resolves, no cycles in `contains` or `depends_on`, criteria anchored to their
 story), and policy (an `unknown` needs an owner, a requirement needs a
 realizing component, a `one_way` decision needs a rationale body, an external's
 assumptions have not expired).
+
+The [model addendum](ABSICHT-MODEL-ADDENDUM.md) adds rules per layer: a seam
+referencing a resource, an observation whose `at` does not resolve or points
+at a requirement/decision/question, a `must_not` observation carrying
+`timing`, composition and supersession cycles, a superseded behavior in a
+milestone's must-satisfy set, and a note whose `promoted_to` does not resolve
+are errors; a behavior with no observations is an error; a requirement with no
+behavior realizing it is a warning.
 
 - `--rule ID` `-r` only these rules; repeatable
 - `--exclude-rule ID` repeatable
@@ -181,6 +216,17 @@ Assemble the brief: milestone scope at full fidelity, one ring of neighbouring
 contracts, the decisions and NFRs that must hold, explicit freedoms, known
 unknowns, and the rejections that must not be re-proposed.
 
+Per the [model addendum §5](ABSICHT-MODEL-ADDENDUM.md#5-lifecycle-and-supersession),
+the packet also carries two behavior lists: the behaviors this slice must
+**satisfy** (the new work) and the active behaviors it must **not break**
+(standing expectations touching the components in scope). Behavior composition
+expands one hop — if A composes B and B composes C, a packet scoped to A
+includes B's observations and references C without expanding it. Notes are
+never packet input. Packet issuance is recorded in the local run store
+(`(milestone, design rev, packet id, timestamp, target agent)`); the packet
+artifact itself is deterministic from milestone plus design rev and is
+regenerated rather than stored.
+
 - `--out DIR` default `.absicht/build/packets/<milestone>`
 - `--stdout`
 - `--format {md,json}` default `md`; `json` for programmatic consumers
@@ -216,6 +262,17 @@ Checks: the diff touched only components in scope; nothing marked
 decision; every seam in scope has a contract test that runs; every `done_when`
 criterion has something verifying it; scenario files are unmodified against the
 sealed digest; step definitions contain assertions.
+
+Per the [model addendum §9](ABSICHT-MODEL-ADDENDUM.md#9-what-verification-does-and-does-not-do),
+verification also asks whether every `must` and `must_not` observation in the
+packet **has something checking it**, and reports three outcomes per
+observation: `checked` (something verifies it, with evidence), `no_check`
+(nothing does — the observation is unguarded), `advisory` (it is a `should`;
+reported, never failed). The unchecked-`should` count is surfaced as
+visibility, not as an error. absicht does not run checks and does not own
+assertions. Each run is recorded in the local run store
+(`(packet id, commit sha, per-criterion result, evidence ref)`) — beside the
+design store, never in git.
 
 - `--packet PATH` default: the sealed packet in the build dir
 - `--repo PATH` repeatable, for multi-repo slices

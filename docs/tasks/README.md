@@ -3,9 +3,11 @@
 Every file in this folder except this one is a **self-contained prompt** for
 handing to one implementing agent: goal, spec excerpt, concrete deliverables,
 out-of-scope, tests, definition of done. They exist so `absicht`'s CLI surface
-— currently signatures only, every body a call to `unimplemented(ctx)` — can be
-built out command by command, by many agents or by one agent working
-sequentially, without each of them re-deriving the same context from scratch.
+— scaffolded as signatures first, built out command by command since — can be
+implemented by many agents or by one agent working sequentially, without each
+of them re-deriving the same context from scratch. The `5x`/`60` block covers
+the [model addendum](../spec/ABSICHT-MODEL-ADDENDUM.md): behaviors,
+resources, observations, notes, and the run store.
 
 Derived from [`../spec/cli.md`](../spec/cli.md) (the surface), the project
 README and [`CONTEXT.md`](../../CONTEXT.md) (the why), `AGENTS.md` /
@@ -64,6 +66,17 @@ each other and can run in parallel once their dependencies are met.
 | 44 | [marker: sync](44-marker-sync.md) | `ab marker sync` | 00, 01, 03 |
 | 45 | [marker: check](45-marker-check.md) | `ab marker check` | 44 |
 | 46 | [marker: stamp](46-marker-stamp.md) | `ab marker stamp` | 44, 05 |
+| 50 | [addendum conventions](50-addendum-conventions.md) | — (reading, not code) | 00 |
+| 51 | [model: behaviors, resources](51-model-behaviors-resources.md) | `models.py` additions, `schema/` | 00, 50 |
+| 52 | [store wiring](52-store-wiring.md) | codec/load/resolve/build for new kinds, fixtures | 50, 51 |
+| 53 | [notes](53-notes.md) | `absicht.notes`, `ab note` | 50, 51 |
+| 54 | [check: addendum rules](54-check-addendum-rules.md) | `absicht.check` additions | 50, 52, 53 |
+| 55 | [addendum query surface](55-addendum-query-surface.md) | `ab new/list/show/gaps/trace` for new kinds | 50, 52 |
+| 56 | [derived scope, composition](56-derived-scope-composition.md) | `absicht.resolve` derivations | 50, 52 |
+| 57 | [packet: behaviors](57-packet-behaviors.md) | `absicht.packet` additions | 50, 56, 31, 32 |
+| 58 | [run store](58-run-store.md) | `absicht.runstore` | 50 |
+| 59 | [verify: observations](59-verify-observations.md) | `absicht.verify` additions | 50, 57, 58, 40, 41 |
+| 60 | [addendum render](60-addendum-render.md) | site pages, diagrams, note inbox | 50, 53, 56, 26, 27 |
 | 90 | [later: extract](90-later-extract.md) | `ab extract` | not started |
 | 91 | [later: import](91-later-import.md) | `ab import` | not started |
 | 92 | [later: mine](92-later-mine.md) | `ab mine` | not started |
@@ -78,6 +91,12 @@ each other and can run in parallel once their dependencies are met.
   (verify) blocks roughly track `cli.md`'s own steps and can be built as four
   waves, but a task should not start before every task in its `Depends on`
   column has landed and `./scripts/verify.sh` is green on `main`.
+- The `5x`/`60` block implements the model addendum. `50` is reading, like
+  `00` — hand both to every agent working a 51–60 task. `51 → 52` is the
+  spine; `53`, `55`, `56`, `58` fan out behind `52` (or `51`/`50` where the
+  table says so) and can run in parallel; `54`, `57`, `59`, `60` close over
+  them. `57` and `59` additionally wait on the pre-addendum packet (`31`,
+  `32`) and verify (`40`, `41`) tasks; `60` waits on render (`26`, `27`).
 - The `9x` block is explicitly **not scoped** — see each file. Don't assign
   these until the numbered tasks above are done and dogfooded; the README's
   own status table calls them "later" for a reason (nothing before them has
