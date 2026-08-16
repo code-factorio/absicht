@@ -1,7 +1,8 @@
-"""``ab render``: the read-only site — element pages, traceability, gaps.
+"""``ab render``: the read-only site — element pages, traceability, gaps — and
+the diagrams of ``docs/tasks/27-render-diagrams.md``.
 
-What these tests pin, per ``docs/tasks/26-render-site.md`` (the non-diagram
-half; ``--overlay``/``--format`` are ``docs/tasks/27-render-diagrams.md``'s):
+What these tests pin, per ``docs/tasks/26-render-site.md`` (the site half) and
+``27-render-diagrams.md`` (the diagram half):
 
 - one page per element under ``elements/<kind>/<slug>.html``, an index that
   groups them by kind the way ``ab list`` walks one kind at a time, a
@@ -14,9 +15,13 @@ half; ``--overlay``/``--format`` are ``docs/tasks/27-render-diagrams.md``'s):
   following refs outward: fewer element pages, and a ref outside the scope
   stays plain text on a page rather than linking to a page that does not
   exist;
-- an explicit ``--overlay``/``--format`` still reports "not implemented yet" —
-  the diagram half of this one command — which is also why ``render`` stays
-  out of ``IMPLEMENTED`` in ``tests/test_cli.py`` until that task lands;
+- an explicit ``--format`` or any ``--overlay`` asks for the diagram half:
+  one file per variant under ``--out``, the overlay spelling the file's name;
+- a store without pinned positions is ``FINDINGS`` with a pointer at
+  ``ab layout``, never an unpinned diagram — an unpinned diagram would defeat
+  the whole purpose of pinning positions;
+- ``--serve`` previews the site only: it is a usage error beside diagram
+  flags, which write their files once rather than being watched;
 - an unknown ``--scope`` ref is ``USAGE``, the lookup miss ``show`` and
   ``trace`` already map there;
 - ``--json`` is the ``schema_version`` envelope of ``00-conventions.md``.
@@ -26,6 +31,7 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -222,15 +228,119 @@ def test_refs_outside_the_scope_stay_plain_text(tmp_path: Path) -> None:
     assert 'href="../../elements/component/orders.html"' not in page
 
 
-@pytest.mark.parametrize("flags", [["--overlay", "state"], ["--format", "mermaid"]])
-def test_the_diagram_half_is_still_not_implemented(tmp_path: Path, flags: list[str]) -> None:
-    """Asking for diagrams explicitly is refused whole, not honoured halfway:
-    an unpinned or uncoloured diagram would quietly defeat the purpose both
-    diagram flags exist for."""
-    result = _render(CLEAN, tmp_path, *flags)
+@pytest.fixture
+def laid_out(tmp_path: Path) -> Path:
+    """The clean fixture as a private copy with positions pinned by ``ab
+    layout`` — the state a diagram is drawn from; the shared fixture ships
+    without a ``layout.yaml`` and must stay that way."""
+    store = tmp_path / "store"
+    shutil.copytree(CLEAN, store)
+    assert runner.invoke(app, ["--store", str(store), "layout"]).exit_code == ExitCode.OK
+    return store
 
-    assert result.exit_code == ExitCode.INTERNAL
-    assert "not implemented yet" in result.stderr
+
+def test_an_explicit_format_writes_one_diagram(laid_out: Path, tmp_path: Path) -> None:
+    out = tmp_path / "diagrams"
+
+    result = _render(laid_out, out, "--format", "svg")
+
+    assert result.exit_code == ExitCode.OK
+    assert (out / "diagram.svg").read_text(encoding="utf-8").startswith("<?xml")
+    assert result.stdout == f"wrote {out / 'diagram.svg'}\n"
+
+
+def test_an_overlay_without_an_explicit_format_defaults_to_svg(
+    laid_out: Path, tmp_path: Path
+) -> None:
+    out = tmp_path / "diagrams"
+
+    result = _render(laid_out, out, "--overlay", "state")
+
+    assert result.exit_code == ExitCode.OK
+    assert (out / "diagram.svg").exists() is False
+    assert (out / "diagram-state.svg").read_text(encoding="utf-8").startswith("<?xml")
+
+
+def test_repeated_overlays_write_one_variant_each(laid_out: Path, tmp_path: Path) -> None:
+    """One visual result per overlay, not a blend: two overlays in one
+    invocation produce two files that differ from each other and from the
+    uncoloured diagram."""
+    out = tmp_path / "diagrams"
+
+    result = _render(laid_out, out, "--overlay", "state", "--overlay", "coverage")
+
+    assert result.exit_code == ExitCode.OK
+    state = (out / "diagram-state.svg").read_text(encoding="utf-8")
+    coverage = (out / "diagram-coverage.svg").read_text(encoding="utf-8")
+    plain = _render(laid_out, tmp_path / "plain", "--format", "svg")
+    assert plain.exit_code == ExitCode.OK
+    assert state != coverage
+    assert state != (tmp_path / "plain" / "diagram.svg").read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize(
+    ("fmt", "first_line"),
+    [("mermaid", "graph TD"), ("d2", "direction: right")],
+)
+def test_the_text_formats_spell_their_dsl(
+    laid_out: Path, tmp_path: Path, fmt: str, first_line: str
+) -> None:
+    out = tmp_path / "diagrams"
+
+    result = _render(laid_out, out, "--format", fmt)
+
+    assert result.exit_code == ExitCode.OK
+    assert (out / f"diagram.{fmt}").read_text(encoding="utf-8").startswith(first_line)
+
+
+def test_rendering_without_pinned_positions_is_findings_pointing_at_ab_layout(
+    tmp_path: Path,
+) -> None:
+    """No ``layout.yaml``, no diagram: the refusal names the command that
+    pins positions, and nothing is written to stdout."""
+    store = tmp_path / "store"
+    shutil.copytree(CLEAN, store)
+    out = tmp_path / "diagrams"
+
+    result = _render(store, out, "--format", "svg")
+
+    assert result.exit_code == ExitCode.FINDINGS
+    assert "ab layout" in result.stderr
+    assert result.stdout == ""
+    assert out.exists() is False
+
+
+def test_json_envelopes_the_diagram_run(laid_out: Path, tmp_path: Path) -> None:
+    out = tmp_path / "diagrams"
+
+    result = _render(laid_out, out, "--format", "svg", "--json")
+
+    assert result.exit_code == ExitCode.OK
+    document = json.loads(result.stdout)
+    assert document["schema_version"] == SCHEMA_VERSION
+    assert document["out"] == str(out)
+    assert document["diagrams"] == ["diagram.svg"]
+
+
+def test_an_unknown_scope_ref_is_a_usage_error_for_diagrams_too(
+    laid_out: Path, tmp_path: Path
+) -> None:
+    result = _render(
+        laid_out, tmp_path / "diagrams", "--format", "svg", "--scope", "component:ghost"
+    )
+
+    assert result.exit_code == ExitCode.USAGE
+    assert "--scope" in result.stderr
+    assert result.stdout == ""
+
+
+def test_serve_refuses_to_watch_diagrams(laid_out: Path, tmp_path: Path) -> None:
+    """``--serve`` is the site's preview loop; diagrams are written once, and
+    pretending to watch them would promise rebuilds that never happen."""
+    result = _render(laid_out, tmp_path / "diagrams", "--format", "svg", "--serve")
+
+    assert result.exit_code == ExitCode.USAGE
+    assert "--serve" in result.stderr
     assert result.stdout == ""
 
 

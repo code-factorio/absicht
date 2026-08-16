@@ -67,9 +67,9 @@ SURFACE: dict[str, tuple[list[str], list[str]]] = {
     "gaps": (["gaps"], ["--kind", "--owner", "--overdue", "--blocking", "--format"]),
     "trace": (["trace", "component:x"], ["--to", "--up", "--down", "--format"]),
     # `render` is one command behind two tasks: the site half landed with
-    # docs/tasks/26-render-site.md, the diagram half is 27-render-diagrams.md's.
-    # The argv asks for the diagram half so the "not implemented" parametrization
-    # below keeps exercising what is genuinely still missing.
+    # docs/tasks/26-render-site.md, the diagram half with 27-render-diagrams.md.
+    # The argv asks for the diagram half because it needs a store with pinned
+    # positions to run; as a `--help` probe it needs no store at all.
     "render": (
         ["render", "--overlay", "state"],
         ["--out", "--serve", "--port", "--overlay", "--format", "--scope"],
@@ -143,6 +143,7 @@ IMPLEMENTED = {
     "list",
     "migrate",
     "new",
+    "render",
     "schema",
     "show",
     "trace",
