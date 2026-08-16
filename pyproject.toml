@@ -160,6 +160,7 @@ type = "layers"
 layers = [
     "absicht.__main__",
     "absicht.cli",
+    "absicht.diagram",
     "absicht.render",
     "absicht.gherkin",
     "absicht.init",

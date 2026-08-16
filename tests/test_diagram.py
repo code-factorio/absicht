@@ -30,9 +30,9 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 
 import pytest
-from absicht.diagram import Diagram, build, overlay_colours
 from syrupy.assertion import SnapshotAssertion
 
+from absicht.diagram import Diagram, build, overlay_colours
 from absicht.layout import LayoutError, compute, write_layout
 from absicht.load import load_store
 from absicht.models import Design, Layout, Position
@@ -152,6 +152,15 @@ def test_d2_spells_boxes_and_edges(tmp_path: Path) -> None:
     assert 'component_orders: "Orders" {' in text
     assert "component_orders -> component_catalog: contains" in text
     assert "component_cancellation -> seam_order_events: consumes" in text
+
+
+def test_d2_with_an_overlay_styles_by_fill(tmp_path: Path) -> None:
+    design = _laid_out(CLEAN, tmp_path / "store")
+
+    text = _picture(design, tmp_path / "store").render_d2(overlay_colours("state", design))
+
+    assert 'component_cancellation.style.fill: "#eb6834"' in text
+    assert 'component_cancellation.style.font-color: "#0b0b0b"' in text
 
 
 @pytest.mark.parametrize("fixture", ["clean", "brownfield", "composite"])

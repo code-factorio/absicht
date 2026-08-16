@@ -10,6 +10,7 @@ the rest of this group are projections of it.
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from contextlib import suppress
 from datetime import date
 from pathlib import Path
@@ -34,8 +35,9 @@ from absicht.cli._common import (
     TraceFormat,
     effective_format,
     options,
-    unimplemented,
 )
+from absicht.diagram import build as build_diagram
+from absicht.diagram import overlay_colours
 from absicht.findings import ExitCode
 from absicht.git import GitError
 from absicht.layout import (
@@ -448,17 +450,25 @@ def render(
 ) -> None:
     """Generate the read-only site: element pages, traceability, gaps, diagrams."""
     opts = options(ctx)
-    # The diagram half of this one command is docs/tasks/27-render-diagrams.md's;
-    # an invocation that asks for it is refused whole rather than honoured
-    # halfway — an unpinned or uncoloured diagram defeats what both flags are
-    # for. Every other invocation renders the site half this task owns.
-    source = ctx.get_parameter_source("output_format")
-    if overlay or (source is not None and source.name != "DEFAULT"):
-        unimplemented(ctx)
     if serve and not 1 <= port <= 65535:
         typer.echo("--port must be between 1 and 65535", err=True)
         raise typer.Exit(ExitCode.USAGE)
+    # One command, two outputs. A bare invocation is the site (docs/tasks/
+    # 26-render-site.md); an explicit `--format` or any `--overlay` asks for
+    # the diagram half (27-render-diagrams.md). The default `--format svg` is
+    # the diagram's own default, not a site selector, so only an explicit pass
+    # or an overlay routes there.
+    source = ctx.get_parameter_source("output_format")
+    wants_diagram = bool(overlay) or (source is not None and source.name != "DEFAULT")
+    if serve and wants_diagram:
+        # `--serve` is the site's preview loop; pretending to watch one-shot
+        # diagram files would promise rebuilds that never happen.
+        typer.echo("--serve previews the site; diagrams are written once, not watched", err=True)
+        raise typer.Exit(ExitCode.USAGE)
     root, design = _design(opts)
+    if wants_diagram:
+        _render_diagrams(opts, root, design, out, output_format, overlay or (), scope)
+        return
     try:
         pages = generate_site(design, out, today=date.today(), scope=scope)
     except UnknownRefError as exc:
@@ -486,6 +496,56 @@ def render(
     # process, so suppressing the interrupt here is the whole shutdown.
     with suppress(KeyboardInterrupt):
         server.serve()
+
+
+def _render_diagrams(
+    opts: GlobalOptions,
+    root: Path,
+    design: Design,
+    out: Path,
+    output_format: DiagramFormat,
+    overlays: Sequence[Overlay],
+    scope: str | None,
+) -> None:
+    """The diagram half of ``render``: one file per variant under ``out``, the
+    overlay spelling the file's name. Overlays are separate output variants —
+    one visual result per overlay, no blend — so an invocation that names any
+    writes exactly those; only an overlay-less one writes the uncoloured
+    ``diagram.<format>``.
+
+    Unpinned positions are ``FINDINGS`` — the same verdict ``ab layout
+    --check`` gives the same store — and an unknown ``--scope`` ref is
+    ``USAGE``, the lookup miss every ref-taking command maps there.
+    """
+    try:
+        picture = build_diagram(design, root, scope=scope)
+    except UnknownRefError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(ExitCode.USAGE) from exc
+    except LayoutError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(ExitCode.FINDINGS) from exc
+    render = {
+        DiagramFormat.SVG: picture.render_svg,
+        DiagramFormat.MERMAID: picture.render_mermaid,
+        DiagramFormat.D2: picture.render_d2,
+    }[output_format]
+    # dict.fromkeys keeps only the first spelling of a repeated overlay: a
+    # second file of identical bytes would read as a variant that did nothing.
+    variants: list[Overlay | None] = list(dict.fromkeys(overlays)) or [None]
+    out.mkdir(parents=True, exist_ok=True)
+    written: list[str] = []
+    for variant in variants:
+        colouring = None if variant is None else overlay_colours(variant.value, design, root=root)
+        name = f"diagram{'-' + variant.value if variant is not None else ''}.{output_format.value}"
+        (out / name).write_text(render(colouring) + "\n", encoding="utf-8")
+        written.append(name)
+    if opts.json_output:
+        typer.echo(
+            json.dumps({"schema_version": SCHEMA_VERSION, "out": str(out), "diagrams": written})
+        )
+    else:
+        typer.echo("\n".join(f"wrote {out / name}" for name in written))
 
 
 @app.command(rich_help_panel=PANEL)

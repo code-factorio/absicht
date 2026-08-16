@@ -355,19 +355,23 @@ def mermaid(nodes: Iterable[Ref], edges: Iterable[tuple[Ref, str, Ref]]) -> str:
     return "\n".join(
         [
             "graph TD",
-            *(f'  {_node_id(ref)}["{ref}"]' for ref in nodes),
+            *(f'  {node_key(ref)}["{ref}"]' for ref in nodes),
             *(
-                f"  {_node_id(source)} -->|{field}| {_node_id(target)}"
+                f"  {node_key(source)} -->|{field}| {node_key(target)}"
                 for source, field, target in edges
             ),
         ]
     )
 
 
-def _node_id(ref: Ref) -> str:
+def node_key(ref: Ref) -> str:
     """The mermaid-safe spelling of a ref: unique per ref and stable, so the
     same design always spells the same ids. Colons would end the id, dashes
-    read as mermaid syntax in some positions, so both flatten."""
+    read as mermaid syntax in some positions, so both flatten.
+
+    Public because ``absicht.diagram``'s class statements must reference the
+    node ids this spelling minted — a private twin would be free to drift.
+    """
     return ref.replace(":", "_").replace("-", "_")
 
 
@@ -597,17 +601,22 @@ def generate_site(
         design=design,
         index=index,
         out=out,
-        scope=_subtree(index, scope) if scope is not None else frozenset(index.by_id),
+        scope=subtree(index, scope) if scope is not None else frozenset(index.by_id),
         today=today,
     )
     return site.write()
 
 
-def _subtree(index: Index, ref: Ref) -> frozenset[Ref]:
+def subtree(index: Index, ref: Ref) -> frozenset[Ref]:
     """The subtree a ``--scope`` renders: ``ref`` plus everything reachable
     from it by following refs outward. Dangling targets resolve to nothing
     here either — they are ``ab check``'s to report, and on a page they stay
-    plain text rather than becoming links to nowhere."""
+    plain text rather than becoming links to nowhere.
+
+    Public because ``absicht.diagram`` scopes a diagram the same way — one
+    ``--scope`` flag, one definition of what it keeps, across both halves of
+    ``ab render``.
+    """
     seen = {ref}
     pending = [ref]
     while pending:

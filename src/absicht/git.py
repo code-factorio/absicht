@@ -133,3 +133,14 @@ def changed_paths(base: str, repo: Path = Path()) -> frozenset[Path]:
     """
     lines = _git(["diff", "--name-only", f"{base}...HEAD"], repo).stdout
     return frozenset(Path(line) for line in lines.splitlines())
+
+
+def commit_count(path: Path, repo: Path = Path()) -> int:
+    """How many commits ever touched `path` — the churn a diagram colours by.
+
+    Current-branch history only, like every other read here. Paths are
+    relative to the repository root, the same shape `changed_paths` returns,
+    so a caller holding store-relative `source` paths joins them the same way
+    for both.
+    """
+    return len(_git(["log", "--oneline", "--", path.as_posix()], repo).stdout.splitlines())
