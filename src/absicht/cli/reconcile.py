@@ -10,6 +10,7 @@ asks whether it is the code that was asked for, which needs the design to answer
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Annotated
 
@@ -29,10 +30,14 @@ from absicht.cli._common import (
     options,
     unimplemented,
 )
+from absicht.cli.query import _design
 from absicht.diff import diff as diff_store
 from absicht.findings import ExitCode, Report
 from absicht.git import GitError
 from absicht.load import StoreResolutionError, resolve_store
+from absicht.markers import MarkerError
+from absicht.markers import sync as sync_marker
+from absicht.models import SCHEMA_VERSION
 from absicht.render import UnknownRefError
 from absicht.verify import (
     VerifyUsageError,
@@ -224,7 +229,39 @@ def marker_sync(
     json_output: JsonOption = False,
 ) -> None:
     """Write or update a repo's marker from the store."""
-    unimplemented(ctx)
+    opts = options(ctx)
+    root, design = _design(opts)
+    try:
+        marker = sync_marker(design, repo, design_url=_design_url(root, repo))
+    except MarkerError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(ExitCode.USAGE) from exc
+    if opts.json_output:
+        typer.echo(
+            json.dumps(
+                {
+                    "schema_version": SCHEMA_VERSION,
+                    "out": str(repo / ".absicht"),
+                    "units": [unit.model_dump(mode="json") for unit in marker.units],
+                }
+            )
+        )
+    else:
+        count = len(marker.units)
+        typer.echo(f"wrote {repo / '.absicht'} ({count} unit{'s' if count != 1 else ''})")
+
+
+def _design_url(store: Path, repo: Path) -> str:
+    """The marker's `design` field: the store root, spelled relative to the
+    repo receiving the marker.
+
+    The one spelling absicht's own store resolution can follow back from a
+    marker today — `resolve_store` reads a relative target against the
+    marker's directory, so a marker and the store it names travel together,
+    and a remote design would be refused until checking one out is supported.
+    Lexical, like `resolve_store` itself: no symlink resolution, just the two
+    places as they were named."""
+    return Path(os.path.relpath(store, repo)).as_posix()
 
 
 @marker_app.command("check")
