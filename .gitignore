@@ -20,3 +20,6 @@ site/
 # under .absicht/ are the truth; this is a fold over them.
 build.json
 .rohrpost/tickets.jsonl
+
+# rp writes this lock next to its log on every invocation.
+.rohrpost/.lock
