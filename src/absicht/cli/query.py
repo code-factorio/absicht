@@ -37,8 +37,9 @@ from absicht.cli._common import (
 from absicht.findings import ExitCode
 from absicht.git import GitError
 from absicht.load import StoreResolutionError, resolve_store
-from absicht.models import SCHEMA_VERSION, Confidence, Design, State
+from absicht.models import SCHEMA_VERSION, Confidence, Design, Element, Ref, State
 from absicht.render import UnknownRefError, neighbourhood
+from absicht.resolve import Index
 
 PANEL = "Step 2 — build, query, look at it"
 """Where these commands appear in `ab --help`."""
@@ -161,6 +162,40 @@ def show(
         typer.echo(view.render_text(include_body=body))
 
 
+_KIND_FIELDS: dict[Kind, str] = {
+    Kind.COMPONENT: "components",
+    Kind.SEAM: "seams",
+    Kind.DATA: "data",
+    Kind.REQUIREMENT: "requirements",
+    Kind.NFR: "non_functionals",
+    Kind.STORY: "stories",
+    Kind.DECISION: "decisions",
+    Kind.REJECTION: "rejections",
+    Kind.QUESTION: "questions",
+    Kind.MILESTONE: "milestones",
+    Kind.EXTERNAL: "externals",
+}
+"""The `Design` field each kind's elements live in: the kind's value plus an
+`s`, except `data` (already collective) and `nfr` (`Design` spells it
+`non_functionals`) — the two mismatches that make a derived plural a trap."""
+
+
+def _milestone_scope(design: Design, ref: str | None) -> frozenset[Ref] | None:
+    """The `scope` of the milestone `ref` names; `None` without `--milestone`.
+
+    An unknown ref — nothing by that id, or an element of another kind — is
+    `USAGE`, the exit-code table's broken invocation, rather than an empty
+    answer a script would read as "the milestone scopes nothing".
+    """
+    if ref is None:
+        return None
+    milestone = next((m for m in design.milestones if m.id == ref), None)
+    if milestone is None:
+        typer.echo(f"--milestone {ref!r}: no milestone in this store has that id", err=True)
+        raise typer.Exit(ExitCode.USAGE)
+    return frozenset(milestone.scope)
+
+
 @app.command("list", rich_help_panel=PANEL)
 def list_elements(
     ctx: typer.Context,
@@ -184,7 +219,53 @@ def list_elements(
     json_output: JsonOption = False,
 ) -> None:
     """List elements of one kind, filtered."""
-    unimplemented(ctx)
+    if owner is not None and unowned:
+        typer.echo("--owner and --unowned are mutually exclusive", err=True)
+        raise typer.Exit(ExitCode.USAGE)
+    opts = options(ctx)
+    design = _design(opts)
+    scope = _milestone_scope(design, milestone)
+    states = frozenset(state) if state else None
+    tags = frozenset(tag) if tag else None
+    orphans = frozenset(Index.from_design(design).orphaned(kind.value)) if orphaned else None
+    elements: tuple[Element, ...] = getattr(design, _KIND_FIELDS[kind])
+    # Every filter is a predicate AND over one kind, applied in id order — the
+    # stable, deterministic answer the spec's no-sort-flag scope asks for.
+    selected = [
+        element
+        for element in sorted(elements, key=lambda element: element.id)
+        if (states is None or element.state in states)
+        and (confidence is None or element.confidence is confidence)
+        and (owner is None or element.owner == owner)
+        and (not unowned or element.owner is None)
+        and (tags is None or not tags.isdisjoint(element.tags))
+        and (scope is None or element.id in scope)
+        and (orphans is None or element.id in orphans)
+    ]
+    output = effective_format(ctx, output_format, opts.json_output, json_member=ListFormat.JSON)
+    if output is ListFormat.JSON:
+        typer.echo(
+            json.dumps(
+                {
+                    "schema_version": SCHEMA_VERSION,
+                    "kind": kind.value,
+                    "elements": [element.model_dump(mode="json") for element in selected],
+                }
+            )
+        )
+    elif selected:
+        # Both prose formats stay silent on an empty answer: a lone blank
+        # line would hand `xargs` one empty argument where no id is.
+        if output is ListFormat.IDS:
+            typer.echo("\n".join(element.id for element in selected))
+        else:
+            width = max(len(element.id) for element in selected)
+            typer.echo(
+                "\n".join(
+                    f"{element.id.ljust(width)}  {element.state}  {element.title}"
+                    for element in selected
+                )
+            )
 
 
 @app.command(rich_help_panel=PANEL)
