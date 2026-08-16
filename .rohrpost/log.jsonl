@@ -88,3 +88,5 @@
 {"id":"01M04SXS3FY85JY17WFVM284ZY","ts":"2026-08-16T08:10:03.247Z","ticket":"qrpj67","op":"comment","actor":"agent/absicht-workflow","text":"Implemented via 7 commit(s): fa77a4966ec8f29d01611f7f87f91c46d53c49d8..328c371daecd62af3c9487a603f6bc888465d076"}
 {"id":"01M04SYTSSFZYWHWM5GJ39DEV0","ts":"2026-08-16T08:10:37.753Z","ticket":"qrpj67","op":"set","actor":"agent/absicht-workflow","set":{"status":"done"},"reason":"spec docs/tasks/21-show.md delivered"}
 {"id":"01M04T7VDDM39NNB597CMK3NJZ","ts":"2026-08-16T08:15:33.293Z","ticket":"p4eeqf","op":"set","actor":"agent/absicht-workflow","set":{"status":"in_progress","assignee":"agent/absicht-workflow"}}
+{"id":"01M04VDGMPFMY1WVF2C6KBETE4","ts":"2026-08-16T08:36:07.446Z","ticket":"p4eeqf","op":"comment","actor":"agent/absicht-workflow","text":"Implemented via 2 commit(s): 580eb0bec02a5f5530f4d3218368ad7e864bcc75..da0eb9b52242fb13fb89d3142dc395c928004d36"}
+{"id":"01M04VDXSGJWMH3FH0EHTXV4Q4","ts":"2026-08-16T08:36:20.913Z","ticket":"p4eeqf","op":"set","actor":"agent/absicht-workflow","set":{"status":"done"},"reason":"spec docs/tasks/22-list.md delivered"}
