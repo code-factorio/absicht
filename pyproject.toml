@@ -163,6 +163,7 @@ layers = [
     "absicht.resolve",
     "absicht.init",
     "absicht.migrate",
+    "absicht.check",
     "absicht.load",
     "absicht.codec",
     "absicht.findings",

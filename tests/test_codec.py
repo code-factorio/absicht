@@ -14,6 +14,8 @@ import pytest
 
 from absicht.codec import (
     CodecError,
+    CodecSyntaxError,
+    CodecValidationError,
     dump_element,
     dump_singleton,
     parse_element,
@@ -270,6 +272,21 @@ def test_a_validation_error_is_translated_not_leaked() -> None:
     """`load` builds findings from the message, so it must name the offending field."""
 
     with pytest.raises(CodecError, match=r"validation failed: id\b"):
+        parse_element(
+            "---\nid: not-a-ref\ntitle: X\n---\n", model=Component, source="components/x.md"
+        )
+
+
+def test_the_two_failure_families_raise_their_own_subclass() -> None:
+    """`check` maps each family to its own rule id (`schema/yaml-syntax` vs
+    `schema/validation`), so the family is told apart here — at the boundary
+    that raises — not guessed from a message one layer up."""
+
+    with pytest.raises(CodecSyntaxError, match="invalid YAML"):
+        parse_element("---\nid: [unclosed\n---\n", model=Component, source="components/x.md")
+    with pytest.raises(CodecSyntaxError, match="front matter"):
+        parse_element("no delimiters at all\n", model=Component, source="components/x.md")
+    with pytest.raises(CodecValidationError, match=r"validation failed: id\b"):
         parse_element(
             "---\nid: not-a-ref\ntitle: X\n---\n", model=Component, source="components/x.md"
         )

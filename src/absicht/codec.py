@@ -19,7 +19,10 @@ The decisions that document leaves open are made here and pinned in
 - the only exception that escapes this module is `CodecError`. The YAML
   parser's and pydantic's own exceptions are translated at the boundary so
   `absicht.load` can turn a bad file into a finding without knowing either
-  library's exception shape.
+  library's exception shape. `CodecError` splits into `CodecSyntaxError` and
+  `CodecValidationError` — the distinction `absicht.check` maps to rule ids —
+  while staying one boundary type for every caller that only cares that a
+  file failed.
 """
 
 from __future__ import annotations
@@ -41,6 +44,15 @@ class CodecError(Exception):
     The message is written for the layer above to lift into a finding as-is:
     it names the record type and the offending field, never a stack trace.
     """
+
+
+class CodecSyntaxError(CodecError):
+    """The text does not read as the format at all: YAML the parser refuses,
+    a document that is not a mapping, or missing/unterminated front matter."""
+
+
+class CodecValidationError(CodecError):
+    """The text parsed, but the record's fields did not validate."""
 
 
 def dump_element(element: Element) -> str:
@@ -87,11 +99,11 @@ def _split_front_matter(text: str) -> tuple[str, str]:
     """Split a file into its front matter and its verbatim body."""
     lines = text.splitlines(keepends=True)
     if not lines or lines[0].strip() != _DELIMITER:
-        raise CodecError(f"no front matter: the file must start with a {_DELIMITER!r} line")
+        raise CodecSyntaxError(f"no front matter: the file must start with a {_DELIMITER!r} line")
     for index, line in enumerate(lines[1:], start=1):
         if line.strip() == _DELIMITER:
             return "".join(lines[1:index]), "".join(lines[index + 1 :])
-    raise CodecError(f"unterminated front matter: no closing {_DELIMITER!r} line")
+    raise CodecSyntaxError(f"unterminated front matter: no closing {_DELIMITER!r} line")
 
 
 def _load_mapping(text: str, *, what: str) -> dict[str, object]:
@@ -99,11 +111,11 @@ def _load_mapping(text: str, *, what: str) -> dict[str, object]:
     try:
         data: object = yaml.safe_load(text)
     except yaml.YAMLError as exc:
-        raise CodecError(f"invalid YAML in {what}: {exc}") from exc
+        raise CodecSyntaxError(f"invalid YAML in {what}: {exc}") from exc
     if data is None:
         return {}
     if not isinstance(data, dict):
-        raise CodecError(f"{what} must be a YAML mapping, not {type(data).__name__}")
+        raise CodecSyntaxError(f"{what} must be a YAML mapping, not {type(data).__name__}")
     return cast("dict[str, object]", data)
 
 
@@ -116,4 +128,4 @@ def _build[R: Record](model: type[R], fields: dict[str, object]) -> R:
             f"{'.'.join(str(part) for part in error['loc']) or '(root)'}: {error['msg']}"
             for error in exc.errors(include_url=False)
         )
-        raise CodecError(f"{model.__name__} validation failed: {problems}") from exc
+        raise CodecValidationError(f"{model.__name__} validation failed: {problems}") from exc

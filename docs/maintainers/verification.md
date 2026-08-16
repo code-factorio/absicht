@@ -91,7 +91,7 @@ rather than whether the code is.
 | xenon max-absolute E | `scripts/verify.sh` | worst block is A (3) | loose on purpose: see below |
 | xenon max-average A, max-modules B | `scripts/verify.sh` | A (2.0) | comfortable, and worth keeping |
 | pyscn max-complexity 15 | `scripts/verify.sh` | nothing near it | loose on purpose; pyscn's default is 10 |
-| mutation ≥ 45% | `MUTATION_FLOOR` in `scripts/verify.sh` | not yet armed | a starting guess, to be revised on first real data |
+| mutation ≥ 45% | `MUTATION_FLOOR` in `scripts/verify.sh` | 86% | a starting guess, to be revised on first real data |
 
 ### Why the complexity ceilings are loose
 
@@ -158,19 +158,18 @@ in `scripts/mutation_score.py`: killed over killed-plus-survived, against
 finished are excluded — they say something about coverage or about mutmut, not
 about whether the tests can tell right from wrong.
 
-The check is **scoped, and currently unarmed.** `MUTATION_SCOPE` in
+The check is **scoped, and armed.** `MUTATION_SCOPE` in
 `scripts/verify.sh` names `model/`, `check.py` and `packet.py`: the places
 where a silent wrong answer is the entire failure mode. A packet that quietly
 omits a `must_hold` ADR is exactly the bug that makes this product worthless,
 and no other check in this file would see it. The renderer and the CLI are not
 worth the runtime.
 
-None of those modules exist yet, so `check_mutation` says so and returns
-success. It arms itself the moment one of them lands — no configuration
-change, no remembering. Until then, `pyproject.toml` also excludes
-`__init__.py`, `__main__.py` and `cli.py`: a version constant and argument
-plumbing, where a mutant survives or dies on Typer's behaviour rather than
-ours.
+`check_mutation` runs whatever in that scope exists — it said so and returned
+success until `absicht.check` landed, the first of the three. `pyproject.toml`
+also excludes `__init__.py`, `__main__.py` and `cli/*.py`: a version constant
+and argument plumbing, where a mutant survives or dies on Typer's behaviour
+rather than ours.
 
 Run `make mutation` yourself when you have changed tests, or when you want to
 know whether a test asserts anything at all.

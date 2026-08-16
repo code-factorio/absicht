@@ -22,10 +22,16 @@ from __future__ import annotations
 import os
 import re
 from dataclasses import dataclass
+from enum import StrEnum
 from pathlib import Path
 from typing import Protocol
 
-from absicht.codec import CodecError, parse_element, parse_singleton
+from absicht.codec import (
+    CodecError,
+    CodecValidationError,
+    parse_element,
+    parse_singleton,
+)
 from absicht.models import (
     Component,
     DataEntity,
@@ -48,6 +54,23 @@ _SYSTEM = "system.yaml"
 _SYSTEM_MISSING = f"{_SYSTEM} is missing: a store needs exactly one System element"
 
 
+class LoadErrorReason(StrEnum):
+    """Which family a load failure belongs to.
+
+    The discriminator `absicht.check` maps to a rule id; without it, mapping
+    a `LoadError` to a finding would mean parsing its message.
+    """
+
+    SYNTAX = "syntax"
+    """The codec could not read the file as the format at all."""
+    VALIDATION = "validation"
+    """The file parsed, but its fields did not validate."""
+    MISSING_SYSTEM = "missing-system"
+    """No `system.yaml`: a store needs exactly one System element."""
+    IO = "io"
+    """The file could not be read, never mind parsed."""
+
+
 @dataclass(frozen=True, slots=True)
 class LoadError:
     """One file that could not be read, and why.
@@ -61,6 +84,9 @@ class LoadError:
 
     message: str
     """What is wrong, in the vocabulary of the caller (a `CodecError` message)."""
+
+    reason: LoadErrorReason
+    """The failure family, so `check` picks a rule id by lookup, not by parsing `message`."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -148,12 +174,14 @@ def load_store(root: Path, *, source: FileSource | None = None) -> LoadedStore:
 def _load_system(root: Path, source: FileSource, errors: list[LoadError]) -> System | None:
     path = root / _SYSTEM
     if not source.exists(path):
-        errors.append(LoadError(path=_SYSTEM, message=_SYSTEM_MISSING))
+        errors.append(
+            LoadError(path=_SYSTEM, message=_SYSTEM_MISSING, reason=LoadErrorReason.MISSING_SYSTEM)
+        )
         return None
     try:
         return parse_singleton(source.read_text(path), model=System)
     except (CodecError, OSError) as exc:
-        errors.append(LoadError(path=_SYSTEM, message=str(exc)))
+        errors.append(LoadError(path=_SYSTEM, message=str(exc), reason=_reason(exc)))
         return None
 
 
@@ -171,8 +199,17 @@ def _load_kind[E: Element](
         try:
             loaded.append(parse_element(source.read_text(path), model=model, source=source_path))
         except (CodecError, OSError) as exc:
-            errors.append(LoadError(path=source_path, message=str(exc)))
+            errors.append(LoadError(path=source_path, message=str(exc), reason=_reason(exc)))
     return tuple(loaded)
+
+
+def _reason(exc: Exception) -> LoadErrorReason:
+    """Classify what one file failed on, for the rule lookup one layer up."""
+    if isinstance(exc, CodecValidationError):
+        return LoadErrorReason.VALIDATION
+    if isinstance(exc, CodecError):  # the base and the syntax subclass alike: not the format
+        return LoadErrorReason.SYNTAX
+    return LoadErrorReason.IO
 
 
 class StoreResolutionError(Exception):

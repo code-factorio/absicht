@@ -21,8 +21,8 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from absicht.check import schema_findings
 
+from absicht.check import schema_findings
 from absicht.findings import Severity
 from absicht.load import LoadedStore, LoadError, LoadErrorReason, load_store
 
@@ -45,7 +45,7 @@ def test_every_load_error_reason_becomes_its_rule_at_error_severity(
 ) -> None:
     loaded = LoadedStore(
         system=None,
-        errors=(LoadError(path="components/x.md", message="what went wrong", reason=reason)),
+        errors=(LoadError(path="components/x.md", message="what went wrong", reason=reason),),
     )
 
     (only,) = schema_findings(loaded)

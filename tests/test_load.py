@@ -29,6 +29,7 @@ from absicht.codec import dump_singleton
 from absicht.load import (
     FileSource,
     LoadError,
+    LoadErrorReason,
     StoreResolutionError,
     WorkingTree,
     load_store,
@@ -117,8 +118,10 @@ def test_broken_reports_its_two_parse_failures_by_name() -> None:
 
     assert garbage.path == "requirements/garbage.md"
     assert "invalid YAML" in garbage.message
+    assert garbage.reason is LoadErrorReason.SYNTAX
     assert bad_anchor.path == "stories/bad-anchor.md"
     assert "not anchored to 'story:bad-anchor'" in bad_anchor.message
+    assert bad_anchor.reason is LoadErrorReason.VALIDATION
 
 
 def test_broken_parses_its_check_layer_defects_without_flagging_them() -> None:
@@ -146,7 +149,11 @@ def test_a_store_without_system_yaml_still_loads_its_elements(tmp_path: Path) ->
 
     assert loaded.system is None
     assert [c.id for c in loaded.components] == ["component:kept"]
-    assert loaded.errors == (LoadError(path="system.yaml", message=_SYSTEM_MISSING),)
+    assert loaded.errors == (
+        LoadError(
+            path="system.yaml", message=_SYSTEM_MISSING, reason=LoadErrorReason.MISSING_SYSTEM
+        ),
+    )
 
 
 def test_an_unparsable_system_yaml_is_one_error_and_a_none_system(tmp_path: Path) -> None:
@@ -203,7 +210,11 @@ def test_an_unreadable_file_is_a_load_error_not_a_crash(tmp_path: Path) -> None:
     loaded = load_store(tmp_path, source=source)
 
     assert loaded.components == ()
-    assert loaded.errors == (LoadError(path="components/locked.md", message="permission denied"),)
+    assert loaded.errors == (
+        LoadError(
+            path="components/locked.md", message="permission denied", reason=LoadErrorReason.IO
+        ),
+    )
 
 
 # ------------------------------------------------------- store location modes
