@@ -143,6 +143,7 @@ IMPLEMENTED = {
     "list",
     "migrate",
     "new",
+    "packet",
     "render",
     "schema",
     "show",

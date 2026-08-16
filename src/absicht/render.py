@@ -7,9 +7,10 @@ gaps`` ("a gaps page, reusing 23-gaps.md's worklist") and the trace paths
 behind ``ab trace REF``; the static site those three become under ``ab
 render`` (docs/tasks/26-render-site.md) and the preview server that serves
 it; plus the one mermaid emitter every ``--format mermaid`` output calls, so
-two diagram spellings cannot drift apart (docs/tasks/27-render-diagrams.md).
-The CLI stays a thin adapter over all of them; the projections and their
-reasoning live here.
+two diagram spellings cannot drift apart (docs/tasks/27-render-diagrams.md),
+and the Markdown document ``ab packet --format md`` writes
+(docs/tasks/32-packet-cli.md). The CLI stays a thin adapter over all of them;
+the projections and their reasoning live here.
 
 Rendering is deterministic because the data under it is: neighbours keep the
 order ``Index`` indexed them in, which is ``models.py``'s field declaration
@@ -24,7 +25,7 @@ import json
 import logging
 import re
 import threading
-from collections.abc import Callable, Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from dataclasses import dataclass
 from datetime import date
 from functools import partial
@@ -34,7 +35,18 @@ from pathlib import Path
 from typing import Any
 
 from absicht.check import expired_externals
-from absicht.models import SCHEMA_VERSION, Design, Element, Question, Ref, State
+from absicht.models import (
+    SCHEMA_VERSION,
+    Criterion,
+    Design,
+    Element,
+    Fidelity,
+    Packet,
+    PacketElement,
+    Question,
+    Ref,
+    State,
+)
 from absicht.resolve import Index, Reference
 
 log = logging.getLogger(__name__)
@@ -565,6 +577,97 @@ def _reaches_target(
                 reaches.add(node)
                 queue.append(node)
     return frozenset(reaches)
+
+
+# --- the packet document -------------------------------------------------------------
+
+
+def packet_markdown(packet: Packet, *, features_dir: str | None = None) -> str:
+    """The ``--format md`` spelling of a ``Packet``: the brief an agent reads
+    end to end (docs/tasks/32-packet-cli.md).
+
+    Scope at full detail and the contract ring summarized to one line each —
+    the ring is context to respect, not something to implement. The obligation
+    sections print ``(none)`` rather than disappearing: "nothing constrains
+    you" and "no rejection forbids anything" are facts an agent acts on, and a
+    missing heading would read as a rendering gap instead.
+
+    ``features_dir`` names where the ``.feature`` files landed when they were
+    rendered, as the caller spelled it — relative, so the document stays
+    byte-identical wherever the packet is written; the criteria section points
+    there for the full Gherkin.
+    """
+    # `assemble` always carries the milestone itself at full fidelity; the
+    # document's header covers it, so Scope is every other full element.
+    milestone = next(element for element in packet.elements if element.ref == packet.milestone)
+    identity = f"`{packet.milestone}`" + (f" — {packet.outcome}" if packet.outcome else "")
+    scope = [
+        element
+        for element in packet.elements
+        if element.fidelity is Fidelity.FULL and element.ref != packet.milestone
+    ]
+    ring = [element for element in packet.elements if element.fidelity is Fidelity.CONTRACT]
+    criteria = [_criterion_text(criterion) for criterion in packet.criteria]
+    if features_dir is not None:
+        criteria.append(f"Full Gherkin: the `.feature` files under `{features_dir}/`.")
+    parts = [
+        [f"# Packet: {milestone.element['title']}"],
+        [identity],
+        _doc_section("## Scope", _scope_blocks(scope)),
+        _doc_section("## Contract ring", [f"- `{e.ref}` — {e.element['title']}" for e in ring]),
+        _doc_section("## Must hold", [f"- `{ref}`" for ref in packet.must_hold]),
+        _doc_section("## May decide", [f"- {freedom}" for freedom in packet.may_decide]),
+        _doc_section("## Unresolved", [f"- `{ref}`" for ref in packet.unresolved]),
+        _doc_section("## Rejections", [f"- `{ref}`" for ref in packet.rejections]),
+        _doc_section("## Criteria", criteria),
+    ]
+    return "\n\n".join("\n".join(part) for part in parts) + "\n"
+
+
+def _doc_section(heading: str, body: list[str]) -> list[str]:
+    """One section: heading, a blank line, then the body — ``(none)`` when the
+    body is empty, per the module docstring's rule about absent obligations."""
+    return [heading, "", *(body or ["(none)"])]
+
+
+def _scope_blocks(elements: Sequence[PacketElement]) -> list[str]:
+    """The Scope section's body: one block per element, a blank line between."""
+    lines: list[str] = []
+    for position, element in enumerate(elements):
+        if position:
+            lines.append("")
+        lines += _element_block(element)
+    return lines
+
+
+def _element_block(element: PacketElement) -> list[str]:
+    """One scope element at full fidelity: title heading, ref, its own fields
+    in declaration order minus the heading four, prose last — ``show --format
+    md``'s shape, so the two documents read the same way."""
+    fields = element.element
+    lines = [f"### {fields['title']}", "", f"`{element.ref}`"]
+    lines += [
+        f"- {name}: {_value_text(value)}"
+        for name, value in fields.items()
+        if name not in ("id", "title", "source", "body") and value not in ("", None, [])
+    ]
+    if body := fields["body"]:
+        lines += ["", str(body).rstrip()]
+    return lines
+
+
+def _criterion_text(criterion: Criterion) -> str:
+    """One criterion as a bullet: behavioural as its given/when/then clauses
+    on one line, the other kinds by their statement. This is the index of the
+    bar; the full Gherkin is the ``.feature`` files' job."""
+    if criterion.statement:
+        return f"- `{criterion.id}` ({criterion.kind.value}) — {criterion.statement}"
+    clauses = []
+    if criterion.given:
+        clauses.append("given " + ", ".join(criterion.given))
+    clauses.append("when " + criterion.when)
+    clauses.append("then " + ", ".join(criterion.then))
+    return f"- `{criterion.id}` — " + "; ".join(clauses)
 
 
 # --- the site --------------------------------------------------------------------

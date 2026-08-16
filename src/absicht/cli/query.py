@@ -78,7 +78,8 @@ PANEL = "Step 2 — build, query, look at it"
 
 
 def _design(opts: GlobalOptions) -> tuple[Path, Design]:
-    """The load → resolve path every command in this group shares: the
+    """The load → resolve path every command needing the resolved design
+    shares (this group's queries, `packet` in the handoff group): the
     resolved store root alongside the `Design`, because `layout` both reads
     the graph and writes `layout.yaml` back into the store it came from.
 

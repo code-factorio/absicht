@@ -8,6 +8,8 @@ The packet is the unit of output and the thing the whole project is a bet on.
 
 from __future__ import annotations
 
+import json
+from dataclasses import replace
 from pathlib import Path
 from typing import Annotated
 
@@ -19,8 +21,18 @@ from absicht.cli._common import (
     DEFAULT_PACKET_DIR,
     JsonOption,
     PacketFormat,
+    effective_format,
+    options,
     unimplemented,
 )
+from absicht.cli.query import _design
+from absicht.findings import ExitCode
+from absicht.gherkin import render_feature, scenario_digest
+from absicht.git import GitError, current_rev, repo_root, resolve_rev
+from absicht.models import SCHEMA_VERSION, Criterion, Design, Packet
+from absicht.packet import PacketFindingError, PacketUsageError, assemble
+from absicht.render import packet_markdown
+from absicht.resolve import Index
 
 PANEL = "Step 3 — hand work to an agent"
 """Where these commands appear in `ab --help`."""
@@ -59,7 +71,11 @@ def packet(
     ] = True,
     features_dir: Annotated[
         Path,
-        typer.Option("--features-dir", metavar="DIR"),
+        typer.Option(
+            "--features-dir",
+            metavar="DIR",
+            help="Where the .feature files land: under --out, or under the cwd with --stdout.",
+        ),
     ] = DEFAULT_FEATURES_DIR,
     rev: Annotated[
         str | None,
@@ -67,7 +83,13 @@ def packet(
     ] = None,
     seal: Annotated[
         bool,
-        typer.Option("--seal", help="Write packet.lock so ab verify can run offline later."),
+        typer.Option(
+            "--seal",
+            help=(
+                "Write packet.lock (design rev, scenario digest) into --out for ab verify. "
+                "Needs --features; refuses --stdout."
+            ),
+        ),
     ] = False,
     json_output: JsonOption = False,
 ) -> None:
@@ -77,7 +99,186 @@ def packet(
     decisions and NFRs that must hold, explicit freedoms, known unknowns, and the
     rejections that must not be re-proposed.
     """
-    unimplemented(ctx)
+    opts = options(ctx)
+    _refuse(seal=seal, to_stdout=to_stdout, features=features, horizon=horizon)
+    # The command's own --rev and the root's mean the same thing here: either
+    # spelling builds the same revision, so the command's wins when both are
+    # given and `_design` sees one resolved answer either way.
+    at = rev if rev is not None else opts.rev
+    root, design = _design(replace(opts, rev=at))
+    assembled = _assembled(design, milestone, horizon=horizon, include=include, exclude=exclude)
+
+    out_dir = out if out is not None else DEFAULT_PACKET_DIR / milestone.removeprefix("milestone:")
+    rendered = _feature_files(design, assembled.criteria) if features else {}
+    # Features are a real directory write even under --stdout: the packet body
+    # is what goes to stdout, not the files the digest seals.
+    features_root = features_dir if to_stdout else out_dir / features_dir
+    for name, content in rendered.items():
+        target = features_root / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding="utf-8")
+    if seal:
+        assembled = _sealed(assembled, rendered, at, root)
+
+    output = effective_format(ctx, output_format, opts.json_output, json_member=PacketFormat.JSON)
+    body = (
+        assembled.model_dump_json(indent=2) + "\n"
+        if output is PacketFormat.JSON
+        else packet_markdown(assembled, features_dir=str(features_dir) if features else None)
+    )
+    if to_stdout:
+        # `nl=False`: the body ends in the newline a file gets, so stdout is
+        # byte-identical to what a write would have produced.
+        typer.echo(body, nl=False)
+        return
+    _write_artifacts(
+        assembled,
+        body,
+        out_dir=out_dir,
+        output=output,
+        rendered=rendered,
+        features_root=features_root,
+        sealed=seal,
+        json_output=opts.json_output,
+    )
+
+
+def _refuse(*, seal: bool, to_stdout: bool, features: bool, horizon: int) -> None:
+    """The invocations that defeat their own purpose, each refused before any
+    store is read: a seal with nowhere durable to put the lock, a seal over no
+    rendered scenarios (silently turning features back on would override an
+    explicit `--no-features`), and a negative ring count."""
+    if seal and to_stdout:
+        typer.echo(
+            "--seal writes packet.lock into --out; --stdout leaves nowhere durable to put it",
+            err=True,
+        )
+        raise typer.Exit(ExitCode.USAGE)
+    if seal and not features:
+        typer.echo(
+            "--seal seals the rendered .feature files; --no-features leaves nothing to seal",
+            err=True,
+        )
+        raise typer.Exit(ExitCode.USAGE)
+    if horizon < 0:
+        typer.echo("--horizon counts rings out from the scope; it cannot be negative", err=True)
+        raise typer.Exit(ExitCode.USAGE)
+
+
+def _assembled(
+    design: Design,
+    milestone: str,
+    *,
+    horizon: int,
+    include: list[str] | None,
+    exclude: list[str] | None,
+) -> Packet:
+    """`absicht.packet.assemble` with its two failure vocabularies mapped to
+    the exit-code table: a broken invocation is `USAGE`, a milestone that
+    names no scope is `FINDINGS` — a true statement about the design."""
+    try:
+        return assemble(
+            design,
+            Index.from_design(design),
+            milestone,
+            horizon=horizon,
+            include=frozenset(include or ()),
+            exclude=frozenset(exclude or ()),
+        )
+    except PacketUsageError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(ExitCode.USAGE) from exc
+    except PacketFindingError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(ExitCode.FINDINGS) from exc
+
+
+def _sealed(packet: Packet, rendered: dict[str, str], at: str | None, root: Path) -> Packet:
+    """The packet stamped with what `packet.lock` will carry — the design rev
+    and the digest of the files just rendered — so the two cannot drift."""
+    try:
+        repo = repo_root(root)
+        design_rev = resolve_rev(at, repo) if at is not None else current_rev(repo)
+    except GitError as exc:
+        typer.echo(f"--seal needs the store's git history: {exc}", err=True)
+        raise typer.Exit(ExitCode.USAGE) from exc
+    return packet.model_copy(
+        update={"design_rev": design_rev, "scenarios_digest": scenario_digest(rendered)}
+    )
+
+
+def _write_artifacts(
+    packet: Packet,
+    body: str,
+    *,
+    out_dir: Path,
+    output: PacketFormat,
+    rendered: dict[str, str],
+    features_root: Path,
+    sealed: bool,
+    json_output: bool,
+) -> None:
+    """The durable half of the command: the packet body into `--out`, the
+    `packet.lock` beside it when sealed, and a status line naming everything
+    written — the `--json` envelope of `00-conventions.md` when asked for."""
+    out_dir.mkdir(parents=True, exist_ok=True)
+    body_path = out_dir / f"packet.{output.value}"
+    body_path.write_text(body, encoding="utf-8")
+    written = [f"wrote {body_path}"]
+    if rendered:
+        count = len(rendered)
+        written.append(f"wrote {features_root} ({count} feature file{'s' if count > 1 else ''})")
+    if sealed:
+        # JSON, not YAML: machine-read by `ab verify`, never hand-authored,
+        # so it sides with the artifact rather than the store's files.
+        lock_path = out_dir / "packet.lock"
+        lock_path.write_text(
+            json.dumps(
+                {
+                    "schema_version": SCHEMA_VERSION,
+                    "design_rev": packet.design_rev,
+                    "scenarios_digest": packet.scenarios_digest,
+                },
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        written.append(f"wrote {lock_path}")
+    if json_output:
+        envelope: dict[str, object] = {
+            "schema_version": SCHEMA_VERSION,
+            "out": str(out_dir),
+            "packet": str(body_path),
+        }
+        if rendered:
+            envelope["features"] = str(features_root)
+        if sealed:
+            envelope["lock"] = str(out_dir / "packet.lock")
+        typer.echo(json.dumps(envelope))
+    else:
+        typer.echo("\n".join(written))
+
+
+def _feature_files(design: Design, criteria: tuple[Criterion, ...]) -> dict[str, str]:
+    """The ``.feature`` files for a packet's criteria: one per story behind
+    them, named by the story's slug, criteria in the order the packet carries.
+
+    The file names are part of what ``scenario_digest`` hashes, so they are
+    the contract ``packet.lock`` seals — ``ab features`` (docs/tasks/
+    33-features.md) walks its own milestone but must not spell them
+    differently. Every criterion a packet carries is anchored to a story of
+    the design, ``assemble``'s own selection rule."""
+    stories = {story.id: story for story in design.stories}
+    grouped: dict[str, list[Criterion]] = {}
+    for criterion in criteria:
+        grouped.setdefault(criterion.id.rsplit("#", 1)[0], []).append(criterion)
+    return {
+        f"{story_id.removeprefix('story:')}.feature": render_feature(
+            stories[story_id], tuple(group)
+        )
+        for story_id, group in grouped.items()
+    }
 
 
 @app.command(rich_help_panel=PANEL)

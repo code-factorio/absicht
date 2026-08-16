@@ -30,8 +30,11 @@ is ``tests/test_packet.py``'s; here it is the command around it:
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -80,6 +83,20 @@ def _git(repo: Path, *args: str) -> str:
     return subprocess.run(
         ["git", "-C", str(repo), *args], capture_output=True, text=True, check=True
     ).stdout
+
+
+@contextmanager
+def _cwd(directory: Path) -> Iterator[Path]:
+    """Run with the cwd moved into a directory the test owns, so a relative
+    default ``--out`` (or ``--features-dir`` under ``--stdout``) lands there —
+    typer's CliRunner has no isolated filesystem of its own."""
+    directory.mkdir(parents=True, exist_ok=True)
+    origin = Path.cwd()
+    os.chdir(directory)
+    try:
+        yield directory
+    finally:
+        os.chdir(origin)
 
 
 def _as_repo(store: Path) -> None:
@@ -186,18 +203,18 @@ def test_the_default_out_is_named_by_the_milestone_slug(tmp_path: Path) -> None:
     """``.absicht/build/packets/m1`` — the slug the id carries after its
     ``milestone:`` prefix, not the whole id and not the prefix's own spelling."""
 
-    with runner.isolated_filesystem(temp_dir=tmp_path) as cwd:
+    with _cwd(tmp_path / "cwd") as cwd:
         result = _packet()
 
         assert result.exit_code == ExitCode.OK
-        assert (Path(cwd) / ".absicht" / "build" / "packets" / "m1" / "packet.md").is_file()
-        assert not (Path(cwd) / ".absicht" / "build" / "packets" / "milestone:m1").exists()
+        assert (cwd / ".absicht" / "build" / "packets" / "m1" / "packet.md").is_file()
+        assert not (cwd / ".absicht" / "build" / "packets" / "milestone:m1").exists()
 
 
 def test_stdout_prints_the_body_byte_identical_and_writes_no_packet(tmp_path: Path) -> None:
     written = _body(tmp_path / "written")
 
-    with runner.isolated_filesystem(temp_dir=tmp_path) as cwd:
+    with _cwd(tmp_path / "cwd") as cwd:
         result = _packet("--out", str(tmp_path / "elsewhere"), "--stdout")
 
         assert result.exit_code == ExitCode.OK
@@ -206,18 +223,20 @@ def test_stdout_prints_the_body_byte_identical_and_writes_no_packet(tmp_path: Pa
         assert not (tmp_path / "elsewhere").exists()
         # Features are a real directory write even under --stdout: they land
         # relative to the cwd, which is the decision --help documents.
-        assert (Path(cwd) / "features" / "cancel-order.feature").is_file()
+        assert (cwd / "features" / "cancel-order.feature").is_file()
 
 
 def test_no_features_leaves_no_features_dir_and_no_note(tmp_path: Path) -> None:
     out = tmp_path / "packet"
 
-    result = _packet("--out", str(out), "--no-features", "--json")
+    plain = _packet("--out", str(out), "--no-features")
+    as_json = _packet("--out", str(tmp_path / "json"), "--no-features", "--json")
 
-    assert result.exit_code == ExitCode.OK
+    assert plain.exit_code == ExitCode.OK
+    assert as_json.exit_code == ExitCode.OK
     assert not (out / "features").exists()
     assert "features/" not in (out / "packet.md").read_text(encoding="utf-8")
-    assert "features" not in json.loads(result.stdout)
+    assert "features" not in json.loads(as_json.stdout)
 
 
 def test_features_dir_names_where_they_land(tmp_path: Path) -> None:
@@ -251,8 +270,8 @@ def test_seal_writes_a_lock_matching_the_repo_and_the_rendered_features(
     shutil.copytree(CLEAN, store)
     _as_repo(store)
 
-    sealed = _packet("--out", str(tmp_path / "sealed"), "--seal")
-    result = _packet("--out", str(tmp_path / "body"), "--seal", "--format", "json")
+    sealed = _packet("--out", str(tmp_path / "sealed"), "--seal", store=store)
+    result = _packet("--out", str(tmp_path / "body"), "--seal", "--format", "json", store=store)
 
     assert sealed.exit_code == ExitCode.OK
     assert result.exit_code == ExitCode.OK
@@ -347,8 +366,8 @@ def test_a_packet_at_a_rev_reflects_that_revs_store(tmp_path: Path) -> None:
     _git(store, "commit", "-qm", "c2")
     argv = ["--stdout", "--format", "json", "--no-features"]
 
-    on_working_tree = _packet(*argv)
-    at_rev = _packet(*argv, f"--rev={first}")
+    on_working_tree = _packet(*argv, store=store)
+    at_rev = _packet(*argv, f"--rev={first}", store=store)
     from_root = runner.invoke(
         app, ["--store", str(store), "--rev", first, "packet", "milestone:m1", *argv]
     )
@@ -370,7 +389,7 @@ def test_seal_at_a_rev_stamps_that_revs_sha(tmp_path: Path) -> None:
     _git(store, "add", "-A")
     _git(store, "commit", "-qm", "c2")
 
-    result = _packet("--out", str(tmp_path / "out"), "--seal", f"--rev={first}")
+    result = _packet("--out", str(tmp_path / "out"), "--seal", f"--rev={first}", store=store)
 
     assert result.exit_code == ExitCode.OK
     lock = json.loads((tmp_path / "out" / "packet.lock").read_text(encoding="utf-8"))

@@ -1,0 +1,47 @@
+# serializer version: 1
+# name: test_the_md_document_is_snapshotted
+  '''
+  # Packet: Cancellation MVP
+  
+  `milestone:m1` — A customer can cancel a refundable order.
+  
+  ## Scope
+  
+  ### Cancellation
+  
+  `component:cancellation`
+  - state: constrained
+  - confidence: assumed
+  - responsibility: Decide whether an order can still be cancelled, and start the refund.
+  - consumes: seam:order-events
+  
+  ## Contract ring
+  
+  - `requirement:cancel-orders` — Orders can be cancelled
+  - `seam:order-events` — Order events
+  
+  ## Must hold
+  
+  (none)
+  
+  ## May decide
+  
+  (none)
+  
+  ## Unresolved
+  
+  (none)
+  
+  ## Rejections
+  
+  (none)
+  
+  ## Criteria
+  
+  - `story:cancel-order#ac-1` — when the customer cancels a refundable order; then the order is cancelled, the refund starts
+  - `story:cancel-order#ac-2` — given an order that has already shipped; when the customer asks to cancel it; then cancellation is refused
+  - `story:cancel-order#ac-3` (structural) — cancellation only consumes the order-events seam
+  Full Gherkin: the `.feature` files under `features/`.
+  
+  '''
+# ---
