@@ -2,10 +2,11 @@
 
 `resolve` is the seam between "the store as files" and "the design as a
 graph": `load` walks a directory into per-kind tuples, this module folds them
-into the `Design` everything downstream reads, and `Index` adds the two
-lookups that `show`, `list`, `gaps` and `trace` all need and should not each
-rebuild — an element by id, and "what points at this ref", which `Element`'s
-own fields cannot answer because references are one-directional by design.
+into the `Design` everything downstream reads, and `Index` adds the lookups
+that `show`, `list`, `gaps` and `trace` all need and should not each rebuild —
+an element by id, and each direction of its references ("what points at this
+ref", "what this ref points at"), which `Element`'s own fields cannot answer
+because references are one-directional by design.
 
 This is deliberately not validation. A dangling ref simply never becomes a
 key in the index (`check` turns it into a finding via `iter_references`), a
@@ -157,26 +158,34 @@ class Index:
     none should rebuild.
 
     Not a graph library — the project's graphs are small and the need is
-    narrow, so `trace` does its own traversal over exactly these two mappings
+    narrow, so `trace` does its own traversal over exactly these mappings
     rather than this module growing one.
     """
 
     by_id: dict[Ref, Element]
     referenced_by: dict[Ref, tuple[Reference, ...]]
+    references_from: dict[Ref, tuple[Reference, ...]]
+    """The mirror of `referenced_by`: what each element points at, which
+    `show` walks for its outgoing side. It keeps edges `referenced_by` cannot
+    hold — a source is always an element, so a dangling target still has its
+    outgoing edge here, where `check`'s readers can find it."""
 
     @classmethod
     def from_design(cls, design: Design) -> Index:
         by_id = {element.id: element for element in _elements(design)}
         incoming: dict[Ref, list[Reference]] = {}
+        outgoing: dict[Ref, list[Reference]] = {}
         for reference in iter_references(design):
             # A target that is not an element is a dangling ref: it gets no
             # entry, because nothing that exists was pointed at. The edge
             # stays in `iter_references` for `check` to report.
             if reference.target in by_id:
                 incoming.setdefault(reference.target, []).append(reference)
+            outgoing.setdefault(reference.source, []).append(reference)
         return cls(
             by_id=by_id,
             referenced_by={target: tuple(refs) for target, refs in incoming.items()},
+            references_from={source: tuple(refs) for source, refs in outgoing.items()},
         )
 
     def orphaned(self, kind: str | None = None) -> tuple[Ref, ...]:

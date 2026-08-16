@@ -23,6 +23,7 @@ from absicht.cli._common import (
     JsonOption,
     Kind,
     ReportFormat,
+    effective_format,
     options,
 )
 from absicht.codec import dump_element
@@ -197,7 +198,10 @@ def check(
         exclude=set(exclude_rule or ()),
         min_severity=severity,
     )
-    _render(report, _effective_format(ctx, output_format, opts.json_output))
+    _render(
+        report,
+        effective_format(ctx, output_format, opts.json_output, json_member=ReportFormat.JSON),
+    )
     raise typer.Exit(report.exit_code(strict=strict))
 
 
@@ -271,22 +275,6 @@ def _only_changed(report: Report, root: Path, base: str) -> Report:
             f for f in report.findings if f.source is None or prefix / f.source in changed
         )
     )
-
-
-def _effective_format(
-    ctx: typer.Context, output_format: ReportFormat, json_output: bool
-) -> ReportFormat:
-    """`--json` is the json member of `--format` only while `--format` was
-    left at its default; an explicitly passed `--format` wins (docs/adr/0001).
-
-    The parameter source is compared by name rather than by importing
-    `click.core.ParameterSource`: click is typer's dependency, not ours, and
-    the deps gate holds that line.
-    """
-    source = ctx.get_parameter_source("output_format")
-    if json_output and (source is None or source.name == "DEFAULT"):
-        return ReportFormat.JSON
-    return output_format
 
 
 def _render(report: Report, output_format: ReportFormat) -> None:

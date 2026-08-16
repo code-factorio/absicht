@@ -167,6 +167,25 @@ def color_enabled(no_color: bool) -> bool:
     return sys.stdout.isatty()
 
 
+def effective_format[F: StrEnum](
+    ctx: typer.Context, output_format: F, json_output: bool, *, json_member: F
+) -> F:
+    """``--json`` selects the ``json`` member of ``--format`` only while
+    ``--format`` was left at its default; an explicitly passed ``--format``
+    wins (docs/adr/0001 — closed, so every ``--format`` command shares this
+    one spelling of it).
+
+    The parameter source is compared by name rather than by importing
+    ``click.core.ParameterSource``: click is typer's dependency, not ours, and
+    the deps gate holds that line. The command's parameter must be named
+    ``output_format``, which is what the source is looked up by.
+    """
+    source = ctx.get_parameter_source("output_format")
+    if json_output and (source is None or source.name == "DEFAULT"):
+        return json_member
+    return output_format
+
+
 def unimplemented(ctx: typer.Context) -> NoReturn:
     """Refuse a command that exists in the surface but has no body yet.
 

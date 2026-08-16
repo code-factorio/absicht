@@ -160,6 +160,7 @@ type = "layers"
 layers = [
     "absicht.__main__",
     "absicht.cli",
+    "absicht.render",
     "absicht.init",
     "absicht.new",
     "absicht.migrate",

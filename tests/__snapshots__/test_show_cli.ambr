@@ -1,0 +1,23 @@
+# serializer version: 1
+# name: test_the_text_format_is_snapshotted
+  '''
+  component:orders — Orders
+    state: specified
+    confidence: assumed
+    responsibility: Take orders and record what happened to them.
+    contains: component:catalog
+    provides: seam:order-events
+    owns_data: data:order
+  
+  points at:
+    component:catalog (contains)
+    seam:order-events (provides)
+    data:order (owns_data)
+  
+  referenced by:
+    seam:order-events (provider)
+    data:order (owner_component)
+    decision:event-log (applies_to)
+  
+  '''
+# ---

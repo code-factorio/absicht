@@ -23,22 +23,45 @@ from absicht.cli._common import (
     DEFAULT_SITE_OUT,
     DiagramFormat,
     DocFormat,
+    GlobalOptions,
     JsonOption,
     Kind,
     ListFormat,
     Overlay,
     PlainFormat,
     TraceFormat,
+    effective_format,
     options,
     unimplemented,
 )
 from absicht.findings import ExitCode
 from absicht.git import GitError
 from absicht.load import StoreResolutionError, resolve_store
-from absicht.models import SCHEMA_VERSION, Confidence, State
+from absicht.models import SCHEMA_VERSION, Confidence, Design, State
+from absicht.render import UnknownRefError, neighbourhood
 
 PANEL = "Step 2 — build, query, look at it"
 """Where these commands appear in `ab --help`."""
+
+
+def _design(opts: GlobalOptions) -> Design:
+    """The load → resolve path every command in this group shares.
+
+    One spelling of the three ways a query invocation breaks: no store, or a
+    `--rev` that does not resolve / a store outside any repository (git reads,
+    not findings), are `USAGE`; a store whose files did not all load is
+    `build`'s `FINDINGS`-level refusal — a partial artifact is not an answer
+    to a query either (docs/tasks/21-show.md's reuse rule).
+    """
+    try:
+        root = resolve_store(opts.store)
+        return build_design(root, rev=opts.rev)
+    except (StoreResolutionError, GitError, ValueError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(ExitCode.USAGE) from exc
+    except BuildError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(ExitCode.FINDINGS) from exc
 
 
 @app.command(rich_help_panel=PANEL)
@@ -58,21 +81,7 @@ def build(
     reads this and nothing else.
     """
     opts = options(ctx)
-    try:
-        root = resolve_store(opts.store)
-        design = build_design(root, rev=opts.rev)
-    except StoreResolutionError as exc:
-        typer.echo(str(exc), err=True)
-        raise typer.Exit(ExitCode.USAGE) from exc
-    except (GitError, ValueError) as exc:
-        # `--rev` reads the store out of git: a rev that does not resolve, or
-        # a store outside any repository, is a broken invocation, not a
-        # finding about the design.
-        typer.echo(str(exc), err=True)
-        raise typer.Exit(ExitCode.USAGE) from exc
-    except BuildError as exc:
-        typer.echo(str(exc), err=True)
-        raise typer.Exit(ExitCode.FINDINGS) from exc
+    design = _design(opts)
     text = design_json(design)
     if to_stdout:
         # `nl=False`: the document ends in the newline a file gets, so stdout
@@ -123,13 +132,33 @@ def show(
     output_format: Annotated[DocFormat, typer.Option("--format")] = DocFormat.TEXT,
     depth: Annotated[
         int,
-        typer.Option("--depth", metavar="N", help="How far to follow refs."),
+        typer.Option(
+            "--depth",
+            metavar="N",
+            help="How far to follow the element's own refs; the inbound side stays one hop.",
+        ),
     ] = 1,
     body: Annotated[bool, typer.Option("--body/--no-body", help="Include the prose body.")] = True,
     json_output: JsonOption = False,
 ) -> None:
     """One element, resolved: its own fields, what points at it, what it points at."""
-    unimplemented(ctx)
+    opts = options(ctx)
+    if depth < 0:
+        typer.echo("--depth counts hops out from REF; it cannot be negative", err=True)
+        raise typer.Exit(ExitCode.USAGE)
+    design = _design(opts)
+    try:
+        view = neighbourhood(design, ref, depth=depth)
+    except UnknownRefError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(ExitCode.USAGE) from exc
+    output = effective_format(ctx, output_format, opts.json_output, json_member=DocFormat.JSON)
+    if output is DocFormat.JSON:
+        typer.echo(json.dumps(view.render_json(include_body=body)))
+    elif output is DocFormat.MD:
+        typer.echo(view.render_markdown(include_body=body))
+    else:
+        typer.echo(view.render_text(include_body=body))
 
 
 @app.command("list", rich_help_panel=PANEL)
