@@ -42,3 +42,5 @@ This is the opensource project `absicht`
   first find out — a hook that fails on commit means you skipped a step.
 - When you write tests, commit the tests first and follow up with the actual implementation.
   That way a reviewer can verify that you didn't cheat with your tests.
+#### Worktrees
+Use .worktrees/ to create worktrees if you need them
