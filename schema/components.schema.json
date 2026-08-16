@@ -1,0 +1,136 @@
+{
+  "$defs": {
+    "Confidence": {
+      "description": "How much we trust this, independent of how complete it is.",
+      "enum": [
+        "assumed",
+        "reviewed",
+        "verified"
+      ],
+      "title": "Confidence",
+      "type": "string"
+    },
+    "State": {
+      "description": "How complete an element is, and what an agent may do about it.",
+      "enum": [
+        "specified",
+        "constrained",
+        "delegated",
+        "unknown",
+        "observed",
+        "out_of_scope"
+      ],
+      "title": "State",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "pattern": "^[a-z]+:[a-z0-9][a-z0-9-]*$",
+      "title": "Id",
+      "type": "string"
+    },
+    "title": {
+      "minLength": 1,
+      "title": "Title",
+      "type": "string"
+    },
+    "state": {
+      "$ref": "#/$defs/State",
+      "default": "unknown"
+    },
+    "confidence": {
+      "$ref": "#/$defs/Confidence",
+      "default": "assumed"
+    },
+    "owner": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Owner"
+    },
+    "tags": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "title": "Tags",
+      "type": "array"
+    },
+    "source": {
+      "default": "",
+      "description": "Path within the store. Written by the loader.",
+      "title": "Source",
+      "type": "string"
+    },
+    "body": {
+      "default": "",
+      "description": "Prose, verbatim. Never parsed.",
+      "title": "Body",
+      "type": "string"
+    },
+    "responsibility": {
+      "default": "",
+      "title": "Responsibility",
+      "type": "string"
+    },
+    "contains": {
+      "default": [],
+      "items": {
+        "pattern": "^[a-z]+:[a-z0-9][a-z0-9-]*$",
+        "type": "string"
+      },
+      "title": "Contains",
+      "type": "array"
+    },
+    "consumes": {
+      "default": [],
+      "items": {
+        "pattern": "^[a-z]+:[a-z0-9][a-z0-9-]*$",
+        "type": "string"
+      },
+      "title": "Consumes",
+      "type": "array"
+    },
+    "provides": {
+      "default": [],
+      "items": {
+        "pattern": "^[a-z]+:[a-z0-9][a-z0-9-]*$",
+        "type": "string"
+      },
+      "title": "Provides",
+      "type": "array"
+    },
+    "owns_data": {
+      "default": [],
+      "items": {
+        "pattern": "^[a-z]+:[a-z0-9][a-z0-9-]*$",
+        "type": "string"
+      },
+      "title": "Owns Data",
+      "type": "array"
+    },
+    "implemented_by": {
+      "default": [],
+      "description": "\"repo#path\". The authoritative side of the link; markers are hints.",
+      "items": {
+        "type": "string"
+      },
+      "title": "Implemented By",
+      "type": "array"
+    }
+  },
+  "required": [
+    "id",
+    "title"
+  ],
+  "title": "Component",
+  "type": "object"
+}

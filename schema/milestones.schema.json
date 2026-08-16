@@ -1,0 +1,154 @@
+{
+  "$defs": {
+    "Confidence": {
+      "description": "How much we trust this, independent of how complete it is.",
+      "enum": [
+        "assumed",
+        "reviewed",
+        "verified"
+      ],
+      "title": "Confidence",
+      "type": "string"
+    },
+    "State": {
+      "description": "How complete an element is, and what an agent may do about it.",
+      "enum": [
+        "specified",
+        "constrained",
+        "delegated",
+        "unknown",
+        "observed",
+        "out_of_scope"
+      ],
+      "title": "State",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "description": "A vertical slice. A selection over the model, plus the delta.",
+  "properties": {
+    "id": {
+      "pattern": "^[a-z]+:[a-z0-9][a-z0-9-]*$",
+      "title": "Id",
+      "type": "string"
+    },
+    "title": {
+      "minLength": 1,
+      "title": "Title",
+      "type": "string"
+    },
+    "state": {
+      "$ref": "#/$defs/State",
+      "default": "unknown"
+    },
+    "confidence": {
+      "$ref": "#/$defs/Confidence",
+      "default": "assumed"
+    },
+    "owner": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Owner"
+    },
+    "tags": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "title": "Tags",
+      "type": "array"
+    },
+    "source": {
+      "default": "",
+      "description": "Path within the store. Written by the loader.",
+      "title": "Source",
+      "type": "string"
+    },
+    "body": {
+      "default": "",
+      "description": "Prose, verbatim. Never parsed.",
+      "title": "Body",
+      "type": "string"
+    },
+    "outcome": {
+      "default": "",
+      "title": "Outcome",
+      "type": "string"
+    },
+    "includes": {
+      "default": [],
+      "items": {
+        "pattern": "^[a-z]+:[a-z0-9][a-z0-9-]*$",
+        "type": "string"
+      },
+      "title": "Includes",
+      "type": "array"
+    },
+    "scope": {
+      "default": [],
+      "items": {
+        "pattern": "^[a-z]+:[a-z0-9][a-z0-9-]*$",
+        "type": "string"
+      },
+      "title": "Scope",
+      "type": "array"
+    },
+    "must_hold": {
+      "default": [],
+      "items": {
+        "pattern": "^[a-z]+:[a-z0-9][a-z0-9-]*$",
+        "type": "string"
+      },
+      "title": "Must Hold",
+      "type": "array"
+    },
+    "may_decide": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "title": "May Decide",
+      "type": "array"
+    },
+    "unresolved": {
+      "default": [],
+      "items": {
+        "pattern": "^[a-z]+:[a-z0-9][a-z0-9-]*$",
+        "type": "string"
+      },
+      "title": "Unresolved",
+      "type": "array"
+    },
+    "done_when": {
+      "default": [],
+      "items": {
+        "pattern": "^[a-z]+:[a-z0-9][a-z0-9-]*#ac-\\d+$",
+        "type": "string"
+      },
+      "title": "Done When",
+      "type": "array"
+    },
+    "depends_on": {
+      "default": [],
+      "items": {
+        "pattern": "^[a-z]+:[a-z0-9][a-z0-9-]*$",
+        "type": "string"
+      },
+      "title": "Depends On",
+      "type": "array"
+    }
+  },
+  "required": [
+    "id",
+    "title"
+  ],
+  "title": "Milestone",
+  "type": "object"
+}
