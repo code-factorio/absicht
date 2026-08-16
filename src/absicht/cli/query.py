@@ -10,6 +10,7 @@ the rest of this group are projections of it.
 from __future__ import annotations
 
 import json
+from contextlib import suppress
 from datetime import date
 from pathlib import Path
 from typing import Annotated
@@ -58,12 +59,13 @@ from absicht.models import (
     State,
 )
 from absicht.render import (
-    EXTERNAL_EXPIRED,
-    QUESTION_OPEN,
     QUESTION_OVERDUE,
     Gap,
+    SiteServer,
     UnknownRefError,
+    generate_site,
     neighbourhood,
+    reasons_text,
     trace_paths,
     worklist,
 )
@@ -312,20 +314,6 @@ def _blocks(element: Element, target: Element) -> bool:
     return isinstance(target, Milestone) and element.id in target.unresolved
 
 
-def _reasons_text(gap: Gap) -> str:
-    """Every reason on one stretch of a worklist line, the dated ones with
-    their date — the fact a reader triages on."""
-    parts: list[str] = []
-    for reason in gap.reasons:
-        if reason in (QUESTION_OPEN, QUESTION_OVERDUE) and gap.due_on is not None:
-            parts.append(f"{reason} (due {gap.due_on.isoformat()})")
-        elif reason == EXTERNAL_EXPIRED and gap.expires_on is not None:
-            parts.append(f"{reason} (expired {gap.expires_on.isoformat()})")
-        else:
-            parts.append(reason)
-    return ", ".join(parts)
-
-
 def _gap_json(gap: Gap) -> dict[str, object]:
     """One worklist entry as json: the annotation first, the element it is
     about alongside, so a consumer never has to re-read it with `ab show`."""
@@ -388,7 +376,7 @@ def gaps(
         width = max(len(gap.element.id) for gap in selected)
         typer.echo(
             "\n".join(
-                f"{gap.element.id.ljust(width)}  {_reasons_text(gap)}  {gap.element.title}"
+                f"{gap.element.id.ljust(width)}  {reasons_text(gap)}  {gap.element.title}"
                 for gap in selected
             )
         )
@@ -459,7 +447,45 @@ def render(
     json_output: JsonOption = False,
 ) -> None:
     """Generate the read-only site: element pages, traceability, gaps, diagrams."""
-    unimplemented(ctx)
+    opts = options(ctx)
+    # The diagram half of this one command is docs/tasks/27-render-diagrams.md's;
+    # an invocation that asks for it is refused whole rather than honoured
+    # halfway — an unpinned or uncoloured diagram defeats what both flags are
+    # for. Every other invocation renders the site half this task owns.
+    source = ctx.get_parameter_source("output_format")
+    if overlay or (source is not None and source.name != "DEFAULT"):
+        unimplemented(ctx)
+    if serve and not 1 <= port <= 65535:
+        typer.echo("--port must be between 1 and 65535", err=True)
+        raise typer.Exit(ExitCode.USAGE)
+    root, design = _design(opts)
+    try:
+        pages = generate_site(design, out, today=date.today(), scope=scope)
+    except UnknownRefError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(ExitCode.USAGE) from exc
+    if opts.json_output:
+        typer.echo(
+            json.dumps({"schema_version": SCHEMA_VERSION, "out": str(out), "pages": len(pages)})
+        )
+    else:
+        typer.echo(f"wrote {out} ({len(pages)} pages)")
+    if not serve:
+        return
+
+    # The rebuild re-reads the store rather than reusing this run's design —
+    # picking up the change is the point. A frozen --rev is not watched:
+    # editing the working tree under a pinned revision would trigger rebuilds
+    # that cannot change anything.
+    def rebuild() -> None:
+        generate_site(build_design(root, rev=opts.rev), out, today=date.today(), scope=scope)
+
+    server = SiteServer(out, port, watch=None if opts.rev is not None else root, rebuild=rebuild)
+    typer.echo(f"serving {out} at http://127.0.0.1:{port} (Ctrl-C to stop)", err=True)
+    # Ctrl-C is the one way out of a preview; its daemon threads die with the
+    # process, so suppressing the interrupt here is the whole shutdown.
+    with suppress(KeyboardInterrupt):
+        server.serve()
 
 
 @app.command(rich_help_panel=PANEL)

@@ -337,7 +337,7 @@ def test_the_site_is_byte_identical_across_runs(clean: Design, tmp_path: Path) -
 
     first = _site_bytes(tmp_path / "first")
     assert first == _site_bytes(tmp_path / "second")
-    assert len(first) == 15  # twelve element pages, index, traceability, gaps
+    assert len(first) == 14  # eleven element pages, index, traceability, gaps
 
 
 def test_the_change_detection_notices_edits_additions_and_removals(tmp_path: Path) -> None:

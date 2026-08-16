@@ -42,7 +42,7 @@ FIXTURES = Path(__file__).parent / "fixtures" / "systems"
 CLEAN = FIXTURES / "clean"
 BROWNFIELD = FIXTURES / "brownfield"
 
-# clean/'s twelve elements plus the three whole-store views. A page's path is
+# clean/'s eleven elements plus the three whole-store views. A page's path is
 # its id with the kind as a directory — one directory per kind, like the store.
 CLEAN_PAGES = {
     "index.html",
@@ -127,7 +127,7 @@ def test_the_index_groups_elements_by_kind_in_design_order(tmp_path: Path) -> No
         f"<h2>{kind}</h2>" for kind in KIND_ORDER
     ]
     assert 'href="elements/component/orders.html">component:orders</a>' in index
-    assert "Take orders and record what happened to them." in index
+    assert ">component:orders</a> — Orders</li>" in index
 
 
 def test_an_element_page_is_the_show_view_with_links(tmp_path: Path) -> None:
@@ -140,8 +140,13 @@ def test_an_element_page_is_the_show_view_with_links(tmp_path: Path) -> None:
     assert "<h1>Orders</h1>" in page
     assert "<code>component:orders</code>" in page
     assert "responsibility: Take orders and record what happened to them." in page
-    assert '<a href="../component/catalog.html">component:catalog</a> — contains' in page
-    assert '<a href="../decision/event-log.html">decision:event-log</a> — applies_to' in page
+    assert (
+        '<a href="../../elements/component/catalog.html">component:catalog</a> — contains' in page
+    )
+    assert (
+        '<a href="../../elements/decision/event-log.html">decision:event-log</a> — applies_to'
+        in page
+    )
 
 
 def test_an_element_page_carries_the_prose_body(tmp_path: Path) -> None:
@@ -214,7 +219,7 @@ def test_refs_outside_the_scope_stay_plain_text(tmp_path: Path) -> None:
     assert result.exit_code == ExitCode.OK
     page = (tmp_path / "elements" / "component" / "catalog.html").read_text(encoding="utf-8")
     assert "component:orders" in page
-    assert 'href="../component/orders.html"' not in page
+    assert 'href="../../elements/component/orders.html"' not in page
 
 
 @pytest.mark.parametrize("flags", [["--overlay", "state"], ["--format", "mermaid"]])
