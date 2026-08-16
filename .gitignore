@@ -23,3 +23,4 @@ build.json
 
 # rp writes this lock next to its log on every invocation.
 .rohrpost/.lock
+.worktrees/
