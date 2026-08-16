@@ -14,7 +14,9 @@ The contract with callers, in the order they trip over it:
 - `resolve_rev` returns a full sha, so anything stamped into a packet or a
   watermark (`design_rev`) is comparable no matter what string was typed;
 - `changed_paths` diffs from the merge base (three-dot): what this branch did
-  since it left `base`, which is what a CI diff against a base branch means.
+  since it left `base`, which is what a CI diff against a base branch means;
+- `repo_root` returns the toplevel a diff's paths are relative to, whatever
+  the cwd — the join a store-relative `source` needs to meet those paths.
 
 No git writes, and no fetch: `origin/HEAD` and friends are read as refs the
 local repo already knows; fetching them is the caller's (or CI's) job.
@@ -68,6 +70,16 @@ def resolve_rev(rev: str, repo: Path = Path()) -> str:
     sha — into the full sha it points at, once, so the rest of a run and
     anything it stamps into a watermark compares full shas."""
     return _git(["rev-parse", rev], repo).stdout.strip()
+
+
+def repo_root(repo: Path = Path()) -> Path:
+    """The root of the repository `repo` sits in, as git itself spells it.
+
+    Diff paths come out relative to this whatever the cwd, so a caller
+    joining store-relative paths onto a diff needs the one spelling both
+    share — `ab check --changed-only` is that caller today.
+    """
+    return Path(_git(["rev-parse", "--show-toplevel"], repo).stdout.strip())
 
 
 def read_file_at_rev(path: Path, rev: str, repo: Path = Path()) -> bytes | None:

@@ -186,14 +186,24 @@ def seen(monkeypatch: pytest.MonkeyPatch) -> list[GlobalOptions]:
         captured.append(options(ctx))
         raise typer.Exit()
 
+    # A module whose every command has a body no longer imports
+    # `unimplemented` — there is nothing left to intercept there.
     for module in (author, query, handoff, reconcile):
-        monkeypatch.setattr(module, "unimplemented", record)
+        if hasattr(module, "unimplemented"):
+            monkeypatch.setattr(module, "unimplemented", record)
     return captured
 
 
-def test_global_flags_reach_the_command(seen: list[GlobalOptions]) -> None:
-    """Commands read the globals off the context rather than re-declaring them."""
-    result = runner.invoke(app, ["--store", "elsewhere", "--rev", "v1", "--json", "-vv", "check"])
+@pytest.mark.parametrize(
+    "argv", [SURFACE[name][0] for name in NOT_IMPLEMENTED], ids=NOT_IMPLEMENTED
+)
+def test_global_flags_reach_the_command(argv: list[str], seen: list[GlobalOptions]) -> None:
+    """Commands read the globals off the context rather than re-declaring them.
+
+    Parametrized over the bodyless commands, so the probe follows the surface
+    instead of pinning one command that a landing would silently invalidate.
+    """
+    result = runner.invoke(app, ["--store", "elsewhere", "--rev", "v1", "--json", "-vv", *argv])
 
     assert result.exit_code == ExitCode.OK
     assert seen == [
@@ -207,8 +217,13 @@ def test_global_flags_reach_the_command(seen: list[GlobalOptions]) -> None:
     ]
 
 
-def test_the_store_falls_back_to_the_environment(seen: list[GlobalOptions]) -> None:
-    result = runner.invoke(app, ["check"], env={"ABSICHT_STORE": "/srv/design"})
+@pytest.mark.parametrize(
+    "argv", [SURFACE[name][0] for name in NOT_IMPLEMENTED], ids=NOT_IMPLEMENTED
+)
+def test_the_store_falls_back_to_the_environment(
+    argv: list[str], seen: list[GlobalOptions]
+) -> None:
+    result = runner.invoke(app, argv, env={"ABSICHT_STORE": "/srv/design"})
 
     assert result.exit_code == ExitCode.OK
     assert [o.store for o in seen] == [Path("/srv/design")]
@@ -232,11 +247,14 @@ def test_json_is_accepted_after_the_command_name(
     assert [o.json_output for o in seen] == [True]
 
 
+@pytest.mark.parametrize(
+    "argv", [SURFACE[name][0] for name in NOT_IMPLEMENTED], ids=NOT_IMPLEMENTED
+)
 def test_json_means_the_same_thing_on_either_side_of_the_command(
-    seen: list[GlobalOptions],
+    argv: list[str], seen: list[GlobalOptions]
 ) -> None:
     """Both positions, and both at once, are one boolean — not a shadowed pair."""
-    for argv in (["--json", "check"], ["check", "--json"], ["--json", "check", "--json"]):
-        runner.invoke(app, argv)
+    for invocation in (["--json", *argv], [*argv, "--json"], ["--json", *argv, "--json"]):
+        runner.invoke(app, invocation)
 
     assert [o.json_output for o in seen] == [True, True, True]

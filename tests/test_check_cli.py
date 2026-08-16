@@ -31,7 +31,7 @@ from typer.testing import CliRunner
 
 from absicht.cli import app
 from absicht.cli._common import ExitCode
-from absicht.findings import RULES
+from absicht.findings import RULES, Severity
 from absicht.models import SCHEMA_VERSION
 
 runner = CliRunner()
@@ -52,8 +52,19 @@ combination itself is under test as much as any one finding."""
 
 
 def _rule_ids(stdout: str) -> set[str]:
-    """The rule ids of a text report, whose lines read `severity rule-id: message`."""
-    return {line.split()[1].rstrip(":") for line in stdout.splitlines()}
+    """The rule ids of a text report, whose finding lines read
+    `severity rule-id: message`.
+
+    Only severity-prefixed lines are finding lines: a message can itself span
+    lines (a YAML parse error carries pyyaml's context lines), and those
+    continuations are not findings.
+    """
+    grades = {grade.value for grade in Severity}
+    return {
+        tokens[1].rstrip(":")
+        for line in stdout.splitlines()
+        if (tokens := line.split(maxsplit=2)) and tokens[0] in grades
+    }
 
 
 # --- the fixtures' verdicts ---------------------------------------------------
@@ -277,6 +288,19 @@ def test_changed_only_with_an_unknown_base_is_a_usage_error(repo: Path) -> None:
     assert "no-such-ref" in result.stderr
 
 
+def test_changed_only_refuses_a_store_outside_the_repository(repo: Path) -> None:
+    """The diff cannot name a store it does not contain, and pretending it
+    checked anything would be a silent pass — the one outcome a checker must
+    never fake."""
+    result = runner.invoke(
+        app,
+        ["--store", str(FIXTURES / "broken"), "check", "--changed-only", "--diff-base", "main"],
+    )
+
+    assert result.exit_code == ExitCode.USAGE
+    assert "outside" in result.stderr
+
+
 # --- --explain and the failure modes that are not findings ---------------------
 
 
@@ -297,6 +321,17 @@ def test_explain_prints_the_rules_reasoning_without_reading_a_store(tmp_path: Pa
 
     assert result.exit_code == ExitCode.OK
     assert RULES["policy/one-way-needs-rationale"] in result.stdout
+
+
+def test_explain_json_speaks_the_envelope() -> None:
+    result = runner.invoke(app, ["check", "--explain", "integrity/cycle", "--json"])
+
+    assert result.exit_code == ExitCode.OK
+    assert json.loads(result.stdout) == {
+        "schema_version": SCHEMA_VERSION,
+        "rule": "integrity/cycle",
+        "explain": RULES["integrity/cycle"],
+    }
 
 
 def test_explain_of_an_unknown_rule_is_a_usage_error() -> None:

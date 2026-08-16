@@ -9,11 +9,13 @@
 from __future__ import annotations
 
 import json
+from datetime import date
 from pathlib import Path
 from typing import Annotated
 
 import typer
 
+from absicht.check import integrity_findings, policy_findings, schema_findings
 from absicht.cli._app import app
 from absicht.cli._common import (
     DEFAULT_DIFF_BASE,
@@ -22,14 +24,16 @@ from absicht.cli._common import (
     Kind,
     ReportFormat,
     options,
-    unimplemented,
 )
 from absicht.codec import dump_element
-from absicht.findings import ExitCode, Severity
+from absicht.findings import RULES, ExitCode, Report, Severity
+from absicht.git import GitError, changed_paths, repo_root
 from absicht.init import InitError, init_embedded, init_reference
+from absicht.load import StoreResolutionError, load_store, resolve_store
 from absicht.migrate import MigrationError, migrate_store
 from absicht.models import SCHEMA_VERSION, State
 from absicht.new import NewError, create, scaffold
+from absicht.resolve import Index, ResolveError, resolve
 from absicht.schema import stale_schemas, write_schemas
 
 PANEL = "Step 1 — author and validate"
@@ -176,7 +180,125 @@ def check(
     owner, a requirement needs a realizing component, a `one_way` decision needs
     a rationale body, an external's assumptions have not expired.
     """
-    unimplemented(ctx)
+    opts = options(ctx)
+    if explain is not None:
+        _explain_rule(explain, json_output=opts.json_output)
+        return
+    try:
+        root = resolve_store(opts.store)
+    except StoreResolutionError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(ExitCode.USAGE) from exc
+    report = _report_for(root)
+    if changed_only:
+        report = _only_changed(report, root, diff_base)
+    report = report.filtered(
+        rules=set(rule) if rule is not None else None,
+        exclude=set(exclude_rule or ()),
+        min_severity=severity,
+    )
+    _render(report, _effective_format(ctx, output_format, opts.json_output))
+    raise typer.Exit(report.exit_code(strict=strict))
+
+
+def _explain_rule(rule_id: str, *, json_output: bool) -> None:
+    """Answer `--explain` from the rule catalog and nothing else.
+
+    Short-circuits the store, the report and the filters: the question is
+    about a rule, not about this design. An unknown id is a usage error
+    naming the rules that do exist, not a silent no-op.
+    """
+    try:
+        explanation = RULES[rule_id]
+    except KeyError:
+        typer.echo(
+            f"unknown rule {rule_id!r}: known rules are {', '.join(sorted(RULES))}", err=True
+        )
+        raise typer.Exit(ExitCode.USAGE) from None
+    if json_output:
+        typer.echo(
+            json.dumps({"schema_version": SCHEMA_VERSION, "rule": rule_id, "explain": explanation})
+        )
+    else:
+        typer.echo(f"{rule_id}: {explanation}")
+
+
+def _report_for(root: Path) -> Report:
+    """The three layers over one store, schema findings first.
+
+    A store whose `system.yaml` is missing or unreadable cannot be folded
+    into a `Design` — `resolve`'s one refusal — and its schema findings
+    stand alone as the report: a system-wide problem is a result, not a
+    reason to say nothing. `today` is the run's clock, read here once.
+    """
+    loaded = load_store(root)
+    findings = list(schema_findings(loaded))
+    try:
+        design = resolve(loaded)
+    except ResolveError:
+        return Report(findings=tuple(findings))
+    index = Index.from_design(design)
+    findings.extend(integrity_findings(design, index))
+    findings.extend(policy_findings(design, index, today=date.today()))
+    return Report(findings=tuple(findings))
+
+
+def _only_changed(report: Report, root: Path, base: str) -> Report:
+    """Keep the findings whose file is in the diff against `base`.
+
+    Findings carry store-relative paths and the diff repo-relative ones, so
+    the store's own place in the repository is the join — without it no path
+    would ever match and `--changed-only` would quietly empty every report.
+    A finding with no `source` (a cycle, anything system-wide) survives:
+    dropping a real problem because it cannot be pinned to one file is the
+    wrong failure mode for a checker.
+    """
+    try:
+        changed = changed_paths(base)
+        prefix = root.resolve().relative_to(repo_root().resolve())
+    except GitError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(ExitCode.USAGE) from exc
+    except ValueError as exc:
+        typer.echo(
+            f"--changed-only needs the store inside the repository the diff of {base!r} "
+            f"is taken in; {root} is outside it",
+            err=True,
+        )
+        raise typer.Exit(ExitCode.USAGE) from exc
+    return Report(
+        findings=tuple(
+            f for f in report.findings if f.source is None or prefix / f.source in changed
+        )
+    )
+
+
+def _effective_format(
+    ctx: typer.Context, output_format: ReportFormat, json_output: bool
+) -> ReportFormat:
+    """`--json` is the json member of `--format` only while `--format` was
+    left at its default; an explicitly passed `--format` wins (docs/adr/0001).
+
+    The parameter source is compared by name rather than by importing
+    `click.core.ParameterSource`: click is typer's dependency, not ours, and
+    the deps gate holds that line.
+    """
+    source = ctx.get_parameter_source("output_format")
+    if json_output and (source is None or source.name == "DEFAULT"):
+        return ReportFormat.JSON
+    return output_format
+
+
+def _render(report: Report, output_format: ReportFormat) -> None:
+    """One run of stdout in the asked-for shape. An empty text report prints
+    nothing at all rather than a blank line — silence is the pass signal a
+    human greps for."""
+    if output_format is ReportFormat.JSON:
+        typer.echo(json.dumps(report.render_json()))
+    elif output_format is ReportFormat.SARIF:
+        typer.echo(json.dumps(report.render_sarif()))
+    elif text := report.render_text():
+        typer.echo(text)
 
 
 @app.command(rich_help_panel=PANEL)
