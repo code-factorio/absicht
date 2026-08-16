@@ -24,6 +24,16 @@ What these tests pin, per docs/tasks/44-marker-sync.md:
   path the store no longer names, is a finding;
 - no marker at all, an embedded ``.absicht/`` directory or an unreadable
   file is refused, each in its own words.
+
+``stamp``, the advancing hand docs/tasks/46-marker-stamp.md specifies:
+
+- one unit's ``at``/``design_rev`` move — from whatever they already were,
+  since moving an existing watermark is the point — and every other unit in
+  the marker is untouched; a unit implemented at two paths is one unit, so
+  both its watermarks move together;
+- a unit the marker does not carry, or a repo with no marker at all, is
+  refused in its own words: a stamp is a claim about a unit the store synced
+  into the repo, never a way to widen the marker.
 """
 
 from __future__ import annotations
@@ -34,7 +44,7 @@ import pytest
 
 from absicht.codec import dump_singleton, parse_singleton
 from absicht.findings import Severity
-from absicht.markers import MarkerError, check, sync
+from absicht.markers import MarkerError, check, stamp, sync
 from absicht.models import Component, Design, Marker, System, UnitWatermark
 
 
@@ -304,3 +314,83 @@ def test_an_unreadable_marker_is_refused_for_checking(tmp_path: Path) -> None:
 
     with pytest.raises(MarkerError, match="not a readable"):
         check(_design(), repo)
+
+
+def test_stamping_moves_one_unit_and_leaves_the_rest_alone(tmp_path: Path) -> None:
+    repo = _repo(tmp_path, "acme/r")
+    # The state a first landing leaves behind: both units already stamped.
+    (repo / ".absicht").write_text(
+        dump_singleton(
+            Marker(
+                design="../design",
+                units=(
+                    UnitWatermark(
+                        id="component:a", path="src/a", at="milestone:m0", design_rev="older"
+                    ),
+                    UnitWatermark(
+                        id="component:b", path="src/b", at="milestone:m0", design_rev="beefdead"
+                    ),
+                ),
+            )
+        ),
+        encoding="utf-8",
+    )
+
+    marker = stamp(repo, "component:a", "milestone:m1", design_rev="deadbeef")
+
+    assert marker.units == (
+        UnitWatermark(id="component:a", path="src/a", at="milestone:m1", design_rev="deadbeef"),
+        # `b`'s watermark is not stamp's to move
+        UnitWatermark(id="component:b", path="src/b", at="milestone:m0", design_rev="beefdead"),
+    )
+    assert parse_singleton((repo / ".absicht").read_text(encoding="utf-8"), model=Marker) == marker
+
+
+def test_a_unit_implemented_at_two_paths_moves_as_one(tmp_path: Path) -> None:
+    """Both watermarks describe the same code's progress; moving only one
+    would leave `ab status` reading the stale half as the unit being behind."""
+    repo = _repo(tmp_path, "acme/r")
+    (repo / ".absicht").write_text(
+        dump_singleton(
+            Marker(
+                design="../design",
+                units=(
+                    UnitWatermark(id="component:a", path="src/a"),
+                    UnitWatermark(id="component:a", path="src/legacy"),
+                ),
+            )
+        ),
+        encoding="utf-8",
+    )
+
+    marker = stamp(repo, "component:a", "milestone:m1", design_rev="deadbeef")
+
+    assert marker.units == (
+        UnitWatermark(id="component:a", path="src/a", at="milestone:m1", design_rev="deadbeef"),
+        UnitWatermark(
+            id="component:a", path="src/legacy", at="milestone:m1", design_rev="deadbeef"
+        ),
+    )
+
+
+def test_a_unit_the_marker_does_not_carry_is_refused_for_stamping(tmp_path: Path) -> None:
+    """Widening the marker is `marker sync`'s job; a unit it never carried has
+    no watermark to move."""
+    repo = _repo(tmp_path, "acme/r")
+    (repo / ".absicht").write_text(
+        dump_singleton(
+            Marker(design="../design", units=(UnitWatermark(id="component:a", path="src/a"),))
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(MarkerError, match="no such unit"):
+        stamp(repo, "component:elsewhere", "milestone:m1", design_rev="deadbeef")
+
+
+def test_a_repo_without_a_marker_is_refused_for_stamping(tmp_path: Path) -> None:
+    """Nothing to move: sync writes the marker, stamp only advances it."""
+    repo = _repo(tmp_path, "acme/r")
+
+    with pytest.raises(MarkerError, match="no marker to stamp"):
+        stamp(repo, "component:a", "milestone:m1", design_rev="deadbeef")

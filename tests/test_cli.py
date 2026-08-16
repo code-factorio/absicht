@@ -144,6 +144,7 @@ IMPLEMENTED = {
     "layout",
     "list",
     "marker check",
+    "marker stamp",
     "marker sync",
     "migrate",
     "new",
