@@ -143,6 +143,7 @@ IMPLEMENTED = {
     "init",
     "layout",
     "list",
+    "marker sync",
     "migrate",
     "new",
     "packet",
