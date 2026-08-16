@@ -26,6 +26,7 @@ from absicht.cli._common import (
 )
 from absicht.findings import ExitCode, Severity
 from absicht.init import InitError, init_embedded, init_reference
+from absicht.migrate import MigrationError, migrate_store
 from absicht.models import SCHEMA_VERSION, State
 from absicht.schema import stale_schemas, write_schemas
 
@@ -197,5 +198,34 @@ def migrate(
     dry_run: Annotated[bool, typer.Option("--dry-run")] = False,
     json_output: JsonOption = False,
 ) -> None:
-    """Migrate the store to a newer schema version."""
-    unimplemented(ctx)
+    """Migrate the store to a newer schema version.
+
+    There is no newer version yet, so today this is the seam: a store at the
+    running version is already current, and a target the registry cannot
+    reach is a usage error naming where the walk got stuck.
+    """
+    opts = options(ctx)
+    # `--dry-run` changes nothing while the registry is empty — there is no
+    # migration to run, so there is nothing to hold back either. It stays on
+    # the surface so the applier that lands with version 2 has its switch
+    # already at the call site.
+    try:
+        result = migrate_store(opts.store, to=to)
+    except MigrationError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(ExitCode.USAGE) from exc
+    except NotImplementedError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(ExitCode.INTERNAL) from exc
+    if opts.json_output:
+        typer.echo(
+            json.dumps(
+                {
+                    "schema_version": SCHEMA_VERSION,
+                    "from": result.from_version,
+                    "to": result.to_version,
+                }
+            )
+        )
+    else:
+        typer.echo(f"already current at schema version {result.to_version}")

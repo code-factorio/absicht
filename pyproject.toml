@@ -162,6 +162,7 @@ layers = [
     "absicht.cli",
     "absicht.resolve",
     "absicht.init",
+    "absicht.migrate",
     "absicht.load",
     "absicht.codec",
     "absicht.findings",
