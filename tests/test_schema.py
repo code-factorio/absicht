@@ -39,6 +39,8 @@ EXPECTED_FILES = {
     "components.schema.json",
     "seams.schema.json",
     "data.schema.json",
+    "resources.schema.json",
+    "behaviors.schema.json",
     "decisions.schema.json",
     "rejections.schema.json",
     "questions.schema.json",
