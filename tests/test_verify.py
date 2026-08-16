@@ -1,8 +1,8 @@
-"""``ab verify``'s scaffolding: the sealed packet, the diff, the rule plumbing.
+"""``ab verify``: the scaffolding, then the seven rules that hang in it.
 
 ``docs/tasks/40-verify-core.md`` builds the frame that
-``docs/tasks/41-verify-rules.md`` hangs rules into, so what these tests pin is
-everything around the rules:
+``docs/tasks/41-verify-rules.md`` fills in, so what these tests pin is the
+frame first —
 
 - ``load_sealed_packet`` reads back exactly what ``ab packet --seal`` wrote —
   offline, no design store — and refuses what it cannot read back (a missing
@@ -16,6 +16,11 @@ everything around the rules:
   id is a usage error, and ``--strict`` promotes the warnings that survive;
 - ``--report`` writes the rendered report *in addition to* stdout, and an
   empty report stays silent on stdout while still writing the (empty) file.
+
+Then 41's seven rules, each as the pair ``verification.md`` asks of every
+rule: a sealed packet and a repo diff that trip it, and the same shape not
+tripping it — plus one end-to-end run against a packet sealed for real from
+``clean/``, over a repo built to satisfy all seven at once.
 """
 
 from __future__ import annotations
@@ -36,8 +41,23 @@ from absicht import verify
 from absicht.cli import app
 from absicht.cli._common import DEFAULT_PACKET_DIR, ExitCode
 from absicht.findings import RULES, Finding, Severity, finding
+from absicht.gherkin import scenario_digest
 from absicht.git import current_rev
-from absicht.models import SCHEMA_VERSION, Packet, PacketLock
+from absicht.models import (
+    SCHEMA_VERSION,
+    Component,
+    Criterion,
+    Decision,
+    DecisionStatus,
+    Element,
+    Fidelity,
+    Packet,
+    PacketElement,
+    PacketLock,
+    Seam,
+    SeamStyle,
+    State,
+)
 
 runner = CliRunner()
 FIXTURES = Path(__file__).parent / "fixtures" / "systems"
@@ -68,9 +88,11 @@ def _init_repo(repo: Path) -> None:
 
 
 def _repo(tmp_path: Path, name: str, files: dict[str, str]) -> Path:
-    """A one-commit git repository holding ``files`` — an implementing repo."""
+    """A one-commit git repository holding ``files`` — an implementing repo.
+    ``name`` may nest (`acme/core`): an implemented_by repo half names a path,
+    so the repo that matches it has to be buildable at one."""
     repo = tmp_path / name
-    repo.mkdir()
+    repo.mkdir(parents=True)
     for path, content in files.items():
         target = repo / path
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -367,4 +389,456 @@ def test_an_unresolvable_diff_base_is_a_usage_error(sealed: tuple[Path, Path]) -
 
     assert result.exit_code == ExitCode.USAGE
     assert "no-such-ref" in result.stderr
+    assert result.stdout == ""
+
+
+# ------------------------------------------------------------------- the rules
+#
+# The packets here are hand-built and sealed through the same two files
+# `load_sealed_packet` reads — the packet's on-disk contract — because what a
+# rule consumes is the sealed shape, not a store; shaping an element per rule
+# is the point, and no fixture system holds these states. The one end-to-end
+# run at the bottom uses the real `ab packet --seal` against `clean/` instead.
+
+_CORE = Component(
+    id="component:core",
+    title="Core",
+    state=State.SPECIFIED,
+    implemented_by=("code#src/core",),
+)
+_RISKY = Component(
+    id="component:risky",
+    title="Risky",
+    state=State.UNKNOWN,
+    implemented_by=("code#src/risky",),
+)
+_CRITERION = Criterion(id="story:thing#ac-1", when="the thing runs", then=("it works",))
+
+_CLEAN_STEPS = '''"""Step definitions for milestone:m1's scenarios."""
+
+# story:cancel-order#ac-1
+def test_cancel_refundable():
+    assert cancelled and refund_started
+
+# story:cancel-order#ac-2
+def test_refuse_shipped():
+    assert refused
+
+# story:cancel-order#ac-3
+def test_cancellation_only_consumes_order_events():
+    assert consumes == ("seam:order-events",)
+'''
+
+
+def _full(element: Element) -> PacketElement:
+    """A packet element at full fidelity: the element as built, every field."""
+    return PacketElement(
+        ref=element.id, fidelity=Fidelity.FULL, element=element.model_dump(mode="json")
+    )
+
+
+def _seal_pair(tmp_path: Path, packet: Packet, *, scenarios: dict[str, str] | None) -> Path:
+    """A sealed pair on disk for ``packet``, its lock digesting ``scenarios``."""
+    out = tmp_path / "packet"
+    out.mkdir()
+    (out / "packet.json").write_text(packet.model_dump_json(indent=2) + "\n", encoding="utf-8")
+    lock = PacketLock(design_rev="0" * 40, scenarios_digest=scenario_digest(scenarios or {}))
+    (out / "packet.lock").write_text(lock.model_dump_json(indent=2) + "\n", encoding="utf-8")
+    return out / "packet.lock"
+
+
+def _context_for(
+    tmp_path: Path,
+    packet: Packet,
+    *,
+    repos: tuple[Path, ...],
+    scenarios: dict[str, str] | None = None,
+    diff_base: str = "HEAD",
+) -> verify.VerifyContext:
+    """The context a rule sees: the packet sealed on disk, loaded back, plus
+    each repo's diff — ``diff_base`` picks whether the repos carry a change."""
+    brief, lock = verify.load_sealed_packet(_seal_pair(tmp_path, packet, scenarios=scenarios))
+    return verify.context_for(brief, lock, diff_base=diff_base, repos=repos)
+
+
+def _diff_repo(
+    tmp_path: Path, name: str, committed: dict[str, str], change: dict[str, str]
+) -> Path:
+    """An implementing repo whose diff since ``HEAD~1`` is exactly ``change``."""
+    repo = _repo(tmp_path, name, committed)
+    for rel, content in change.items():
+        target = repo / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding="utf-8")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "c2")
+    return repo
+
+
+def _rule(ctx: verify.VerifyContext, rule_id: str) -> tuple[Finding, ...]:
+    """One rule's findings over ``ctx``, isolated from the other six."""
+    return verify.run_rules(ctx, include=frozenset({rule_id})).findings
+
+
+def test_the_seven_rules_are_registered_with_explanations() -> None:
+    """The spec's ids, in the spec's order, each with an ``--explain`` text:
+    ``finding()`` already refuses an unregistered id, this pins the surface."""
+    assert list(verify.VERIFY_RULES) == [
+        "verify/scope",
+        "verify/out-of-scope",
+        "verify/unknown-basis",
+        "verify/contract-tests",
+        "verify/done-when",
+        "verify/scenarios-unmodified",
+        "verify/step-assertions",
+    ]
+    assert set(verify.VERIFY_RULES) <= RULES.keys()
+
+
+# ------------------------------------------------------------- verify/scope
+
+
+def test_a_changed_file_outside_every_in_scope_component_is_a_finding(
+    tmp_path: Path,
+) -> None:
+    packet = Packet(milestone="milestone:m", elements=(_full(_CORE),))
+    repo = _diff_repo(tmp_path, "code", {"src/core/api.py": "one\n"}, {"README.md": "words\n"})
+
+    findings = _rule(
+        _context_for(tmp_path, packet, repos=(repo,), diff_base="HEAD~1"), "verify/scope"
+    )
+
+    assert [f.message for f in findings] == [
+        f"README.md in {repo} maps to no component the packet puts in scope"
+    ]
+    assert findings[0].severity is Severity.ERROR
+    assert findings[0].source == "README.md"
+
+
+def test_an_implementation_in_another_repo_does_not_cover_a_changed_file(
+    tmp_path: Path,
+) -> None:
+    """``implemented_by``'s repo half names the ``--repo`` an entry speaks for:
+    the same relative path under the wrong repo is leakage, not coverage — and
+    under the right one, quiet, which is this pair's clean side."""
+    acme = Component(
+        id="component:core",
+        title="Core",
+        state=State.SPECIFIED,
+        implemented_by=("acme/core#src/core",),
+    )
+    packet = Packet(milestone="milestone:m", elements=(_full(acme),))
+    core = _diff_repo(
+        tmp_path, "acme/core", {"src/core/api.py": "one\n"}, {"src/core/api.py": "two\n"}
+    )
+    elsewhere = _diff_repo(
+        tmp_path, "elsewhere", {"src/core/api.py": "one\n"}, {"src/core/api.py": "two\n"}
+    )
+
+    findings = _rule(
+        _context_for(tmp_path, packet, repos=(core, elsewhere), diff_base="HEAD~1"), "verify/scope"
+    )
+
+    assert [f.source for f in findings] == ["src/core/api.py"]
+    assert str(elsewhere) in findings[0].message
+
+
+# ------------------------------------------------------- verify/out-of-scope
+
+
+def test_building_an_out_of_scope_component_is_a_finding(tmp_path: Path) -> None:
+    """A full run, not the isolated one: the change maps — to a component the
+    packet carries — so verify/scope must stay quiet. That the two rules are
+    distinct is exactly what this fixture pins."""
+    frozen = Component(
+        id="component:frozen",
+        title="Frozen",
+        state=State.OUT_OF_SCOPE,
+        implemented_by=("code#src/frozen",),
+    )
+    packet = Packet(milestone="milestone:m", elements=(_full(_CORE), _full(frozen)))
+    repo = _diff_repo(
+        tmp_path,
+        "code",
+        {"src/core/api.py": "one\n", "src/frozen/old.py": "one\n"},
+        {"src/frozen/thing.py": "new\n"},
+    )
+
+    result = verify.run_rules(_context_for(tmp_path, packet, repos=(repo,), diff_base="HEAD~1"))
+
+    assert [(f.rule_id, f.ref) for f in result.findings] == [
+        ("verify/out-of-scope", "component:frozen")
+    ]
+    assert "src/frozen/thing.py" in result.findings[0].message
+    assert result.findings[0].severity is Severity.ERROR
+
+
+def test_a_change_under_the_in_scope_component_leaves_the_frozen_one_alone(
+    tmp_path: Path,
+) -> None:
+    frozen = Component(
+        id="component:frozen",
+        title="Frozen",
+        state=State.OUT_OF_SCOPE,
+        implemented_by=("code#src/frozen",),
+    )
+    packet = Packet(milestone="milestone:m", elements=(_full(_CORE), _full(frozen)))
+    repo = _diff_repo(tmp_path, "code", {"src/core/api.py": "one\n"}, {"src/core/api.py": "two\n"})
+
+    result = verify.run_rules(_context_for(tmp_path, packet, repos=(repo,), diff_base="HEAD~1"))
+
+    assert result.findings == ()
+
+
+# -------------------------------------------------------- verify/unknown-basis
+
+
+def test_building_on_an_unknown_component_is_a_finding(tmp_path: Path) -> None:
+    packet = Packet(milestone="milestone:m", elements=(_full(_RISKY),))
+    repo = _diff_repo(tmp_path, "code", {"src/risky/a.py": "one\n"}, {"src/risky/a.py": "two\n"})
+
+    findings = _rule(
+        _context_for(tmp_path, packet, repos=(repo,), diff_base="HEAD~1"), "verify/unknown-basis"
+    )
+
+    assert [f.ref for f in findings] == ["component:risky"]
+    assert "src/risky/a.py" in findings[0].message
+    assert findings[0].severity is Severity.ERROR
+
+
+def test_a_decision_must_hold_names_covers_the_unknown(tmp_path: Path) -> None:
+    answer = Decision(
+        id="decision:answer",
+        title="Recorded answer",
+        status=DecisionStatus.ACCEPTED,
+        applies_to=("component:risky",),
+    )
+    packet = Packet(
+        milestone="milestone:m",
+        elements=(_full(_RISKY), _full(answer)),
+        must_hold=("decision:answer",),
+    )
+    repo = _diff_repo(tmp_path, "code", {"src/risky/a.py": "one\n"}, {"src/risky/a.py": "two\n"})
+
+    findings = _rule(
+        _context_for(tmp_path, packet, repos=(repo,), diff_base="HEAD~1"), "verify/unknown-basis"
+    )
+
+    assert findings == ()
+
+
+def test_a_decision_only_carried_is_not_coverage(tmp_path: Path) -> None:
+    """``must_hold`` naming the decision is what makes it an answer. A packet
+    that merely carries one — hand-narrowed, or pulled in as a ring — cannot
+    launder an unknown with it."""
+    answer = Decision(
+        id="decision:answer",
+        title="Recorded answer",
+        status=DecisionStatus.ACCEPTED,
+        applies_to=("component:risky",),
+    )
+    packet = Packet(milestone="milestone:m", elements=(_full(_RISKY), _full(answer)))
+    repo = _diff_repo(tmp_path, "code", {"src/risky/a.py": "one\n"}, {"src/risky/a.py": "two\n"})
+
+    findings = _rule(
+        _context_for(tmp_path, packet, repos=(repo,), diff_base="HEAD~1"), "verify/unknown-basis"
+    )
+
+    assert [f.ref for f in findings] == ["component:risky"]
+
+
+# ------------------------------------------------------ verify/contract-tests
+
+
+def test_a_seam_in_scope_that_names_no_contract_test_is_a_finding(tmp_path: Path) -> None:
+    packet = Packet(
+        milestone="milestone:m",
+        elements=(_full(Seam(id="seam:sync", title="Sync", style=SeamStyle.CALL)),),
+    )
+    repo = _repo(tmp_path, "code", {"src/core/api.py": "one\n"})
+
+    findings = _rule(_context_for(tmp_path, packet, repos=(repo,)), "verify/contract-tests")
+
+    assert [f.ref for f in findings] == ["seam:sync"]
+    assert "verified_by" in findings[0].message
+    assert findings[0].severity is Severity.ERROR
+
+
+def test_a_named_contract_test_no_repo_holds_is_a_finding(tmp_path: Path) -> None:
+    seam = Seam(
+        id="seam:sync", title="Sync", style=SeamStyle.CALL, verified_by=("tests/test_sync.py",)
+    )
+    packet = Packet(milestone="milestone:m", elements=(_full(seam),))
+    repo = _repo(tmp_path, "code", {"src/core/api.py": "one\n"})
+
+    findings = _rule(_context_for(tmp_path, packet, repos=(repo,)), "verify/contract-tests")
+
+    assert [f.ref for f in findings] == ["seam:sync"]
+    assert "tests/test_sync.py" in findings[0].message
+
+
+def test_a_named_file_that_is_not_a_test_is_a_finding(tmp_path: Path) -> None:
+    seam = Seam(
+        id="seam:sync", title="Sync", style=SeamStyle.CALL, verified_by=("tests/test_sync.py",)
+    )
+    packet = Packet(milestone="milestone:m", elements=(_full(seam),))
+    repo = _repo(tmp_path, "code", {"tests/test_sync.py": "# TODO\n"})
+
+    findings = _rule(_context_for(tmp_path, packet, repos=(repo,)), "verify/contract-tests")
+
+    assert [f.ref for f in findings] == ["seam:sync"]
+    assert "nothing that looks like a test" in findings[0].message
+
+
+def test_an_existing_test_shaped_contract_test_is_quiet(tmp_path: Path) -> None:
+    seam = Seam(
+        id="seam:sync", title="Sync", style=SeamStyle.CALL, verified_by=("tests/test_sync.py",)
+    )
+    packet = Packet(milestone="milestone:m", elements=(_full(seam),))
+    repo = _repo(tmp_path, "code", {"tests/test_sync.py": "def test_sync():\n    assert True\n"})
+
+    findings = _rule(_context_for(tmp_path, packet, repos=(repo,)), "verify/contract-tests")
+
+    assert findings == ()
+
+
+def test_a_seam_behind_the_seam_is_not_the_change_to_judge(tmp_path: Path) -> None:
+    """A contract-fidelity neighbour is the ring around the work, not the work:
+    the rule judges seams the packet carries at full fidelity only."""
+    neighbour = PacketElement(
+        ref="seam:sync",
+        fidelity=Fidelity.CONTRACT,
+        element=Seam(id="seam:sync", title="Sync", style=SeamStyle.CALL).model_dump(mode="json"),
+    )
+    packet = Packet(milestone="milestone:m", elements=(neighbour,))
+    repo = _repo(tmp_path, "code", {"src/core/api.py": "one\n"})
+
+    findings = _rule(_context_for(tmp_path, packet, repos=(repo,)), "verify/contract-tests")
+
+    assert findings == ()
+
+
+# ----------------------------------------------------------- verify/done-when
+
+
+def test_a_criterion_nothing_references_is_a_finding(tmp_path: Path) -> None:
+    """The ``.feature`` file names the criterion in its own Scenario header and
+    still does not count: scenarios are generated, step definitions are what
+    somebody writes."""
+    scenarios = {"thing.feature": "Feature: Thing\n\n  Scenario: story:thing#ac-1\n"}
+    packet = Packet(milestone="milestone:m", elements=(_full(_CORE),), criteria=(_CRITERION,))
+    repo = _repo(tmp_path, "code", dict(scenarios))
+
+    findings = _rule(
+        _context_for(tmp_path, packet, repos=(repo,), scenarios=scenarios), "verify/done-when"
+    )
+
+    assert [f.ref for f in findings] == ["story:thing"]
+    assert "story:thing#ac-1" in findings[0].message
+    assert findings[0].severity is Severity.ERROR
+
+
+def test_a_criterion_a_step_file_references_is_verified(tmp_path: Path) -> None:
+    scenarios = {"thing.feature": "Feature: Thing\n"}
+    packet = Packet(milestone="milestone:m", elements=(_full(_CORE),), criteria=(_CRITERION,))
+    repo = _repo(
+        tmp_path, "code", dict(scenarios) | {"steps/steps.py": 'IDS = ("story:thing#ac-1",)\n'}
+    )
+
+    findings = _rule(
+        _context_for(tmp_path, packet, repos=(repo,), scenarios=scenarios), "verify/done-when"
+    )
+
+    assert findings == ()
+
+
+# ------------------------------------------------- verify/scenarios-unmodified
+
+
+def test_scenario_files_matching_the_sealed_digest_are_not_a_finding(
+    tmp_path: Path,
+) -> None:
+    scenarios = {"thing.feature": "Feature: Thing\n"}
+    packet = Packet(milestone="milestone:m", elements=(_full(_CORE),), criteria=(_CRITERION,))
+    repo = _repo(tmp_path, "code", dict(scenarios))
+
+    findings = _rule(
+        _context_for(tmp_path, packet, repos=(repo,), scenarios=scenarios),
+        "verify/scenarios-unmodified",
+    )
+
+    assert findings == ()
+
+
+def test_modified_scenario_files_are_a_finding(tmp_path: Path) -> None:
+    scenarios = {"thing.feature": "Feature: Thing\n"}
+    packet = Packet(milestone="milestone:m", elements=(_full(_CORE),), criteria=(_CRITERION,))
+    repo = _repo(tmp_path, "code", {"thing.feature": "Feature: Thing, edited\n"})
+
+    findings = _rule(
+        _context_for(tmp_path, packet, repos=(repo,), scenarios=scenarios),
+        "verify/scenarios-unmodified",
+    )
+
+    assert [f.rule_id for f in findings] == ["verify/scenarios-unmodified"]
+    # The message carries both digests, so a human can tell which side moved.
+    assert scenario_digest({"thing.feature": "Feature: Thing, edited\n"}) in findings[0].message
+    assert scenario_digest(scenarios) in findings[0].message
+    assert findings[0].severity is Severity.ERROR
+
+
+# ------------------------------------------------------ verify/step-assertions
+
+
+def test_a_step_file_without_assertions_is_a_finding(tmp_path: Path) -> None:
+    packet = Packet(milestone="milestone:m", elements=(_full(_CORE),), criteria=(_CRITERION,))
+    repo = _repo(tmp_path, "code", {"steps/steps.py": 'IDS = ("story:thing#ac-1",)\n'})
+
+    findings = _rule(_context_for(tmp_path, packet, repos=(repo,)), "verify/step-assertions")
+
+    assert [f.source for f in findings] == ["steps/steps.py"]
+    assert findings[0].severity is Severity.WARN  # a heuristic warns; --strict promotes
+
+
+def test_a_step_file_with_assertions_is_not_a_finding(tmp_path: Path) -> None:
+    packet = Packet(milestone="milestone:m", elements=(_full(_CORE),), criteria=(_CRITERION,))
+    steps = 'IDS = ("story:thing#ac-1",)\n\n\ndef check():\n    assert IDS\n'
+    repo = _repo(tmp_path, "code", {"steps/steps.py": steps})
+
+    findings = _rule(_context_for(tmp_path, packet, repos=(repo,)), "verify/step-assertions")
+
+    assert findings == ()
+
+
+# ------------------------------------------------------------- end to end
+
+
+def test_a_clean_reconciliation_against_the_clean_fixture_passes(tmp_path: Path) -> None:
+    """The spec's end-to-end: a packet sealed for real from ``clean/``'s
+    milestone, and a repo built to satisfy every rule at once — the report is
+    empty and the exit is OK."""
+    _, out = _seal(tmp_path, "--format", "json", out=tmp_path / "packet")
+    feature = (out / "features" / "cancel-order.feature").read_text(encoding="utf-8")
+    # The seal must actually have digested this file, or rule 6 would be
+    # passing vacuously: pin the fixture before trusting the verdict.
+    lock = PacketLock.model_validate_json((out / "packet.lock").read_text(encoding="utf-8"))
+    assert lock.scenarios_digest == scenario_digest({"cancel-order.feature": feature})
+    repo = _repo(
+        tmp_path, "code", {"cancel-order.feature": feature, "steps/test_steps.py": _CLEAN_STEPS}
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "verify",
+            "--packet",
+            str(out / "packet.lock"),
+            "--repo",
+            str(repo),
+            "--diff-base",
+            "HEAD",
+        ],
+    )
+
+    assert result.exit_code == ExitCode.OK
     assert result.stdout == ""
