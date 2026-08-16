@@ -32,15 +32,18 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import sqlite3
 import subprocess
 from collections.abc import Iterator
 from contextlib import contextmanager
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 from syrupy.assertion import SnapshotAssertion
 from typer.testing import CliRunner
 
+from absicht import runstore
 from absicht.cli import app
 from absicht.cli._common import ExitCode
 from absicht.gherkin import render_feature, scenario_digest
@@ -395,3 +398,82 @@ def test_seal_at_a_rev_stamps_that_revs_sha(tmp_path: Path) -> None:
     lock = json.loads((tmp_path / "out" / "packet.lock").read_text(encoding="utf-8"))
     assert lock["design_rev"] == resolve_rev(first, store)
     assert lock["design_rev"] != current_rev(store)
+
+
+# ----------------------------------------------------------------- the run store
+
+
+def test_issuance_is_recorded_beside_the_store(tmp_path: Path) -> None:
+    """``docs/tasks/58-run-store.md``: ``ab packet`` records what addendum §8
+    asks — milestone, design rev, packet id, timestamp, target agent — in the
+    store's own ``build/runs.db``. The id is the digest of milestone plus
+    design rev, so the unsealed and the sealed issuance of one milestone are
+    two packets: they were built at two revs."""
+    store = tmp_path / "store"
+    shutil.copytree(CLEAN, store)
+    _as_repo(store)
+    rev = current_rev(store)
+
+    plain = _packet("--out", str(tmp_path / "plain"), "--no-features", store=store)
+    sealed = _packet(
+        "--out", str(tmp_path / "sealed"), "--seal", "--target-agent", "agent/one", store=store
+    )
+
+    assert plain.exit_code == ExitCode.OK
+    assert sealed.exit_code == ExitCode.OK
+    by_id = {issued.packet_id: issued for issued in runstore.packets_for(store, "milestone:m1")}
+    assert set(by_id) == {
+        runstore.packet_id("milestone:m1", ""),
+        runstore.packet_id("milestone:m1", rev),
+    }
+    assert by_id[runstore.packet_id("milestone:m1", "")] == runstore.IssuedPacket(
+        packet_id=runstore.packet_id("milestone:m1", ""),
+        milestone="milestone:m1",
+        design_rev="",
+        issued_at=by_id[runstore.packet_id("milestone:m1", "")].issued_at,
+        target_agent=None,
+    )
+    assert by_id[runstore.packet_id("milestone:m1", rev)].design_rev == rev
+    assert by_id[runstore.packet_id("milestone:m1", rev)].target_agent == "agent/one"
+    # The timestamp is the CLI's clock, spelled ISO-8601 UTC.
+    for issued in by_id.values():
+        assert datetime.fromisoformat(issued.issued_at).utcoffset() == timedelta(0)
+
+
+def test_reissuing_upserts_the_issuance_record(tmp_path: Path) -> None:
+    """Regeneration is the normal case: re-issuing the same packet is the
+    newest issuance of one packet, not a second row."""
+    store = tmp_path / "store"
+    shutil.copytree(CLEAN, store)
+
+    first = _packet(
+        "--out", str(tmp_path / "one"), "--no-features", "--target-agent", "agent/one", store=store
+    )
+    second = _packet(
+        "--out", str(tmp_path / "two"), "--no-features", "--target-agent", "agent/two", store=store
+    )
+
+    assert first.exit_code == ExitCode.OK
+    assert second.exit_code == ExitCode.OK
+    (issued,) = runstore.packets_for(store, "milestone:m1")
+    assert issued.packet_id == runstore.packet_id("milestone:m1", "")
+    assert issued.target_agent == "agent/two"
+
+
+def test_a_future_run_store_fails_the_command_before_it_writes(tmp_path: Path) -> None:
+    """A ``runs.db`` left by a newer ``ab`` is refused rather than guessed at:
+    the exit names the mismatch (4), the message names the file, and the
+    packet is not half-delivered on top of it."""
+    store = tmp_path / "store"
+    shutil.copytree(CLEAN, store)
+    db = store / "build" / "runs.db"
+    db.parent.mkdir(parents=True)
+    conn = sqlite3.connect(db)
+    conn.execute(f"PRAGMA user_version = {runstore.USER_VERSION + 1}")
+    conn.close()
+
+    result = _packet("--out", str(tmp_path / "out"), "--no-features", store=store)
+
+    assert result.exit_code == ExitCode.SCHEMA_MISMATCH
+    assert "runs.db" in result.stderr
+    assert not (tmp_path / "out").exists()

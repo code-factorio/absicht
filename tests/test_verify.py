@@ -29,16 +29,18 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import sqlite3
 import subprocess
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
+from absicht.runstore import RunResult
 from click.testing import Result
 from typer.testing import CliRunner
 
-from absicht import verify
+from absicht import runstore, verify
 from absicht.cli import app
 from absicht.cli._common import DEFAULT_PACKET_DIR, ExitCode
 from absicht.findings import RULES, Finding, Severity, finding
@@ -883,4 +885,119 @@ def test_a_clean_reconciliation_against_the_clean_fixture_passes(tmp_path: Path)
     )
 
     assert result.exit_code == ExitCode.OK
+    assert result.stdout == ""
+
+
+# ------------------------------------------------------------------ the run store
+
+
+def test_the_run_is_recorded_beside_the_design_store(
+    tmp_path: Path, sealed: tuple[Path, Path]
+) -> None:
+    """``docs/tasks/58-run-store.md``: every verification run lands in the
+    design store's ``build/runs.db`` — the packet id the issuance digest
+    spells, the verified repo's HEAD, one row per criterion: ``checked`` with
+    the referencing file as evidence, ``no_check`` without one. Recorded
+    whatever the verdict; a run with findings is still a run."""
+    store, lock_path = sealed
+    packet, lock = verify.load_sealed_packet(lock_path)
+    feature = (lock_path.parent / "features" / "cancel-order.feature").read_text(encoding="utf-8")
+    repo = _repo(
+        tmp_path,
+        "impl",
+        {
+            "cancel-order.feature": feature,
+            "tests/test_cancel.py": "def test_cancel():\n    assert True  # story:cancel-order#ac-1\n",
+        },
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "--store",
+            str(store),
+            "verify",
+            "--packet",
+            str(lock_path),
+            "--repo",
+            str(repo),
+            "--diff-base",
+            "HEAD",
+        ],
+    )
+
+    # ac-2 and ac-3 have nothing referencing them: the run has findings, and
+    # is recorded anyway.
+    assert result.exit_code == ExitCode.FINDINGS
+    (run,) = runstore.runs_for(store, runstore.packet_id(packet.milestone, lock.design_rev))
+    assert run.commit_sha == current_rev(repo)
+    assert run.results == (
+        RunResult(
+            criterion="story:cancel-order#ac-1",
+            result="checked",
+            evidence_ref="tests/test_cancel.py",
+        ),
+        RunResult(criterion="story:cancel-order#ac-2", result="no_check", evidence_ref=None),
+        RunResult(criterion="story:cancel-order#ac-3", result="no_check", evidence_ref=None),
+    )
+
+
+def test_a_verify_with_nowhere_to_record_still_verifies(
+    tmp_path: Path, sealed: tuple[Path, Path]
+) -> None:
+    """Verification is offline: when no design store can be located beside it,
+    the run leaves no history — said on stderr, never swallowing the verdict."""
+    _, lock_path = sealed
+    repo = _repo(tmp_path, "impl", {"cancel-order.feature": "Feature: x\n"})
+
+    result = runner.invoke(
+        app,
+        [
+            "--store",
+            str(tmp_path / "nowhere"),
+            "verify",
+            "--packet",
+            str(lock_path),
+            "--repo",
+            str(repo),
+            "--diff-base",
+            "HEAD",
+        ],
+    )
+
+    assert result.exit_code == ExitCode.FINDINGS
+    assert "not recorded" in result.stderr
+    assert "nowhere" in result.stderr
+
+
+def test_a_future_run_store_fails_the_verification_loudly(
+    tmp_path: Path, sealed: tuple[Path, Path]
+) -> None:
+    """A ``runs.db`` left by a newer ``ab`` is refused rather than guessed at:
+    the exit names the mismatch (4) before any report is printed."""
+    store, lock_path = sealed
+    db = store / "build" / "runs.db"
+    db.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(db)
+    conn.execute(f"PRAGMA user_version = {runstore.USER_VERSION + 1}")
+    conn.close()
+    repo = _repo(tmp_path, "impl", {"app.py": "one\n"})
+
+    result = runner.invoke(
+        app,
+        [
+            "--store",
+            str(store),
+            "verify",
+            "--packet",
+            str(lock_path),
+            "--repo",
+            str(repo),
+            "--diff-base",
+            "HEAD",
+        ],
+    )
+
+    assert result.exit_code == ExitCode.SCHEMA_MISMATCH
+    assert "runs.db" in result.stderr
     assert result.stdout == ""

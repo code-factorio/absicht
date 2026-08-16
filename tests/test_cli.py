@@ -89,6 +89,7 @@ SURFACE: dict[str, tuple[list[str], list[str]]] = {
             "--features-dir",
             "--rev",
             "--seal",
+            "--target-agent",
         ],
     ),
     "features": (["features", "milestone:m1"], ["--out", "--stdout", "--check"]),
