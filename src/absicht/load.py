@@ -14,8 +14,9 @@ and `packet` just want the data plus a list of what went wrong.
 `layout.yaml` stays outside `LoadedStore`: it is not an element collection
 but positions pinned by `ab layout` (`docs/tasks/25-layout.md`), and
 `absicht.layout` owns reading and writing it through the same codec.
-`resolve_store` lands the store-location modes from `cli.md`'s global
-flags table — the CLI maps its failure to `ExitCode.USAGE`.
+`locate_store` lands the store-location modes from `cli.md`'s global
+flags table (`resolve_store` is its root-only view) — the CLI maps the
+failure to `ExitCode.USAGE`.
 """
 
 from __future__ import annotations
@@ -221,6 +222,30 @@ class StoreResolutionError(Exception):
     """
 
 
+class StoreMode(StrEnum):
+    """How a store location was reached — the two modes of `cli.md`'s global
+    flags table.
+
+    A directory is the whole store with the code beside it; a `.absicht`
+    marker file is an implementing repo pointing at a design store that lives
+    elsewhere. Whether watermarks mean anything depends entirely on which of
+    the two a store arrived as, which is why the resolution says so."""
+
+    EMBEDDED = "embedded"
+    REFERENCE = "reference"
+
+
+@dataclass(frozen=True, slots=True)
+class LocatedStore:
+    """A store location, resolved: where the store is, and how it was reached.
+
+    `ab status` is the caller that needs both halves; everything else reads
+    `resolve_store` for the root alone."""
+
+    root: Path
+    mode: StoreMode
+
+
 _REMOTE_DESIGN = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*://|^[\w.-]+@[\w.-]+:")
 """`design:` targets that would need fetching: URLs and scp-style git remotes.
 
@@ -231,7 +256,17 @@ a silent partial fetch.
 
 
 def resolve_store(path: Path) -> Path:
-    """Resolve a store location — `--store`, `$ABSICHT_STORE` or `.absicht`.
+    """Resolve a store location to the store's root — `--store`,
+    `$ABSICHT_STORE` or `.absicht`.
+
+    The walk itself lives in `locate_store`, which also says which mode the
+    location was reached in; this is the root-only view of it."""
+    return locate_store(path).root
+
+
+def locate_store(path: Path) -> LocatedStore:
+    """Resolve a store location — `--store`, `$ABSICHT_STORE` or `.absicht` —
+    and report which mode it was reached in.
 
     Embedded mode: the path is a directory and is the store itself. Reference
     mode: the path is a `.absicht` marker file whose `design` names the store,
@@ -242,7 +277,7 @@ def resolve_store(path: Path) -> Path:
     Raises `StoreResolutionError` when there is no store to load.
     """
     if path.is_dir():
-        return path
+        return LocatedStore(root=path, mode=StoreMode.EMBEDDED)
     if not path.is_file():
         raise StoreResolutionError(
             f"no store at {path}: not a store directory and not a .absicht marker file"
@@ -263,7 +298,7 @@ def resolve_store(path: Path) -> Path:
         raise StoreResolutionError(
             f"the marker at {path} names {design}, which is not a store directory"
         )
-    return design
+    return LocatedStore(root=design, mode=StoreMode.REFERENCE)
 
 
 def _read_marker(path: Path) -> Marker:

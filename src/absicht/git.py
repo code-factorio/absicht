@@ -1,8 +1,9 @@
 """One thin place that shells out to git, and only ever reads.
 
 Every feature that needs a revision or a diff — `--rev`, `--diff-base`,
-`--changed-only`, `--since`, `ab diff`, `ab marker stamp` — goes through this
-module instead of building its own `subprocess.run`, so they all read history
+`--changed-only`, `--since`, `ab diff`, `ab marker stamp`, `ab status` — goes
+through this module instead of building its own `subprocess.run`, so they all
+read history
 the same way and there is exactly one place for the parts `bandit` exists to
 scrutinise: an argv list, never a shell, non-zero exits handled explicitly.
 
@@ -133,6 +134,27 @@ def changed_paths(base: str, repo: Path = Path()) -> frozenset[Path]:
     """
     lines = _git(["diff", "--name-only", f"{base}...HEAD"], repo).stdout
     return frozenset(Path(line) for line in lines.splitlines())
+
+
+def changed_between(
+    ref_a: str, ref_b: str, repo: Path = Path(), paths: Sequence[Path] = ()
+) -> frozenset[Path]:
+    """The paths that differ between two revisions, two-dot.
+
+    Both revs are named outright — the shape "what landed since the
+    watermark" needs (`ab status` is the caller): everything between the rev
+    a unit landed at and the rev it is judged against, not what a branch did
+    since it diverged. `paths` restricts the answer to the store's own
+    directories. A sha git knows but no ref names works here too: the empty
+    tree's well-known sha is how "nothing has landed yet" is spelled as a
+    revision.
+
+    Paths are relative to the repository root.
+    """
+    args = ["diff", "--name-only", f"{ref_a}..{ref_b}"]
+    if paths:
+        args += ["--", *(path.as_posix() for path in paths)]
+    return frozenset(Path(line) for line in _git(args, repo).stdout.splitlines())
 
 
 def commit_count(path: Path, repo: Path = Path()) -> int:

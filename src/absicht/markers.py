@@ -28,7 +28,9 @@ it. It judges the marker's *shape* — which units, which paths — and never
 the watermarks (how far behind they are is drift, `ab status`'s entire
 subject) nor the marker's `design` field (where a marker points is
 discovery, and the store was never asked). Disagreements are findings at
-error severity; the README calls a mismatch an error outright.
+error severity; the README calls a mismatch an error outright. `read` is
+the locating half of check without the comparison, shared with `ab
+status`, which judges exactly the watermarks check refuses to.
 
 `ab marker stamp` (docs/tasks/46-marker-stamp.md) is the advancing hand: it
 moves exactly one unit's `at`/`design_rev` and never the marker's shape,
@@ -119,6 +121,25 @@ def sync(design: Design, repo: Path, *, design_url: str) -> Marker:
     fresh = _expected(design, repo, design_url=design_url, previous=previous)
     marker_path.write_text(dump_singleton(fresh), encoding="utf-8")
     return fresh
+
+
+def read(repo: Path) -> Marker:
+    """The marker at `repo`, for the commands that read one without comparing
+    it (`ab status`): the same guards `check` leans on — a missing repo, an
+    embedded store where a marker file would be, no marker, a marker that does
+    not parse — each a `MarkerError` in the reader's own words rather than a
+    silently empty report."""
+    if not repo.is_dir():
+        raise MarkerError(f"--repo {repo}: no such directory")
+    marker_path = repo / _MARKER
+    if marker_path.is_dir():
+        raise MarkerError(
+            f"{marker_path} is a directory: an embedded store, which carries no marker — "
+            "its status is computed from the store itself"
+        )
+    if not marker_path.is_file():
+        raise MarkerError(f"{marker_path}: no marker to read — `ab marker sync` writes one")
+    return _read(marker_path, refusal="its watermarks cannot be read")
 
 
 def check(design: Design, repo: Path) -> tuple[Finding, ...]:

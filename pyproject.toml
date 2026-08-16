@@ -161,6 +161,7 @@ type = "layers"
 layers = [
     "absicht.__main__",
     "absicht.cli",
+    "absicht.status",
     "absicht.markers",
     "absicht.diagram",
     "absicht.diff",

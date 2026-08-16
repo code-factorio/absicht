@@ -152,6 +152,7 @@ IMPLEMENTED = {
     "render",
     "schema",
     "show",
+    "status",
     "trace",
     "verify",
 }

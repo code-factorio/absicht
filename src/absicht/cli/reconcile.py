@@ -17,6 +17,7 @@ from typing import Annotated
 import typer
 
 from absicht.build import BuildError
+from absicht.build import build as build_design
 from absicht.cli._app import app
 from absicht.cli._common import (
     DEFAULT_DIFF_BASE,
@@ -28,19 +29,20 @@ from absicht.cli._common import (
     ReportFormat,
     effective_format,
     options,
-    unimplemented,
 )
 from absicht.cli.query import _design
 from absicht.diff import diff as diff_store
 from absicht.findings import ExitCode, Report
 from absicht.git import GitError, current_rev
-from absicht.load import StoreResolutionError, resolve_store
+from absicht.load import StoreMode, StoreResolutionError, locate_store, resolve_store
 from absicht.markers import MarkerError
 from absicht.markers import check as check_marker
 from absicht.markers import stamp as stamp_marker
 from absicht.markers import sync as sync_marker
 from absicht.models import SCHEMA_VERSION
 from absicht.render import UnknownRefError
+from absicht.status import StatusUsageError
+from absicht.status import status as status_report
 from absicht.verify import (
     VerifyUsageError,
     context_for,
@@ -171,7 +173,63 @@ def status(
     A watermark is a hint, not proof — it tends to over-claim, since a merge
     stamps it whether or not the work was finished.
     """
-    unimplemented(ctx)
+    opts = options(ctx)
+    try:
+        # locate_store rather than _design's resolve_store: which mode the
+        # store was reached in is the report's whole shape, and only the
+        # locating walk knows it.
+        located = locate_store(opts.store)
+        design = build_design(located.root, rev=opts.rev)
+    except (StoreResolutionError, GitError, ValueError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(ExitCode.USAGE) from exc
+    except BuildError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(ExitCode.FINDINGS) from exc
+    try:
+        report = status_report(
+            design,
+            located,
+            repos=tuple(repo) if repo else (),
+            unit=unit,
+            since=since,
+            behind_only=behind_only,
+        )
+    except (StatusUsageError, MarkerError, GitError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(ExitCode.USAGE) from exc
+    output = effective_format(ctx, output_format, opts.json_output, json_member=PlainFormat.JSON)
+    body = json.dumps(report.render_json()) if output is PlainFormat.JSON else report.render_text()
+    if body:
+        # Empty stays silent, like `list`, `gaps` and `trace`: no blank line
+        # where a fact would be.
+        typer.echo(body)
+    if located.mode is StoreMode.EMBEDDED:
+        _note_reference_only(repo, since, behind_only, fail_on_drift)
+    if fail_on_drift and report.drift:
+        raise typer.Exit(ExitCode.FINDINGS)
+
+
+def _note_reference_only(
+    repo: list[Path] | None, since: str | None, behind_only: bool, fail_on_drift: bool
+) -> None:
+    """Say, rather than silently ignore, the flags that mean something only in
+    reference mode: embedded, design and code land in the same commit and
+    nothing can be behind (docs/tasks/42-status.md asks for exactly that
+    honesty). stderr, so the machine output stays clean."""
+    passed = [
+        *(["--repo"] if repo else []),
+        *(["--since"] if since is not None else []),
+        *(["--behind-only"] if behind_only else []),
+        *(["--fail-on-drift"] if fail_on_drift else []),
+    ]
+    if passed:
+        verb = "is" if len(passed) == 1 else "are"
+        typer.echo(
+            f"embedded mode: {', '.join(passed)} {verb} reference-mode only — "
+            "design and code land in the same commit, nothing can be behind",
+            err=True,
+        )
 
 
 @app.command(rich_help_panel=PANEL)

@@ -273,6 +273,8 @@ def test_unit_restricts_to_one_watermark(
         f"since {revs['first'][:7]}",
         "consumer behind: seam:invoice-events: component:billing-worker in "
         f"{billing} has not caught up; provider component:orders-api is current",
+        # Coverage stays store-wide: --unit restricts the watermark half.
+        "done_when unmet: milestone:m1 story:invoice-on-charge#ac-1: nothing claims to verify it",
     ]
     assert ghost.exit_code == ExitCode.USAGE
     assert "component:ghost" in ghost.stderr
