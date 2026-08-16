@@ -5,56 +5,32 @@ description: Operational playbook for absicht task tickets — harness and gate 
 
 # absicht task-run playbook
 
-Operational facts the binding rules do not state, observed through Render —
-READ whole before acting: keyword-grepping it matches nothing.
+Operational facts the binding rules do not state, observed through Packet & verify — READ whole: grepping it for keywords matches nothing.
 
 ## Environment and command forms
-- The FORCE_COLOR flag-test failure is FIXED (40a1d0b: the test strips
-  ANSI; suite green run RAW, even under GITHUB_ACTIONS=true). A
-  flag-presence failure now is a NEW color-coupled test, never your diff.
-- zsh: words starting with `=` expand (bare `==`, `echo ===`) and unquoted
-  non-matching globs abort the command (`--include=*.py`) — quote patterns.
-- `ab`'s `--store`/`--rev` are root options: BEFORE the subcommand (after
-  it: USAGE error); only `--json` works in both positions.
-- `rp` is venv-only (bare `rp` is a 127 — `uv run rp`); `rp comment ID
-  "text"` is positional, `rp close` uses `--reason`.
-- `docs/users/` doesn't exist yet (docs/: adr, maintainers, spec, tasks).
+- zsh still bites: a word starting with `=` (`echo ===`, `=====`) fails expansion AND THE REST OF THE LINE NEVER RUNS — earlier output returns, later commands are silently skipped, so it reads like truncated success (two reviewers this phase). Unquoted non-matching globs abort the line too.
+- `ab`'s `--store`/`--rev` are root options: BEFORE the subcommand; only `--json` works in both. `rp` is venv-only (`uv run rp`); `rp comment ID "text"` is positional, `rp close` uses `--reason`.
+- A "[model] temporarily unavailable … cannot determine the safety of Bash" tool error is transient: continue read-only, retry unchanged.
+
+## Fixtures and smoke tests
+- tests/fixtures/systems/<name>/ IS a store root: element dirs sit at the top (stories/, milestones/, …, system.yaml) with NO `.absicht/` inside — grep `<name>/<kind>/*.md`, never `<name>/.absicht/<kind>/`.
+- Smoke-testing in /tmp: a fixture copy carries no marker, so default store discovery refuses it (`no store at .absicht`) — drive it with `uv run --project <repo> ab --store <copy> …` from one sandbox cwd; `--out` and build paths resolve against the cwd, not the store.
+- Golden `.ambr` are generated, byte-faithful: `uv run pytest <file>::<test> --snapshot-update`, commit with the change; growing fixtures moves OTHER tickets' snapshots. Grep fixture facts before a red assertion.
 
 ## Gates and CI
-- Local lint green + CI fails I001 = STALE `.ruff_cache` (underscore,
-  gitignored) re-serving verdicts — CI runs cacheless; the hyphenated
-  `.ruff-cache` isn't ruff's dir. Trust lint only via `ruff check
-  --no-cache`; triage CI at `gh run view <id> --log-failed`.
-- deptry DEP002 on deps src/ never imports: `rp`, test-only packages and
-  mypy `types-*` stubs go in the dev group; commit uv.lock alongside
-  pyproject.toml.
-- After EVERY edit round `uv run ruff check --fix <files> && uv run ruff
-  format <files>`, then re-Read before the next Edit (autofix rewrites
-  files). PT011/PT018 on tests, SIM105 on src: no auto-fix.
-- `verify.sh mutation` re-serves CACHED verdicts from gitignored `mutants/`
-  when only tests changed (`rm -rf mutants` first); check the `[tool.mutmut]`
-  paths before running; output: `tr '\r' '\n' | grep -a "mutation:"`.
-- Before commit ONE full verify.sh suffices — its test gate IS the whole
-  suite; a standalone full pytest just before it doubles the run.
-- The live `[[tool.importlinter.contracts]]` block is the only truth
-  (specs drift BOTH ways): insert the new layer in place, never reorder.
+- Run verify/pytest bare: the FORCE_COLOR flag-test failure is fixed (40a1d0b); a flag-presence failure now is a NEW color-coupled test.
+- Local lint green + CI fails I001 = stale `.ruff_cache` (underscore, gitignored) re-serving verdicts — trust lint only via `ruff check --no-cache`; triage CI at `gh run view <id> --log-failed`.
+- deptry DEP002 on deps src/ never imports: `rp`, test-only packages and mypy `types-*` stubs go in the dev group; commit uv.lock with pyproject.
+- After EVERY edit round `ruff check --fix && ruff format` the touched files, then re-Read before the next Edit. Not auto-fixed: PT011/PT018 on tests; SIM105 and PERF401 on src.
+- The live `[[tool.importlinter.contracts]]` block is the only truth (specs drift BOTH ways): insert the new layer in place, never reorder.
+- Before a commit ONE full verify.sh suffices — its test gate IS the whole suite; a standalone full pytest right before it doubles the run.
 
-## Snapshots and fixtures
-- Golden `.ambr` are generated, byte-faithful: regenerate via `uv run
-  pytest <file>::<test> --snapshot-update`, commit with the change, never
-  hand-edit; growing fixtures moves OTHER tickets' snapshots. Count/grep
-  fixtures before a red assertion assumes their facts (site: 3 fixes).
+## Mutation economy
+- Owed only when tests of MUTATION_SCOPE (model/, check.py, packet.py) changed — check that first; render/, cli/ and verify.py are NOT gated and the gate is a floor (45%), not zero survivors: perfecting ungated code cost two extra minutes-long runs on one ticket.
+- Iterate on survivors by name (`uv run mutmut run absicht.render.x__…`) instead of full re-runs; `rm -rf mutants` before a run whose score you will trust; verdicts via `tr '\r' '\n' | grep -a "mutation:"`, survivors via `uv run mutmut results`.
 
-## Blocked rounds, reporting, committing
-- A blocked round is ONE command, `git status --porcelain`, REVIEWERS too:
-  a prior round's verified dirty path plus `git log -1` unmoved IS fresh
-  verification, and a zero-commit round needs NO suite run — two reviewers
-  burned full verifies re-deriving the chain on a tree equal to HEAD.
-  Prior verdicts, even uncommitted: `grep "<ticket>" .rohrpost/log.jsonl`.
-- Foreign staged work beside yours: scope commits to your paths; `git add`
-  new files first — `git commit -- <path>` on an untracked path errors.
-- Commit ids in reports: copy from `git log`, never hand-complete prefixes.
-- Backticks in commit messages need `git commit -m "$(cat <<'EOF' ...
-  EOF)"` or `-F <file>`; plain -m runs command substitution.
-- Multi-line python probes go to /tmp/probe.py; inline `uv run python -c`
-  quoting fights the shell.
+## Starting, reporting, committing
+- FIRST move on any dispatched ticket: `grep <id> .rohrpost/log.jsonl` and `git log --oneline --grep=<slug>` — one arrived already delivered by an earlier round (implement became claim + audit). The same grep settles blocked rounds: a prior verdict plus unmoved HEAD is fresh verification, and a zero-commit round needs no suite run (reviewers included).
+- Full SHAs in rp comments: paste from output or interpolate `$(git rev-parse …)` — hand-completing a prefix shipped a wrong tail twice; the log is append-only, so each fix costs another commit.
+- Foreign staged work beside yours: scope commits to your paths; `git add` new files first — `git commit -- <path>` on an untracked path errors.
+- Backticks in commit messages need `git commit -m "$(cat <<'EOF' … EOF)"` or `-F <file>`. Multi-line python probes go to a /tmp file, never inline `uv run python -c`.
