@@ -18,10 +18,10 @@ import json
 import shutil
 from pathlib import Path
 
-import absicht.migrate
 import pytest
 from typer.testing import CliRunner
 
+import absicht.migrate
 from absicht.cli import app
 from absicht.cli._common import ExitCode
 from absicht.models import SCHEMA_VERSION

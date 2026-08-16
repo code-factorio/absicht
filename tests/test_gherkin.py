@@ -22,9 +22,9 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from absicht.gherkin import render_feature, scenario_digest
 from syrupy.assertion import SnapshotAssertion
 
+from absicht.gherkin import render_feature, scenario_digest
 from absicht.load import load_store
 from absicht.models import Story
 from absicht.resolve import resolve
