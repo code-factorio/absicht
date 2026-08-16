@@ -104,8 +104,9 @@ def test_depth_two_reaches_an_outgoing_hop_depth_one_leaves_out() -> None:
     assert "seam:order-events" not in one.stdout
     assert "seam:order-events" in two.stdout
     # And indented one level deeper than the hop that reached it, which is
-    # the distance-from-REF the indentation encodes.
-    assert "    seam:order-events (consumes)" in two.stdout
+    # the distance-from-REF the indentation encodes. A whole-line match: a
+    # substring would also pass with the indent drifted deeper.
+    assert "    seam:order-events (consumes)" in two.stdout.splitlines()
     assert one.stdout.count("story:cancel-order") == two.stdout.count("story:cancel-order") == 1
 
 
