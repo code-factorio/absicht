@@ -341,6 +341,8 @@ def _packet_document() -> str:
                     element={
                         "id": "component:core",
                         "title": "Core",
+                        "state": "",
+                        "responsibility": "Do things",
                         "tags": [],
                         "owner": None,
                         "body": "Prose that must survive.\n\n",
@@ -382,10 +384,12 @@ def test_packet_markdown_carries_every_obligation_and_each_scope_block() -> None
 
     assert document.startswith("# Packet: M\n\n`milestone:m` — The thing works.\n")
     # Two scope blocks, both present — the second must not clobber the first —
-    # separated by a blank line, prose included and trailing blank lines gone.
-    assert "Prose that must survive.\n\n### Side" in document
+    # separated by a blank line, prose included and trailing blank lines gone,
+    # with the prose itself a blank line after the last field.
+    assert "### Core" in document
+    assert "- responsibility: Do things\n\nProse that must survive.\n\n### Side" in document
     # Empty-valued fields and the header four stay out of the bullet list.
-    for absent in ("- tags:", "- owner:", "- body:", "- id:", "- title:"):
+    for absent in ("- tags:", "- owner:", "- body:", "- id:", "- title:", "- state:"):
         assert absent not in document
     # The ring stays summarized to one line, never a block of its own.
     assert "- `seam:edge` — Edge" in document
