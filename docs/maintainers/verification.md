@@ -91,7 +91,7 @@ rather than whether the code is.
 | xenon max-absolute E | `scripts/verify.sh` | worst block is A (3) | loose on purpose: see below |
 | xenon max-average A, max-modules B | `scripts/verify.sh` | A (2.0) | comfortable, and worth keeping |
 | pyscn max-complexity 15 | `scripts/verify.sh` | nothing near it | loose on purpose; pyscn's default is 10 |
-| mutation ≥ 45% | `MUTATION_FLOOR` in `scripts/verify.sh` | 86% | a starting guess, to be revised on first real data |
+| mutation ≥ 45% | `MUTATION_FLOOR` in `scripts/verify.sh` | 88% | a starting guess, to be revised on first real data |
 
 ### Why the complexity ceilings are loose
 
