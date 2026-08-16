@@ -1,0 +1,21 @@
+# serializer version: 1
+# name: test_the_rendered_feature_is_pinned_whole
+  '''
+  Feature: Cancel an order
+  
+    As a customer
+    I want to cancel an order
+    So that the order is cancelled and the refund starts
+  
+    Scenario: story:cancel-order#ac-1
+      When the customer cancels a refundable order
+      Then the order is cancelled
+      And the refund starts
+  
+    Scenario: story:cancel-order#ac-2
+      Given an order that has already shipped
+      When the customer asks to cancel it
+      Then cancellation is refused
+  
+  '''
+# ---

@@ -161,6 +161,7 @@ layers = [
     "absicht.__main__",
     "absicht.cli",
     "absicht.render",
+    "absicht.gherkin",
     "absicht.init",
     "absicht.new",
     "absicht.migrate",
