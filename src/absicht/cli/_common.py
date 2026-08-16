@@ -1,9 +1,13 @@
 """Shared vocabulary for the ``ab`` command surface.
 
-Exit codes, the value sets options choose from, the flags every command shares,
-and the default store paths. Nothing here knows what a design store contains —
-this module describes the *interface*, and the library behind it is free to
-change shape without the surface moving.
+The value sets options choose from, the flags every command shares, and the
+default store paths. Nothing here knows what a design store contains — this
+module describes the *interface*, and the library behind it is free to change
+shape without the surface moving.
+
+``ExitCode`` and the severity grades are defined in ``absicht.findings`` — the
+lowest layer both the surface and the report machinery may import — and only
+imported here.
 
 The option value sets are separate enums rather than one big ``Format`` because
 Typer derives a command's choices from the annotation: sharing one enum would
@@ -16,11 +20,13 @@ from __future__ import annotations
 import os
 import sys
 from dataclasses import dataclass, replace
-from enum import IntEnum, StrEnum
+from enum import StrEnum
 from pathlib import Path
 from typing import Annotated, NoReturn
 
 import typer
+
+from absicht.findings import ExitCode
 
 # --------------------------------------------------------------- store paths
 
@@ -36,27 +42,6 @@ DEFAULT_FEATURES_DIR = Path("features")
 
 DEFAULT_DIFF_BASE = "origin/HEAD"
 """What counts as "this change" when nothing says otherwise."""
-
-
-class ExitCode(IntEnum):
-    """What the shell sees.
-
-    ``FINDINGS`` versus ``USAGE`` is the distinction that matters: CI treats the
-    first as a real result about the design and the second as a broken pipeline.
-    ``USAGE`` is also what Click exits with on a bad flag, so the two agree
-    without us having to intercept anything.
-    """
-
-    OK = 0
-    """Success, or advisory findings only."""
-    FINDINGS = 1
-    """Findings at error severity — validation, verification, drift."""
-    USAGE = 2
-    """Usage error: bad flags, unknown ref, no store."""
-    INTERNAL = 3
-    """Internal error."""
-    SCHEMA_MISMATCH = 4
-    """Schema version mismatch; run ``ab migrate``."""
 
 
 # ------------------------------------------------------------- option values
@@ -76,12 +61,6 @@ class Kind(StrEnum):
     QUESTION = "question"
     MILESTONE = "milestone"
     EXTERNAL = "external"
-
-
-class Severity(StrEnum):
-    ERROR = "error"
-    WARN = "warn"
-    INFO = "info"
 
 
 class Overlay(StrEnum):

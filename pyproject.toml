@@ -137,18 +137,20 @@ include_external_packages = true
 # core reusable behind a web or MCP surface later, so it is enforced from the
 # first commit rather than asserted in a doc.
 #
-# The stack it grows into, once those modules exist:
+# The stack it grows into, once those modules exist (docs/tasks/00-conventions.md):
 #
 #   absicht.__main__
 #   absicht.cli
 #   absicht.status | absicht.markers
-#   absicht.render | absicht.packet          # the resolved graph, read-only
+#   absicht.render | absicht.packet | absicht.verify   # resolved graph, read-only
 #   absicht.build
 #   absicht.check
 #   absicht.resolve
 #   absicht.load
 #   absicht.codec
-#   absicht.models                           # imports nothing of ours
+#   absicht.git
+#   absicht.findings                        # cross-cutting, imported by check/verify
+#   absicht.models                          # imports nothing of ours
 #
 # Only the layers that exist are listed: import-linter fails on a named module
 # that is not there, and a contract nobody can run is worse than none.
@@ -159,6 +161,7 @@ layers = [
     "absicht.__main__",
     "absicht.cli",
     "absicht.codec",
+    "absicht.findings",
     "absicht.models",
 ]
 

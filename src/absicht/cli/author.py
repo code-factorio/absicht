@@ -20,9 +20,9 @@ from absicht.cli._common import (
     JsonOption,
     Kind,
     ReportFormat,
-    Severity,
     unimplemented,
 )
+from absicht.findings import Severity
 from absicht.models import State
 
 PANEL = "Step 1 — author and validate"
