@@ -1,9 +1,11 @@
-"""``absicht.render``: the element view behind ``ab show`` and the site's pages.
+"""``absicht.render``: the read-only projections behind ``ab show`` and
+``ab gaps`` — and, later, the site's pages.
 
-The command contract — exit codes, flags, the bytes on stdout — lives in
-``tests/test_show_cli.py``. What is pinned here is the view itself, the shape
-``docs/tasks/26-render-site.md`` builds its element pages on ("literally
-reuse 21-show.md's function"):
+The command contracts — exit codes, flags, the bytes on stdout — live in
+``tests/test_show_cli.py`` and ``tests/test_gaps_cli.py``. What is pinned here
+is the projections themselves, the shapes ``docs/tasks/26-render-site.md``
+builds on ("literally reuse" the show view; "a gaps page, reusing 23-gaps.md's
+worklist"):
 
 - ``--depth`` bounds the *outgoing* side only; the inbound side is one hop at
   any depth, because expanding both directions is the pathfinding ``ab trace``
@@ -16,18 +18,32 @@ reuse 21-show.md's function"):
   ``Index.referenced_by`` already holds: reporting dangling refs is ``ab
   check``'s job. ``broken/`` cannot reach this through the CLI (its two
   unreadable files are ``build``'s refusal), so the policy is pinned here on
-  the folded design.
+  the folded design;
+- the gaps worklist's date boundaries — the ones no fixture holds, because a
+  fixture pinned to "today" would rot: a question turns overdue strictly after
+  its due date, an external expires strictly after its expiry date, and a
+  question a decision has already resolved leaves the worklist.
 """
 
 from __future__ import annotations
 
+from datetime import date, timedelta
 from pathlib import Path
 
 import pytest
 
 from absicht.load import load_store
-from absicht.models import SCHEMA_VERSION, Design
-from absicht.render import UnknownRefError, neighbourhood
+from absicht.models import (
+    SCHEMA_VERSION,
+    Component,
+    Design,
+    External,
+    ExternalKind,
+    Question,
+    State,
+    System,
+)
+from absicht.render import UnknownRefError, neighbourhood, worklist
 from absicht.resolve import resolve
 
 FIXTURES = Path(__file__).parent / "fixtures" / "systems"
@@ -144,3 +160,98 @@ def test_json_carries_the_full_view_and_the_body_flag(clean: Design) -> None:
     assert [(link["field"], link["source"]["id"]) for link in with_body["referenced_by"]] == [
         ("satisfies", "story:cancel-order")
     ]
+
+
+# --- the gaps worklist --------------------------------------------------------
+
+# The three worklist boundaries no fixture can hold: each would need "today"
+# baked into the store, and rot the day after. Hand-built designs instead,
+# with the clock injected the way `ab check`'s policy layer already runs.
+TODAY = date(2026, 8, 16)
+
+
+def test_worklist_marks_delegated_elements_unfinished() -> None:
+    """`delegated` is the third unfinished state and the one no fixture holds:
+    decided-elsewhere is still unfinished, and without an owner the element is
+    on the list twice over."""
+    design = Design(
+        system=System(id="system:tiny", title="Tiny"),
+        components=(
+            Component(id="component:outsourced", title="Outsourced", state=State.DELEGATED),
+        ),
+    )
+
+    (only,) = worklist(design, today=TODAY)
+
+    assert only.element.id == "component:outsourced"
+    assert only.reasons == ("state=delegated", "unowned")
+
+
+def test_worklist_questions_turn_overdue_strictly_after_their_due_date() -> None:
+    """A question due today is still open — the day itself is inside the ask,
+    the same strict comparison `check` spells for expiry — and a question a
+    decision has already resolved is nobody's worklist entry, whatever its
+    state says."""
+    design = Design(
+        system=System(id="system:tiny", title="Tiny"),
+        questions=(
+            Question(id="question:today", title="Today", owner="a", due_on=TODAY),
+            Question(
+                id="question:yesterday",
+                title="Yesterday",
+                owner="a",
+                due_on=TODAY - timedelta(days=1),
+            ),
+            Question(
+                id="question:closed",
+                title="Closed",
+                owner="a",
+                state=State.SPECIFIED,
+                due_on=TODAY - timedelta(days=1),
+                resolved_by="decision:done",
+            ),
+        ),
+    )
+
+    by_id = {gap.element.id: gap for gap in worklist(design, today=TODAY)}
+
+    assert by_id["question:today"].reasons == ("state=unknown", "question-open")
+    assert by_id["question:yesterday"].reasons == ("state=unknown", "question-overdue")
+    # The date the reason hangs on travels with the entry, past or not.
+    assert by_id["question:today"].due_on == TODAY
+    assert by_id["question:yesterday"].due_on == TODAY - timedelta(days=1)
+    assert "question:closed" not in by_id
+
+
+def test_worklist_expires_an_external_strictly_after_its_expiry_date() -> None:
+    """`expires_on` means "after this, re-check": the day itself is still
+    trusted — `absicht.check`'s reading, and necessarily this one's too,
+    because the worklist reuses that module's one spelling of "expired"
+    rather than re-deriving the comparison."""
+    design = Design(
+        system=System(id="system:tiny", title="Tiny"),
+        externals=(
+            External(
+                id="external:today",
+                title="Today",
+                state=State.SPECIFIED,
+                owner="ops",
+                external_kind=ExternalKind.SERVICE,
+                expires_on=TODAY,
+            ),
+            External(
+                id="external:yesterday",
+                title="Yesterday",
+                state=State.SPECIFIED,
+                owner="ops",
+                external_kind=ExternalKind.SERVICE,
+                expires_on=TODAY - timedelta(days=1),
+            ),
+        ),
+    )
+
+    (only,) = worklist(design, today=TODAY)
+
+    assert only.element.id == "external:yesterday"
+    assert only.reasons == ("external-expired",)
+    assert only.expires_on == TODAY - timedelta(days=1)

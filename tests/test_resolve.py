@@ -46,7 +46,15 @@ EXPECTED_COUNTS: dict[str, dict[str, int]] = {
         "decisions": 1,
         "milestones": 1,
     },
-    "brownfield": {"requirements": 1, "stories": 1, "components": 2, "data": 1},
+    "brownfield": {
+        "requirements": 1,
+        "stories": 1,
+        "components": 2,
+        "data": 1,
+        "externals": 1,
+        "questions": 2,
+        "milestones": 1,
+    },
     "broken": {"externals": 1, "stories": 1, "components": 3, "decisions": 1, "questions": 1},
     "composite": {"externals": 1, "components": 2, "seams": 1, "data": 1},
 }

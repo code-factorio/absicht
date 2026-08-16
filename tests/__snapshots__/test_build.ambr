@@ -71,12 +71,97 @@
     'decisions': list([
     ]),
     'externals': list([
+      dict({
+        'assumptions': list([
+          'Idempotency keys are honoured for 24 hours.',
+          'Webhook retries continue for a week.',
+        ]),
+        'body': '',
+        'confidence': 'assumed',
+        'expires_on': '2026-01-01',
+        'external_kind': 'service',
+        'id': 'external:payment-api',
+        'owner': 'ops',
+        'source': 'externals/payment-api.md',
+        'state': 'specified',
+        'tags': list([
+        ]),
+        'title': 'Payment provider API',
+        'verified_by': 'ops',
+        'verified_on': '2025-06-01',
+        'version': '2025-04',
+      }),
     ]),
     'milestones': list([
+      dict({
+        'body': '',
+        'confidence': 'assumed',
+        'depends_on': list([
+        ]),
+        'done_when': list([
+        ]),
+        'id': 'milestone:reconcile-mvp',
+        'includes': list([
+          'story:reconcile-billing',
+        ]),
+        'may_decide': list([
+        ]),
+        'must_hold': list([
+        ]),
+        'outcome': 'Nightly reconciliation runs on the replacement, not the legacy job.',
+        'owner': 'engineering',
+        'scope': list([
+        ]),
+        'source': 'milestones/reconcile-mvp.md',
+        'state': 'unknown',
+        'tags': list([
+        ]),
+        'title': 'Reconciliation MVP',
+        'unresolved': list([
+          'question:refund-window',
+        ]),
+      }),
     ]),
     'non_functionals': list([
     ]),
     'questions': list([
+      dict({
+        'blocks': list([
+          'milestone:reconcile-mvp',
+        ]),
+        'body': '''
+          `component:legacy-billing` retries the nightly run three times and nobody
+          remembers why. Ask billing ops before designing the replacement.
+        ''',
+        'confidence': 'assumed',
+        'due_on': '2026-01-10',
+        'id': 'question:nightly-retry',
+        'method': 'ask',
+        'owner': 'finance',
+        'resolved_by': None,
+        'source': 'questions/nightly-retry.md',
+        'state': 'unknown',
+        'tags': list([
+        ]),
+        'title': 'Why does the nightly job retry three times?',
+      }),
+      dict({
+        'blocks': list([
+          'story:reconcile-billing',
+        ]),
+        'body': 'Nightly reconciliation cannot be designed until the refund window is known.',
+        'confidence': 'assumed',
+        'due_on': '2099-01-01',
+        'id': 'question:refund-window',
+        'method': 'spike',
+        'owner': 'engineering',
+        'resolved_by': None,
+        'source': 'questions/refund-window.md',
+        'state': 'unknown',
+        'tags': list([
+        ]),
+        'title': 'How long is the refund window?',
+      }),
     ]),
     'rejections': list([
     ]),

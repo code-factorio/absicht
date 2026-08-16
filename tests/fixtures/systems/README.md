@@ -13,9 +13,15 @@ the format `00-conventions.md` pins: `system.yaml` as plain YAML, one
 - **`brownfield/`** — an honest reading of a legacy system: `observed`
   elements without rationale, one `unknown` requirement with no owner (the gap
   `ab gaps` exists to surface), orphaned elements nothing points at
-  (`component:shadow-report`, `data:audit-log`). Loads without errors; the
-  findings it should produce are policy *warnings* for `ab check`, not load
-  failures — `observed` being unexplained is the honest brownfield default.
+  (`component:shadow-report`, `data:audit-log`), two open questions — one past
+  its `due_on` and blocking the not-yet-committed `milestone:reconcile-mvp`,
+  one still inside its (far-future) due date — and one external whose
+  assumptions expired in the past (`external:payment-api`, the counterpart to
+  `composite/`'s current one and the fixture `ab gaps --overdue`,
+  `--blocking` and the `external-expired` reason run against). Loads without
+  errors; the findings it should produce are policy *warnings* for `ab check`,
+  not load failures — `observed` being unexplained is the honest brownfield
+  default.
 - **`broken/`** — one clearly-named file per failure family, so a later
   `ab check` task can point `--rule X` at exactly the case that trips it.
   Two files fail at load time, on purpose: `requirements/garbage.md` is not

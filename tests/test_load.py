@@ -57,7 +57,7 @@ EXPECTED: dict[str, dict[str, int]] = {
         "errors": 0,
     },
     "brownfield": {
-        "externals": 0,
+        "externals": 1,
         "requirements": 1,
         "non_functionals": 0,
         "stories": 1,
@@ -66,8 +66,8 @@ EXPECTED: dict[str, dict[str, int]] = {
         "data": 1,
         "decisions": 0,
         "rejections": 0,
-        "questions": 0,
-        "milestones": 0,
+        "questions": 2,
+        "milestones": 1,
         "errors": 0,
     },
     "broken": {

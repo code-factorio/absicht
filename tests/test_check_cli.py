@@ -103,13 +103,15 @@ def test_brownfield_exits_findings_because_its_unknown_requirement_is_an_error()
     """The task text calls `brownfield/` "warnings only", but the fixture its
     own siblings built holds `requirement:audit-trail` unknown and unowned —
     an error by the policy layer's own severity contract, so `OK` at default
-    severity was never this store's verdict."""
+    severity was never this store's verdict. The expired external the gaps
+    task added is one more warning beside it, not a second error."""
     result = runner.invoke(app, ["--store", str(FIXTURES / "brownfield"), "check"])
 
     assert result.exit_code == ExitCode.FINDINGS
     assert _rule_ids(result.stdout) == {
         "policy/unknown-needs-owner",
         "policy/requirement-needs-realizer",
+        "policy/external-assumptions-expired",
     }
 
 

@@ -290,14 +290,15 @@ def test_brownfield_reports_exactly_its_policy_findings() -> None:
     """`brownfield/` is the honest reading of a legacy system, and the negative
     case this layer must not get wrong: every element but one is `observed`,
     and `observed` alone is never a finding — unexplained is that store's
-    honest default, not a violation. The one real gap is
-    `requirement:audit-trail`, unknown and unowned. It is also unrealized and
-    still gets the realizer finding despite being `unknown`: the spec reads "a
-    requirement needs a realizing component" unconditionally, and the warning
-    severity — not silence — is what keeps that honesty from reading as
-    breakage."""
+    honest default, not a violation. The real gaps are `requirement:audit-trail`
+    (unknown and unowned — and unrealized: the spec reads "a requirement needs
+    a realizing component" unconditionally, and the warning severity, not
+    silence, is what keeps that honesty from reading as breakage) and, since
+    the gaps task grew the fixture, `external:payment-api`, whose assumptions
+    lapsed in the past. The two questions and the milestone are owned, so the
+    unknown-owner rule still fires exactly once."""
 
-    (unowned, unrealized) = _policy("brownfield", today=date(2026, 8, 16))
+    (unowned, unrealized, expired) = _policy("brownfield", today=date(2026, 8, 16))
 
     assert unowned.rule_id == "policy/unknown-needs-owner"
     assert unowned.severity is Severity.ERROR
@@ -310,6 +311,14 @@ def test_brownfield_reports_exactly_its_policy_findings() -> None:
     assert unrealized.ref == "requirement:audit-trail"
     assert unrealized.source == "requirements/audit-trail.md"
     assert unrealized.message == "requirement:audit-trail is realized by no component"
+
+    assert expired.rule_id == "policy/external-assumptions-expired"
+    assert expired.severity is Severity.WARN
+    assert expired.ref == "external:payment-api"
+    assert expired.source == "externals/payment-api.md"
+    assert expired.message == (
+        "external:payment-api's assumptions expired on 2026-01-01 — re-check before trusting"
+    )
 
 
 def test_clean_has_no_policy_findings() -> None:
