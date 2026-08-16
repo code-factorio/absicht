@@ -1,0 +1,4 @@
+id: system:broken
+title: Deliberately broken
+state: unknown
+purpose: Exercise the failure paths.

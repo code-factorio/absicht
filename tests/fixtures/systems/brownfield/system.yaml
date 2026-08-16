@@ -1,0 +1,4 @@
+id: system:legacy
+title: Legacy billing
+state: observed
+purpose: Kept alive while its replacement is designed.
