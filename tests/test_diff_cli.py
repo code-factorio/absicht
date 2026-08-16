@@ -35,11 +35,14 @@ from absicht.models import SCHEMA_VERSION
 runner = CliRunner()
 
 # The whole answer for the fixture below, in the one order the command spells
-# it: additions, then per-element changes in id order, state before fields.
+# it: additions, removals, then per-element changes in id order, state before
+# fields.
 FULL_TEXT = [
     "+ requirement:refunds",
+    "- requirement:bulk-export",
     "~ component:catalog title: Catalog -> Catalog, retitled",
     "~ requirement:cancel-orders state: unknown -> specified",
+    '~ requirement:cancel-orders realized_by: [] -> ["component:orders"]',
     "~ seam:order-events contract: contracts/order-v1.md -> contracts/order-v2.md",
 ]
 
@@ -53,10 +56,11 @@ def _git(repo: Path, *args: str) -> str:
 
 @pytest.fixture
 def history(tmp_path: Path) -> tuple[Path, str, str]:
-    """A throwaway repo whose store moved in the three ways ``ab diff`` names:
-    one requirement added, one seam's contract rewritten, one element's state
-    advanced — plus one component retitled outside the requirements' corner of
-    the graph, the row ``--kind`` and ``--scope`` narrowing are pinned against.
+    """A throwaway repo whose store moved in every way ``ab diff`` names: one
+    requirement added, one dropped, one seam's contract rewritten, one
+    element's state advanced, one requirement gaining its realization — plus
+    one component retitled outside the requirements' corner of the graph, the
+    row ``--kind`` and ``--scope`` narrowing are pinned against.
     """
     repo = tmp_path / "repo"
     store = repo / ".absicht"
@@ -81,6 +85,10 @@ def history(tmp_path: Path) -> tuple[Path, str, str]:
         "requirements/cancel-orders.md",
         "id: requirement:cancel-orders\ntitle: Orders can be cancelled\nstate: unknown\n",
     )
+    write(
+        "requirements/bulk-export.md",
+        "id: requirement:bulk-export\ntitle: Bulk export\nstate: specified\n",
+    )
     _git(repo, "init", "-q", "-b", "main")
     # A bare CI machine has no git identity, and commits must not try to sign.
     _git(repo, "config", "user.email", "tests@absicht.invalid")
@@ -94,6 +102,7 @@ def history(tmp_path: Path) -> tuple[Path, str, str]:
         "requirements/refunds.md",
         "id: requirement:refunds\ntitle: Orders can be refunded\nstate: specified\n",
     )
+    (store / "requirements/bulk-export.md").unlink()
     write(
         "seams/order-events.md",
         "id: seam:order-events\ntitle: Order events\nstate: specified\n"
@@ -101,7 +110,8 @@ def history(tmp_path: Path) -> tuple[Path, str, str]:
     )
     write(
         "requirements/cancel-orders.md",
-        "id: requirement:cancel-orders\ntitle: Orders can be cancelled\nstate: specified\n",
+        "id: requirement:cancel-orders\ntitle: Orders can be cancelled\nstate: specified\n"
+        "realized_by:\n- component:orders\n",
     )
     write(
         "components/catalog.md",
@@ -152,7 +162,9 @@ def test_kind_narrows_the_compared_elements(history: tuple[Path, str, str]) -> N
     assert result.exit_code == ExitCode.OK
     assert result.stdout.splitlines() == [
         "+ requirement:refunds",
+        "- requirement:bulk-export",
         "~ requirement:cancel-orders state: unknown -> specified",
+        '~ requirement:cancel-orders realized_by: [] -> ["component:orders"]',
     ]
 
 
@@ -192,6 +204,7 @@ def test_json_envelopes_the_changes(history: tuple[Path, str, str]) -> None:
     assert document["to"] == second
     assert document["changes"] == [
         {"type": "added", "kind": "requirement", "ref": "requirement:refunds"},
+        {"type": "removed", "kind": "requirement", "ref": "requirement:bulk-export"},
         {
             "type": "field",
             "ref": "component:catalog",
@@ -204,6 +217,13 @@ def test_json_envelopes_the_changes(history: tuple[Path, str, str]) -> None:
             "ref": "requirement:cancel-orders",
             "before": "unknown",
             "after": "specified",
+        },
+        {
+            "type": "field",
+            "ref": "requirement:cancel-orders",
+            "field": "realized_by",
+            "before": [],
+            "after": ["component:orders"],
         },
         {
             "type": "field",
@@ -239,6 +259,10 @@ def test_md_is_a_changelog_shaped_document(history: tuple[Path, str, str]) -> No
         "",
         "- `requirement:refunds`",
         "",
+        "## Removed",
+        "",
+        "- `requirement:bulk-export`",
+        "",
         "## State transitions",
         "",
         "- `requirement:cancel-orders`: unknown -> specified",
@@ -246,6 +270,7 @@ def test_md_is_a_changelog_shaped_document(history: tuple[Path, str, str]) -> No
         "## Changed",
         "",
         "- `component:catalog` — title: Catalog -> Catalog, retitled",
+        '- `requirement:cancel-orders` — realized_by: [] -> ["component:orders"]',
         "- `seam:order-events` — contract: contracts/order-v1.md -> contracts/order-v2.md",
     ]
 
