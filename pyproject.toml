@@ -163,6 +163,7 @@ layers = [
     "absicht.init",
     "absicht.new",
     "absicht.migrate",
+    "absicht.build",
     "absicht.check",
     "absicht.resolve",
     "absicht.load",

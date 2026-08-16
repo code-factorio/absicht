@@ -229,8 +229,9 @@ Two of those five are already here. The rest:
 **Golden fixtures** — the main safety net for this repo, ahead of unit tests.
 Four small systems under `tests/fixtures/systems/`: a clean one, a brownfield
 one that is mostly `observed`, one deliberately broken for the checker, and
-one multi-repo composite. Snapshot the build artifact, a rendered page, an SVG
-and a packet. `syrupy` is already a dev dependency for this.
+one multi-repo composite. The build artifact is snapshotted per fixture in
+`tests/test_build.py`; a rendered page, an SVG and a packet are still to come.
+`syrupy` is already a dev dependency for this.
 
 **Determinism**, as its own job. Build twice from a clean checkout, diff the
 artifacts, byte-identical or fail. The same for SVG output under a pinned

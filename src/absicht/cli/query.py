@@ -9,11 +9,14 @@ the rest of this group are projections of it.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Annotated
 
 import typer
 
+from absicht.build import BuildError, design_json
+from absicht.build import build as build_design
 from absicht.cli._app import app
 from absicht.cli._common import (
     DEFAULT_DESIGN_OUT,
@@ -26,9 +29,13 @@ from absicht.cli._common import (
     Overlay,
     PlainFormat,
     TraceFormat,
+    options,
     unimplemented,
 )
-from absicht.models import Confidence, State
+from absicht.findings import ExitCode
+from absicht.git import GitError
+from absicht.load import StoreResolutionError, resolve_store
+from absicht.models import SCHEMA_VERSION, Confidence, State
 
 PANEL = "Step 2 — build, query, look at it"
 """Where these commands appear in `ab --help`."""
@@ -50,7 +57,63 @@ def build(
     Deterministic — same input, byte-identical output. Everything downstream
     reads this and nothing else.
     """
-    unimplemented(ctx)
+    opts = options(ctx)
+    try:
+        root = resolve_store(opts.store)
+        design = build_design(root, rev=opts.rev)
+    except StoreResolutionError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(ExitCode.USAGE) from exc
+    except (GitError, ValueError) as exc:
+        # `--rev` reads the store out of git: a rev that does not resolve, or
+        # a store outside any repository, is a broken invocation, not a
+        # finding about the design.
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(ExitCode.USAGE) from exc
+    except BuildError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(ExitCode.FINDINGS) from exc
+    text = design_json(design)
+    if to_stdout:
+        # `nl=False`: the document ends in the newline a file gets, so stdout
+        # is byte-identical to what a write would have produced.
+        typer.echo(text, nl=False)
+    if check_stale:
+        _check_artifact(out, text, json_output=opts.json_output, verdict_stderr=to_stdout)
+        return
+    if to_stdout:
+        return
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(text, encoding="utf-8")
+    if opts.json_output:
+        typer.echo(json.dumps({"schema_version": SCHEMA_VERSION, "out": str(out)}))
+    else:
+        typer.echo(f"wrote {out}")
+
+
+def _check_artifact(out: Path, text: str, *, json_output: bool, verdict_stderr: bool) -> None:
+    """Compare a fresh build against the artifact at ``out``, never writing it.
+
+    Raw bytes, not text, so a corrupted artifact is a drift finding rather
+    than a decode crash. A missing artifact counts as moved: the drift gate
+    exists to catch the artifact being wrong, and absent is wrong. When
+    ``--stdout`` occupies stdout with the artifact itself, the verdict moves
+    to stderr — diagnostics never mix into the machine output.
+    """
+    fresh = out.is_file() and out.read_bytes() == text.encode("utf-8")
+    if json_output:
+        typer.echo(
+            json.dumps({"schema_version": SCHEMA_VERSION, "out": str(out), "stale": not fresh}),
+            err=verdict_stderr,
+        )
+    elif fresh:
+        typer.echo(f"{out} is up to date", err=verdict_stderr)
+    else:
+        state = "differs from a fresh build" if out.is_file() else "does not exist yet"
+        typer.echo(f"stale: {out} {state}", err=verdict_stderr)
+        typer.echo(f"run ab build --out {out} to refresh", err=verdict_stderr)
+    if not fresh:
+        raise typer.Exit(ExitCode.FINDINGS)
 
 
 @app.command(rich_help_panel=PANEL)

@@ -1,0 +1,636 @@
+# serializer version: 1
+# name: test_each_fixture_builds_to_its_snapshot[brownfield]
+  dict({
+    'components': list([
+      dict({
+        'body': '''
+          Invoicing as it runs today. Nobody remembers why the nightly job retries
+          three times.
+        ''',
+        'confidence': 'assumed',
+        'consumes': list([
+        ]),
+        'contains': list([
+        ]),
+        'id': 'component:legacy-billing',
+        'implemented_by': list([
+        ]),
+        'owner': None,
+        'owns_data': list([
+        ]),
+        'provides': list([
+        ]),
+        'responsibility': '',
+        'source': 'components/legacy-billing.md',
+        'state': 'observed',
+        'tags': list([
+        ]),
+        'title': 'Legacy billing',
+      }),
+      dict({
+        'body': '',
+        'confidence': 'assumed',
+        'consumes': list([
+        ]),
+        'contains': list([
+        ]),
+        'id': 'component:shadow-report',
+        'implemented_by': list([
+        ]),
+        'owner': None,
+        'owns_data': list([
+        ]),
+        'provides': list([
+        ]),
+        'responsibility': 'Mirror billing events into the reporting warehouse.',
+        'source': 'components/shadow-report.md',
+        'state': 'observed',
+        'tags': list([
+        ]),
+        'title': 'Shadow reporting',
+      }),
+    ]),
+    'data': list([
+      dict({
+        'body': '',
+        'confidence': 'assumed',
+        'fields': list([
+        ]),
+        'id': 'data:audit-log',
+        'identity': list([
+        ]),
+        'owner': None,
+        'owner_component': None,
+        'source': 'data/audit-log.md',
+        'state': 'observed',
+        'tags': list([
+        ]),
+        'title': 'Audit log',
+      }),
+    ]),
+    'decisions': list([
+    ]),
+    'externals': list([
+    ]),
+    'milestones': list([
+    ]),
+    'non_functionals': list([
+    ]),
+    'questions': list([
+    ]),
+    'rejections': list([
+    ]),
+    'requirements': list([
+      dict({
+        'body': 'Nobody has confirmed this is actually a requirement.',
+        'confidence': 'assumed',
+        'constrains': list([
+        ]),
+        'derived_from': list([
+        ]),
+        'id': 'requirement:audit-trail',
+        'owner': None,
+        'realized_by': list([
+        ]),
+        'source': 'requirements/audit-trail.md',
+        'state': 'unknown',
+        'tags': list([
+        ]),
+        'title': 'Every charge is auditable',
+      }),
+    ]),
+    'schema_version': 1,
+    'seams': list([
+    ]),
+    'stories': list([
+      dict({
+        'acceptance': list([
+        ]),
+        'actor': 'finance',
+        'body': '',
+        'confidence': 'assumed',
+        'id': 'story:reconcile-billing',
+        'outcome': 'the books balance',
+        'owner': None,
+        'satisfies': list([
+          'requirement:audit-trail',
+        ]),
+        'source': 'stories/reconcile-billing.md',
+        'state': 'observed',
+        'tags': list([
+        ]),
+        'title': 'Reconcile billing nightly',
+      }),
+    ]),
+    'system': dict({
+      'body': '',
+      'confidence': 'assumed',
+      'externals': list([
+      ]),
+      'id': 'system:legacy',
+      'owner': None,
+      'purpose': 'Kept alive while its replacement is designed.',
+      'source': '',
+      'state': 'observed',
+      'tags': list([
+      ]),
+      'title': 'Legacy billing',
+      'units': list([
+      ]),
+    }),
+  })
+# ---
+# name: test_each_fixture_builds_to_its_snapshot[clean]
+  dict({
+    'components': list([
+      dict({
+        'body': '',
+        'confidence': 'assumed',
+        'consumes': list([
+          'seam:order-events',
+        ]),
+        'contains': list([
+        ]),
+        'id': 'component:cancellation',
+        'implemented_by': list([
+        ]),
+        'owner': None,
+        'owns_data': list([
+        ]),
+        'provides': list([
+        ]),
+        'responsibility': 'Decide whether an order can still be cancelled, and start the refund.',
+        'source': 'components/cancellation.md',
+        'state': 'constrained',
+        'tags': list([
+        ]),
+        'title': 'Cancellation',
+      }),
+      dict({
+        'body': '',
+        'confidence': 'assumed',
+        'consumes': list([
+        ]),
+        'contains': list([
+        ]),
+        'id': 'component:catalog',
+        'implemented_by': list([
+        ]),
+        'owner': None,
+        'owns_data': list([
+        ]),
+        'provides': list([
+        ]),
+        'responsibility': 'List what can be ordered, with prices.',
+        'source': 'components/catalog.md',
+        'state': 'specified',
+        'tags': list([
+        ]),
+        'title': 'Catalog',
+      }),
+      dict({
+        'body': '',
+        'confidence': 'assumed',
+        'consumes': list([
+        ]),
+        'contains': list([
+          'component:catalog',
+        ]),
+        'id': 'component:orders',
+        'implemented_by': list([
+        ]),
+        'owner': None,
+        'owns_data': list([
+          'data:order',
+        ]),
+        'provides': list([
+          'seam:order-events',
+        ]),
+        'responsibility': 'Take orders and record what happened to them.',
+        'source': 'components/orders.md',
+        'state': 'specified',
+        'tags': list([
+        ]),
+        'title': 'Orders',
+      }),
+    ]),
+    'data': list([
+      dict({
+        'body': '',
+        'confidence': 'assumed',
+        'fields': list([
+          dict({
+            'name': 'id',
+            'note': '',
+            'optional': False,
+            'type': 'uuid',
+          }),
+          dict({
+            'name': 'status',
+            'note': 'lifecycle state',
+            'optional': False,
+            'type': 'string',
+          }),
+        ]),
+        'id': 'data:order',
+        'identity': list([
+          'id',
+        ]),
+        'owner': None,
+        'owner_component': 'component:orders',
+        'source': 'data/order.md',
+        'state': 'specified',
+        'tags': list([
+        ]),
+        'title': 'Order',
+      }),
+    ]),
+    'decisions': list([
+      dict({
+        'applies_to': list([
+          'component:orders',
+        ]),
+        'body': '''
+          ## Context
+          
+          The audit trail is the product; in-place updates erase it.
+          
+          ## Consequences
+          
+          Read models project from the log. Undoing this means a migration, so changes
+          land as new events.
+        ''',
+        'confidence': 'assumed',
+        'decided_on': '2026-01-15',
+        'id': 'decision:event-log',
+        'owner': None,
+        'reversibility': 'costly',
+        'source': 'decisions/event-log.md',
+        'state': 'specified',
+        'status': 'accepted',
+        'supersedes': list([
+        ]),
+        'tags': list([
+        ]),
+        'title': 'Event log over in-place updates',
+      }),
+    ]),
+    'externals': list([
+    ]),
+    'milestones': list([
+      dict({
+        'body': '',
+        'confidence': 'assumed',
+        'depends_on': list([
+        ]),
+        'done_when': list([
+          'story:cancel-order#ac-1',
+        ]),
+        'id': 'milestone:m1',
+        'includes': list([
+          'story:cancel-order',
+        ]),
+        'may_decide': list([
+        ]),
+        'must_hold': list([
+        ]),
+        'outcome': 'A customer can cancel a refundable order.',
+        'owner': None,
+        'scope': list([
+          'component:cancellation',
+        ]),
+        'source': 'milestones/m1.md',
+        'state': 'specified',
+        'tags': list([
+        ]),
+        'title': 'Cancellation MVP',
+        'unresolved': list([
+        ]),
+      }),
+    ]),
+    'non_functionals': list([
+    ]),
+    'questions': list([
+    ]),
+    'rejections': list([
+    ]),
+    'requirements': list([
+      dict({
+        'body': '',
+        'confidence': 'assumed',
+        'constrains': list([
+        ]),
+        'derived_from': list([
+        ]),
+        'id': 'requirement:browse-catalog',
+        'owner': None,
+        'realized_by': list([
+          'component:catalog',
+        ]),
+        'source': 'requirements/browse-catalog.md',
+        'state': 'specified',
+        'tags': list([
+        ]),
+        'title': 'The catalog is browsable',
+      }),
+      dict({
+        'body': 'A customer may cancel an order while it can still be refunded.',
+        'confidence': 'reviewed',
+        'constrains': list([
+        ]),
+        'derived_from': list([
+        ]),
+        'id': 'requirement:cancel-orders',
+        'owner': None,
+        'realized_by': list([
+          'component:cancellation',
+        ]),
+        'source': 'requirements/cancel-orders.md',
+        'state': 'specified',
+        'tags': list([
+        ]),
+        'title': 'Orders can be cancelled',
+      }),
+    ]),
+    'schema_version': 1,
+    'seams': list([
+      dict({
+        'body': '',
+        'carries': list([
+          'data:order',
+        ]),
+        'confidence': 'assumed',
+        'consumers': list([
+          'component:cancellation',
+        ]),
+        'contract': '',
+        'failure_modes': list([
+        ]),
+        'id': 'seam:order-events',
+        'owner': None,
+        'provider': 'component:orders',
+        'source': 'seams/order-events.md',
+        'state': 'specified',
+        'style': 'event',
+        'tags': list([
+        ]),
+        'title': 'Order events',
+        'verified_by': list([
+        ]),
+      }),
+    ]),
+    'stories': list([
+      dict({
+        'acceptance': list([
+          dict({
+            'given': list([
+            ]),
+            'id': 'story:cancel-order#ac-1',
+            'kind': 'behavioural',
+            'statement': '',
+            'then': list([
+              'the order is cancelled',
+              'the refund starts',
+            ]),
+            'touches': list([
+            ]),
+            'when': 'the customer cancels a refundable order',
+          }),
+          dict({
+            'given': list([
+              'an order that has already shipped',
+            ]),
+            'id': 'story:cancel-order#ac-2',
+            'kind': 'behavioural',
+            'statement': '',
+            'then': list([
+              'cancellation is refused',
+            ]),
+            'touches': list([
+            ]),
+            'when': 'the customer asks to cancel it',
+          }),
+          dict({
+            'given': list([
+            ]),
+            'id': 'story:cancel-order#ac-3',
+            'kind': 'structural',
+            'statement': 'cancellation only consumes the order-events seam',
+            'then': list([
+            ]),
+            'touches': list([
+              'seam:order-events',
+            ]),
+            'when': '',
+          }),
+        ]),
+        'actor': 'customer',
+        'body': 'A customer may cancel while the order can still be refunded.',
+        'confidence': 'assumed',
+        'id': 'story:cancel-order',
+        'outcome': 'the order is cancelled and the refund starts',
+        'owner': None,
+        'satisfies': list([
+          'requirement:cancel-orders',
+        ]),
+        'source': 'stories/cancel-order.md',
+        'state': 'specified',
+        'tags': list([
+        ]),
+        'title': 'Cancel an order',
+      }),
+    ]),
+    'system': dict({
+      'body': '',
+      'confidence': 'assumed',
+      'externals': list([
+      ]),
+      'id': 'system:acme',
+      'owner': None,
+      'purpose': 'Sell things, honestly.',
+      'source': '',
+      'state': 'specified',
+      'tags': list([
+      ]),
+      'title': 'ACME orders',
+      'units': list([
+      ]),
+    }),
+  })
+# ---
+# name: test_each_fixture_builds_to_its_snapshot[composite]
+  dict({
+    'components': list([
+      dict({
+        'body': '',
+        'confidence': 'assumed',
+        'consumes': list([
+          'seam:invoice-events',
+        ]),
+        'contains': list([
+        ]),
+        'id': 'component:billing-worker',
+        'implemented_by': list([
+          'acme/billing#worker',
+        ]),
+        'owner': None,
+        'owns_data': list([
+        ]),
+        'provides': list([
+        ]),
+        'responsibility': 'Charge for completed orders.',
+        'source': 'components/billing-worker.md',
+        'state': 'specified',
+        'tags': list([
+        ]),
+        'title': 'Billing worker',
+      }),
+      dict({
+        'body': '',
+        'confidence': 'assumed',
+        'consumes': list([
+        ]),
+        'contains': list([
+        ]),
+        'id': 'component:orders-api',
+        'implemented_by': list([
+          'acme/orders#api',
+        ]),
+        'owner': None,
+        'owns_data': list([
+        ]),
+        'provides': list([
+          'seam:invoice-events',
+        ]),
+        'responsibility': 'Take orders and emit what happened.',
+        'source': 'components/orders-api.md',
+        'state': 'specified',
+        'tags': list([
+        ]),
+        'title': 'Orders API',
+      }),
+    ]),
+    'data': list([
+      dict({
+        'body': '',
+        'confidence': 'assumed',
+        'fields': list([
+          dict({
+            'name': 'id',
+            'note': '',
+            'optional': False,
+            'type': 'uuid',
+          }),
+          dict({
+            'name': 'amount',
+            'note': '',
+            'optional': False,
+            'type': 'decimal',
+          }),
+        ]),
+        'id': 'data:invoice',
+        'identity': list([
+          'id',
+        ]),
+        'owner': None,
+        'owner_component': 'component:orders-api',
+        'source': 'data/invoice.md',
+        'state': 'specified',
+        'tags': list([
+        ]),
+        'title': 'Invoice',
+      }),
+    ]),
+    'decisions': list([
+    ]),
+    'externals': list([
+      dict({
+        'assumptions': list([
+          'idempotency keys are honored',
+        ]),
+        'body': '',
+        'confidence': 'assumed',
+        'expires_on': None,
+        'external_kind': 'service',
+        'id': 'external:payment-provider',
+        'owner': None,
+        'source': 'externals/payment-provider.md',
+        'state': 'specified',
+        'tags': list([
+        ]),
+        'title': 'Payment provider',
+        'verified_by': None,
+        'verified_on': '2026-08-01',
+        'version': None,
+      }),
+    ]),
+    'milestones': list([
+    ]),
+    'non_functionals': list([
+    ]),
+    'questions': list([
+    ]),
+    'rejections': list([
+    ]),
+    'requirements': list([
+    ]),
+    'schema_version': 1,
+    'seams': list([
+      dict({
+        'body': '',
+        'carries': list([
+          'data:invoice',
+        ]),
+        'confidence': 'assumed',
+        'consumers': list([
+          'component:billing-worker',
+        ]),
+        'contract': '',
+        'failure_modes': list([
+        ]),
+        'id': 'seam:invoice-events',
+        'owner': None,
+        'provider': 'component:orders-api',
+        'source': 'seams/invoice-events.md',
+        'state': 'specified',
+        'style': 'event',
+        'tags': list([
+        ]),
+        'title': 'Invoice events',
+        'verified_by': list([
+        ]),
+      }),
+    ]),
+    'stories': list([
+    ]),
+    'system': dict({
+      'body': '',
+      'confidence': 'assumed',
+      'externals': list([
+        'external:payment-provider',
+      ]),
+      'id': 'system:platform',
+      'owner': None,
+      'purpose': 'Orders and billing, one design.',
+      'source': '',
+      'state': 'specified',
+      'tags': list([
+      ]),
+      'title': 'Two-unit platform',
+      'units': list([
+        dict({
+          'design': None,
+          'id': 'unit:orders',
+          'ref': 'main',
+          'repo': 'acme/orders',
+        }),
+        dict({
+          'design': None,
+          'id': 'unit:billing',
+          'ref': 'main',
+          'repo': 'acme/billing',
+        }),
+      ]),
+    }),
+  })
+# ---

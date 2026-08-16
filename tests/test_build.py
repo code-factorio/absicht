@@ -30,10 +30,10 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from absicht.build import _AtRevision, build, design_json
 from syrupy.assertion import SnapshotAssertion
 from typer.testing import CliRunner
 
+from absicht.build import _AtRevision, build, design_json
 from absicht.cli import app
 from absicht.cli._common import ExitCode
 from absicht.models import SCHEMA_VERSION, Design
@@ -47,7 +47,7 @@ BUILDABLE = ("brownfield", "clean", "composite")
 
 
 def _build_to(out: Path, *, store: Path = FIXTURES / "clean") -> None:
-    result = runner.invoke(app, ["build", "--store", str(store), "--out", str(out)])
+    result = runner.invoke(app, ["--store", str(store), "build", "--out", str(out)])
     assert result.exit_code == ExitCode.OK
 
 
@@ -81,7 +81,7 @@ def test_the_documents_keys_are_designs_field_order() -> None:
 def test_a_store_with_load_errors_fails_the_build_without_writing(tmp_path: Path) -> None:
     out = tmp_path / "build" / "design.json"
 
-    result = runner.invoke(app, ["build", "--store", str(FIXTURES / "broken"), "--out", str(out)])
+    result = runner.invoke(app, ["--store", str(FIXTURES / "broken"), "build", "--out", str(out)])
 
     assert result.exit_code == ExitCode.FINDINGS
     # Both unreadable files are named, and the way out is `ab check` — the
@@ -94,7 +94,7 @@ def test_a_store_with_load_errors_fails_the_build_without_writing(tmp_path: Path
 
 def test_stdout_prints_the_artifact_and_writes_nothing(tmp_path: Path) -> None:
     out = tmp_path / "design.json"
-    argv = ["build", "--store", str(FIXTURES / "clean"), "--out", str(out), "--stdout"]
+    argv = ["--store", str(FIXTURES / "clean"), "build", "--out", str(out), "--stdout"]
 
     plain = runner.invoke(app, argv)
     as_json = runner.invoke(app, [*argv, "--json"])
@@ -112,7 +112,7 @@ def test_stdout_prints_the_artifact_and_writes_nothing(tmp_path: Path) -> None:
 def test_writing_creates_parent_directories_as_needed(tmp_path: Path) -> None:
     out = tmp_path / "deep" / "nested" / "design.json"
 
-    result = runner.invoke(app, ["build", "--store", str(FIXTURES / "clean"), "--out", str(out)])
+    result = runner.invoke(app, ["--store", str(FIXTURES / "clean"), "build", "--out", str(out)])
 
     assert result.exit_code == ExitCode.OK
     assert out.read_text(encoding="utf-8") == design_json(build(FIXTURES / "clean"))
@@ -124,7 +124,7 @@ def test_check_against_a_fresh_artifact_is_ok(tmp_path: Path) -> None:
     _build_to(out)
 
     result = runner.invoke(
-        app, ["build", "--store", str(FIXTURES / "clean"), "--out", str(out), "--check"]
+        app, ["--store", str(FIXTURES / "clean"), "build", "--out", str(out), "--check"]
     )
 
     assert result.exit_code == ExitCode.OK
@@ -138,7 +138,7 @@ def test_check_against_a_drifted_artifact_is_findings(tmp_path: Path) -> None:
     out.write_bytes(drifted)
 
     result = runner.invoke(
-        app, ["build", "--store", str(FIXTURES / "clean"), "--out", str(out), "--check"]
+        app, ["--store", str(FIXTURES / "clean"), "build", "--out", str(out), "--check"]
     )
 
     assert result.exit_code == ExitCode.FINDINGS
@@ -156,9 +156,9 @@ def test_check_with_no_artifact_on_disk_is_findings(tmp_path: Path) -> None:
     result = runner.invoke(
         app,
         [
-            "build",
             "--store",
             str(FIXTURES / "clean"),
+            "build",
             "--out",
             str(tmp_path / "design.json"),
             "--check",
@@ -171,7 +171,7 @@ def test_check_with_no_artifact_on_disk_is_findings(tmp_path: Path) -> None:
 
 def test_json_envelopes_the_write_and_the_check(tmp_path: Path) -> None:
     out = tmp_path / "design.json"
-    argv = ["build", "--store", str(FIXTURES / "clean"), "--out", str(out)]
+    argv = ["--store", str(FIXTURES / "clean"), "build", "--out", str(out)]
 
     ahead = runner.invoke(app, ["--json", *argv])
     fresh = runner.invoke(app, [*argv, "--check", "--json"])
@@ -248,7 +248,7 @@ def test_build_at_a_rev_folds_that_revs_tree(history: tuple[Path, str]) -> None:
 def test_the_cli_builds_the_artifact_at_a_rev(history: tuple[Path, str]) -> None:
     store, first = history
 
-    result = runner.invoke(app, ["build", "--store", str(store), "--rev", first, "--stdout"])
+    result = runner.invoke(app, ["--store", str(store), "--rev", first, "build", "--stdout"])
 
     assert result.exit_code == ExitCode.OK
     document = json.loads(result.stdout)
@@ -259,7 +259,7 @@ def test_a_rev_that_does_not_exist_is_a_usage_error(history: tuple[Path, str]) -
     store, _ = history
 
     result = runner.invoke(
-        app, ["build", "--store", str(store), "--rev", "no-such-ref", "--stdout"]
+        app, ["--store", str(store), "--rev", "no-such-ref", "build", "--stdout"]
     )
 
     assert result.exit_code == ExitCode.USAGE
@@ -270,8 +270,8 @@ def test_the_git_source_answers_loads_three_questions(history: tuple[Path, str])
     """The adapter is `load`'s only view of a revision, so its contract is
     pinned directly — including the race-only branch, where a file listed then
     unreadable surfaces as the `OSError` load already translates."""
-    _, first = history
-    source = _AtRevision(Path(".absicht"), first)
+    store, first = history
+    source = _AtRevision(Path(".absicht"), first, store.parent)
 
     assert source.exists(Path(".absicht/system.yaml"))
     assert source.exists(Path(".absicht/components"))  # a tree, not only a blob
