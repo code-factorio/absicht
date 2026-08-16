@@ -47,9 +47,14 @@ from absicht.load import load_store
 from absicht.models import (
     SCHEMA_VERSION,
     Component,
+    Criterion,
+    CriterionKind,
     Design,
     External,
     ExternalKind,
+    Fidelity,
+    Packet,
+    PacketElement,
     Question,
     State,
     System,
@@ -59,6 +64,7 @@ from absicht.render import (
     UnknownRefError,
     generate_site,
     neighbourhood,
+    packet_markdown,
     store_changed,
     store_snapshot,
     trace_paths,
@@ -305,6 +311,115 @@ def test_an_unknown_to_ref_raises_rather_than_answering_empty(clean: Design) -> 
     not an answer anyone should be able to mistake for a route check."""
     with pytest.raises(UnknownRefError, match="decision:never"):
         trace_paths(clean, "requirement:cancel-orders", to="decision:never-made")
+
+
+# --- the packet document -------------------------------------------------------------
+
+
+def _packet_document() -> str:
+    """One packet exercising everything `clean/`'s milestone leaves empty: two
+    scope blocks (one with prose), a ring element, every obligation list
+    carrying content, and a criterion with a two-line `given`.
+
+    Built by hand rather than assembled, because what is under test is the
+    rendering of the model, not the selection that fills it — and a packet that
+    silently dropped its `must_hold` ADRs or an element's prose passes every
+    fixture-driven test the CLI modules run."""
+    return packet_markdown(
+        Packet(
+            milestone="milestone:m",
+            outcome="The thing works.",
+            elements=(
+                PacketElement(
+                    ref="milestone:m",
+                    fidelity=Fidelity.FULL,
+                    element={"id": "milestone:m", "title": "M", "body": ""},
+                ),
+                PacketElement(
+                    ref="component:core",
+                    fidelity=Fidelity.FULL,
+                    element={
+                        "id": "component:core",
+                        "title": "Core",
+                        "tags": [],
+                        "owner": None,
+                        "body": "Prose that must survive.\n\n",
+                    },
+                ),
+                PacketElement(
+                    ref="component:side",
+                    fidelity=Fidelity.FULL,
+                    element={"id": "component:side", "title": "Side", "body": ""},
+                ),
+                PacketElement(
+                    ref="seam:edge",
+                    fidelity=Fidelity.CONTRACT,
+                    element={"id": "seam:edge", "title": "Edge"},
+                ),
+            ),
+            must_hold=("decision:adr", "nfr:latency"),
+            may_decide=("the retry policy",),
+            unresolved=("question:q",),
+            rejections=("rejection:big-bang",),
+            criteria=(
+                Criterion(
+                    id="story:s#ac-1",
+                    given=("a user", "an order"),
+                    when="the user cancels",
+                    then=("it works",),
+                ),
+                Criterion(
+                    id="story:s#ac-2", kind=CriterionKind.STRUCTURAL, statement="one seam only"
+                ),
+            ),
+        ),
+        features_dir="features",
+    )
+
+
+def test_packet_markdown_carries_every_obligation_and_each_scope_block() -> None:
+    document = _packet_document()
+
+    assert document.startswith("# Packet: M\n\n`milestone:m` — The thing works.\n")
+    # Two scope blocks, both present — the second must not clobber the first —
+    # separated by a blank line, prose included and trailing blank lines gone.
+    assert "Prose that must survive.\n\n### Side" in document
+    # Empty-valued fields and the header four stay out of the bullet list.
+    for absent in ("- tags:", "- owner:", "- body:", "- id:", "- title:"):
+        assert absent not in document
+    # The ring stays summarized to one line, never a block of its own.
+    assert "- `seam:edge` — Edge" in document
+    assert "### Edge" not in document
+    # Every obligation section lists what it carries, not `(none)`.
+    assert "- `decision:adr`" in document
+    assert "- `nfr:latency`" in document
+    assert "- the retry policy" in document
+    assert "- `question:q`" in document
+    assert "- `rejection:big-bang`" in document
+    assert "(none)" not in document
+    # A two-line given joins with ", "; a structural criterion carries its
+    # statement under its kind.
+    assert "given a user, an order; when the user cancels; then it works" in document
+    assert "(structural) — one seam only" in document
+
+
+def test_packet_markdown_drops_the_dash_when_the_outcome_is_empty() -> None:
+    """No outcome, no hanging `—`: the identity line is the bare ref, and a
+    scope-less milestone still spells the section rather than vanishing."""
+    document = packet_markdown(
+        Packet(
+            milestone="milestone:m",
+            elements=(
+                PacketElement(
+                    ref="milestone:m",
+                    fidelity=Fidelity.FULL,
+                    element={"id": "milestone:m", "title": "M"},
+                ),
+            ),
+        )
+    )
+
+    assert "`milestone:m`\n\n## Scope\n\n(none)" in document
 
 
 # --- the site --------------------------------------------------------------------
