@@ -43,6 +43,7 @@ from absicht.models import (
     Seam,
     State,
 )
+from absicht.runstore import RunResult
 
 
 class VerifyUsageError(Exception):
@@ -193,6 +194,34 @@ def run_rules(
         if (include is None or rule_id in include) and rule_id not in exclude
     ]
     return Report(findings=tuple(finding for rule in selected for finding in rule(ctx)))
+
+
+def criterion_results(ctx: VerifyContext) -> tuple[RunResult, ...]:
+    """The packet's criteria as one run-store row each, for ``absicht.runstore``.
+
+    ``checked`` with the first file that references the id as evidence,
+    ``no_check`` when nothing does — ``verify/done-when``'s own evidence walk,
+    read as results rather than findings, so the record and the report cannot
+    disagree about what a run verified. Computed from the context alone, not
+    from the findings: a run with ``--rule`` narrowed still records every
+    criterion's result. Observations join this table in
+    docs/tasks/59-verify-observations.md, on the same evidence mechanism.
+    """
+    sources = sorted(_step_sources(ctx).items())
+    results: list[RunResult] = []
+    for criterion in ctx.packet.criteria:
+        evidence = next(
+            (path.as_posix() for (_repo, path), hits in sources if criterion.id in hits),
+            None,
+        )
+        results.append(
+            RunResult(
+                criterion=criterion.id,
+                result="no_check" if evidence is None else "checked",
+                evidence_ref=evidence,
+            )
+        )
+    return tuple(results)
 
 
 # --- the rules (docs/tasks/41-verify-rules.md) ---------------------------------

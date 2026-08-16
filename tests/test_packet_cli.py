@@ -40,6 +40,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+import pytest
 from syrupy.assertion import SnapshotAssertion
 from typer.testing import CliRunner
 
@@ -71,8 +72,36 @@ ELEMENTS = {
 CRITERIA = ("story:cancel-order#ac-1", "story:cancel-order#ac-2", "story:cancel-order#ac-3")
 
 
-def _packet(*flags: str, store: Path = CLEAN, milestone: str = "milestone:m1") -> Any:
-    return runner.invoke(app, ["--store", str(store), "packet", milestone, *flags])
+_SCRATCH: Path = CLEAN
+"""The store ``_packet`` targets when no test names one. The autouse fixture
+below points it at a fresh copy of the clean fixture per test; the module
+default only covers direct imports of the helper outside a test run."""
+
+
+def _packet(*flags: str, store: Path | None = None, milestone: str = "milestone:m1") -> Any:
+    """``ab packet`` against the clean fixture — a per-test copy of it, because
+    the command records issuance under the store's own ``build/`` and the
+    shared fixture is read-only."""
+    root = store if store is not None else _SCRATCH
+    return runner.invoke(app, ["--store", str(root), "packet", milestone, *flags])
+
+
+@pytest.fixture(autouse=True)
+def _scratch(tmp_path: Path) -> Iterator[Path]:
+    """The clean fixture copied once per test, as ``_packet``'s default store.
+
+    Issuance recording (58-run-store) made ``ab packet`` a store-writing
+    command: pointed at the shared fixture it would leave ``build/runs.db``
+    behind in it, and every later copy of the fixture would carry stale
+    history into its assertions."""
+    global _SCRATCH
+    copied = tmp_path / "clean"
+    shutil.copytree(CLEAN, copied)
+    _SCRATCH = copied
+    try:
+        yield copied
+    finally:
+        _SCRATCH = CLEAN
 
 
 def _body(out: Path, *flags: str) -> str:
@@ -467,7 +496,7 @@ def test_a_future_run_store_fails_the_command_before_it_writes(tmp_path: Path) -
     store = tmp_path / "store"
     shutil.copytree(CLEAN, store)
     db = store / "build" / "runs.db"
-    db.parent.mkdir(parents=True)
+    db.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(db)
     conn.execute(f"PRAGMA user_version = {runstore.USER_VERSION + 1}")
     conn.close()

@@ -23,12 +23,14 @@ from absicht.cli._common import (
     DEFAULT_DIFF_BASE,
     DEFAULT_PACKET_DIR,
     DocFormat,
+    GlobalOptions,
     JsonOption,
     Kind,
     PlainFormat,
     ReportFormat,
     effective_format,
     options,
+    utc_now_iso,
 )
 from absicht.cli.query import _design
 from absicht.diff import diff as diff_store
@@ -39,13 +41,16 @@ from absicht.markers import MarkerError
 from absicht.markers import check as check_marker
 from absicht.markers import stamp as stamp_marker
 from absicht.markers import sync as sync_marker
-from absicht.models import SCHEMA_VERSION
+from absicht.models import SCHEMA_VERSION, Packet, PacketLock
 from absicht.render import UnknownRefError
+from absicht.runstore import RunStoreError, packet_id, record_run
 from absicht.status import StatusUsageError
 from absicht.status import status as status_report
 from absicht.verify import (
+    VerifyContext,
     VerifyUsageError,
     context_for,
+    criterion_results,
     discover_sealed_packet,
     load_sealed_packet,
     run_rules,
@@ -118,6 +123,7 @@ def verify(
     except VerifyUsageError as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(ExitCode.USAGE) from exc
+    _record_run(opts, brief, lock, context)
     body = _report_body(
         result,
         effective_format(ctx, output_format, opts.json_output, json_member=ReportFormat.JSON),
@@ -130,6 +136,41 @@ def verify(
         report.parent.mkdir(parents=True, exist_ok=True)
         report.write_text((body + "\n") if body else "", encoding="utf-8")
     raise typer.Exit(result.exit_code(strict=strict))
+
+
+def _record_run(
+    opts: GlobalOptions, packet: Packet, lock: PacketLock, context: VerifyContext
+) -> None:
+    """One verification run into the run store — addendum §8's second tuple.
+
+    Recorded whatever the verdict: a run with findings is still a run, which
+    is the whole point of keeping history. The packet id is the digest's, so
+    the run lands beside its issuance; the commit is the first `--repo`'s
+    HEAD — the code under verification, one spelling of it for a multi-repo
+    slice. Verification itself stays offline: when no design store can be
+    located beside it the run simply leaves no history, said on stderr
+    rather than swallowed. A store this ab cannot safely write fails the
+    command by name before any report is printed — history quietly lost is
+    the failure mode §8 exists to prevent."""
+    try:
+        root = resolve_store(opts.store)
+    except StoreResolutionError as exc:
+        typer.echo(f"verification run not recorded: {exc}", err=True)
+        return
+    try:
+        record_run(
+            root,
+            packet_id=packet_id(packet.milestone, lock.design_rev),
+            commit_sha=current_rev(context.repos[0]),
+            recorded_at=utc_now_iso(),
+            results=criterion_results(context),
+        )
+    except RunStoreError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(ExitCode.SCHEMA_MISMATCH) from exc
+    except GitError as exc:
+        typer.echo(f"cannot record the verification run: {exc}", err=True)
+        raise typer.Exit(ExitCode.USAGE) from exc
 
 
 def _report_body(result: Report, output_format: ReportFormat) -> str:

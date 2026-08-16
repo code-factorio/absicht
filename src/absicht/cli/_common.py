@@ -20,6 +20,7 @@ from __future__ import annotations
 import os
 import sys
 from dataclasses import dataclass, replace
+from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
 from typing import Annotated, NoReturn
@@ -196,3 +197,14 @@ def unimplemented(ctx: typer.Context) -> NoReturn:
     """
     typer.echo(f"{ctx.command_path}: not implemented yet", err=True)
     raise typer.Exit(ExitCode.INTERNAL)
+
+
+def utc_now_iso() -> str:
+    """A run-store timestamp: ISO-8601 UTC, read here at the CLI layer.
+
+    The clock belongs to the surface, not the library — ``absicht.runstore``
+    takes its timestamps as parameters for the same reason ``check`` takes
+    ``today`` — and this is the one spelling of them, so the store's TEXT
+    columns order lexicographically as timestamps.
+    """
+    return datetime.now(UTC).isoformat()

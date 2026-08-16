@@ -23,6 +23,7 @@ from absicht.cli._common import (
     PacketFormat,
     effective_format,
     options,
+    utc_now_iso,
 )
 from absicht.cli.query import _design
 from absicht.findings import ExitCode
@@ -32,6 +33,7 @@ from absicht.models import SCHEMA_VERSION, Criterion, Design, Packet, PacketLock
 from absicht.packet import PacketFindingError, PacketUsageError, assemble
 from absicht.render import packet_markdown
 from absicht.resolve import Index
+from absicht.runstore import RunStoreError, packet_id, record_packet
 
 PANEL = "Step 3 — hand work to an agent"
 """Where these commands appear in `ab --help`."""
@@ -90,6 +92,14 @@ def packet(
             ),
         ),
     ] = False,
+    target_agent: Annotated[
+        str | None,
+        typer.Option(
+            "--target-agent",
+            metavar="WHO",
+            help="Who the packet is handed to; recorded with the issuance in the run store.",
+        ),
+    ] = None,
     json_output: JsonOption = False,
 ) -> None:
     """Assemble the brief for one milestone.
@@ -118,6 +128,7 @@ def packet(
         target.write_text(content, encoding="utf-8")
     if seal:
         assembled = _sealed(assembled, rendered, at, root)
+    _record_issuance(root, assembled, target_agent)
 
     output = effective_format(ctx, output_format, opts.json_output, json_member=PacketFormat.JSON)
     body = (
@@ -204,6 +215,30 @@ def _sealed(packet: Packet, rendered: dict[str, str], at: str | None, root: Path
     return packet.model_copy(
         update={"design_rev": design_rev, "scenarios_digest": scenario_digest(rendered)}
     )
+
+
+def _record_issuance(root: Path, packet: Packet, target_agent: str | None) -> None:
+    """Packet issuance into the run store — addendum §8's first tuple, beside
+    the design store, never in git.
+
+    Recorded for every assembly, sealed or not: an unsealed packet is still
+    handed to an agent, and its empty design rev keeps the digest's id and
+    the row's rev agreeing. The timestamp is this layer's clock — the library
+    below stays clock-free. A store this ab cannot safely write stops the
+    command before it delivers anything: better a named exit 4 than history
+    quietly lost."""
+    try:
+        record_packet(
+            root,
+            packet_id=packet_id(packet.milestone, packet.design_rev),
+            milestone=packet.milestone,
+            design_rev=packet.design_rev,
+            issued_at=utc_now_iso(),
+            target_agent=target_agent,
+        )
+    except RunStoreError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(ExitCode.SCHEMA_MISMATCH) from exc
 
 
 def _write_artifacts(

@@ -238,6 +238,8 @@ regenerated rather than stored.
 - `--rev REF` build from the store at a revision
 - `--seal` write `packet.lock` — design rev plus the scenario digest, so
   `ab verify` can run offline later
+- `--target-agent WHO` who the packet is handed to; recorded with the
+  issuance in the local run store
 
 ### `ab features MILESTONE`
 
@@ -350,6 +352,7 @@ a shorthand, never an override.
 
 No command mutates the store as a side effect of reading. `check`, `build`,
 `packet`, `verify` and `status` are all safe to run anywhere, any number of
-times.
+times. The run history `packet` and `verify` append under `build/` is not
+the store: it is never committed, and losing it loses history, not design.
 
 No command in this list needs a network or an LLM.
