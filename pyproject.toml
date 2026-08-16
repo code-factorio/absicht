@@ -148,8 +148,8 @@ include_external_packages = true
 #   absicht.resolve
 #   absicht.load
 #   absicht.codec
-#   absicht.git
 #   absicht.findings                        # cross-cutting, imported by check/verify
+#   absicht.git                             # thin git reads, above only models
 #   absicht.models                          # imports nothing of ours
 #
 # Only the layers that exist are listed: import-linter fails on a named module
@@ -162,6 +162,7 @@ layers = [
     "absicht.cli",
     "absicht.codec",
     "absicht.findings",
+    "absicht.git",
     "absicht.models",
 ]
 

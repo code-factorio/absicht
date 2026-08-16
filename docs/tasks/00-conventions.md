@@ -21,8 +21,8 @@ absicht.check
 absicht.resolve
 absicht.load
 absicht.codec
-absicht.git
 absicht.findings                                    # cross-cutting, import from check/verify
+absicht.git                                         # thin git reads, above only models
 absicht.models                                       # imports nothing of ours
 ```
 

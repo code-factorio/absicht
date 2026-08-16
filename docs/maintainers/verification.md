@@ -120,9 +120,11 @@ narrowing invariants and never input validation. Everything else runs at full
 sensitivity.
 
 Vermittlung skips four; three of those describe a bus that shells out to `rp`
-and samples with `random`, and neither is true of this repo. If absicht ever
-grows a subprocess call, the exception goes at the site as `# nosec <id>` with
-a reason, not into the skip list.
+and samples with `random`, and neither is true of this repo. The one module
+that shells out here (`absicht.git`) carries its exception at the site as
+`# nosec B603 B607` with a reason — ids space-separated, which is the form
+bandit honours; any future subprocess call does the same rather than landing
+in the skip list.
 
 ### The import contracts
 
