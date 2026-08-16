@@ -160,10 +160,10 @@ type = "layers"
 layers = [
     "absicht.__main__",
     "absicht.cli",
-    "absicht.resolve",
     "absicht.init",
     "absicht.migrate",
     "absicht.check",
+    "absicht.resolve",
     "absicht.load",
     "absicht.codec",
     "absicht.findings",
