@@ -23,7 +23,6 @@ from absicht.cli._common import (
     PacketFormat,
     effective_format,
     options,
-    unimplemented,
 )
 from absicht.cli.query import _design
 from absicht.findings import ExitCode
@@ -281,6 +280,79 @@ def _feature_files(design: Design, criteria: tuple[Criterion, ...]) -> dict[str,
     }
 
 
+def _write_features(out: Path, rendered: dict[str, str], *, json_output: bool) -> None:
+    """The durable half of ``features``: one file per rendered story under
+    ``out``, the ``--json`` envelope of ``00-conventions.md`` when asked for.
+
+    A milestone with no behavioural criteria renders nothing and writes
+    nothing — no empty directory, and (like ``list``) no lone status line
+    where files would be.
+    """
+    if rendered:
+        out.mkdir(parents=True, exist_ok=True)
+        for name, content in rendered.items():
+            (out / name).write_text(content, encoding="utf-8")
+    if json_output:
+        typer.echo(
+            json.dumps(
+                {"schema_version": SCHEMA_VERSION, "out": str(out), "files": sorted(rendered)}
+            )
+        )
+    elif rendered:
+        count = len(rendered)
+        typer.echo(f"wrote {out} ({count} feature file{'s' if count > 1 else ''})")
+
+
+def _check_features(
+    out: Path,
+    milestone: str,
+    rendered: dict[str, str],
+    *,
+    json_output: bool,
+    verdict_stderr: bool,
+) -> None:
+    """Compare a fresh render against the ``.feature`` files at ``out``, never
+    writing them: the guardrail behind "output is generated, never authored",
+    and how CI catches a hand-edit.
+
+    The whole ``*.feature`` set is compared, both directions — a file the
+    store no longer renders has drifted as surely as an edited line — while
+    other files beside them (step definitions) are not this command's to
+    judge. Raw bytes, not text, so a corrupted file is drift rather than a
+    decode crash. When ``--stdout`` occupies stdout with the rendered files,
+    the verdict moves to stderr, the way ``build --check``'s does.
+    """
+    on_disk = {path.name for path in out.glob("*.feature")}
+    why: dict[str, str] = {}
+    for name in sorted(rendered.keys() | on_disk):
+        if name not in rendered:
+            why[name] = "is on disk but not rendered"
+        elif name not in on_disk:
+            why[name] = "is rendered but not on disk"
+        elif (out / name).read_bytes() != rendered[name].encode("utf-8"):
+            why[name] = "differs from a fresh render"
+    if json_output:
+        typer.echo(
+            json.dumps(
+                {
+                    "schema_version": SCHEMA_VERSION,
+                    "out": str(out),
+                    "stale": bool(why),
+                    "files": sorted(why),
+                }
+            ),
+            err=verdict_stderr,
+        )
+    elif not why:
+        typer.echo(f"{out} is up to date", err=verdict_stderr)
+    else:
+        for name in sorted(why):
+            typer.echo(f"stale: {out / name} {why[name]}", err=verdict_stderr)
+        typer.echo(f"run ab features {milestone} --out {out} to refresh", err=verdict_stderr)
+    if why:
+        raise typer.Exit(ExitCode.FINDINGS)
+
+
 @app.command(rich_help_panel=PANEL)
 def features(
     ctx: typer.Context,
@@ -298,4 +370,26 @@ def features(
     Output is generated, never authored: an agent implements step definitions and
     may not touch these files.
     """
-    unimplemented(ctx)
+    opts = options(ctx)
+    _, design = _design(opts)
+    # `ab packet`'s own selection with the horizon folded away: the same
+    # milestone resolution, the same criteria walk, the same refusals. This is
+    # the Gherkin slice of a packet — the files `--seal` digests — so a
+    # milestone that qualifies for one command qualifies for the other.
+    assembled = _assembled(design, milestone, horizon=0, include=None, exclude=None)
+    rendered = _feature_files(design, assembled.criteria)
+
+    if to_stdout:
+        # One `# path` header per file — a Gherkin comment, so the stream stays
+        # parseable while an agent piping it can still split it back into files.
+        for name in sorted(rendered):
+            typer.echo(f"# {out / name}")
+            typer.echo(rendered[name], nl=False)
+    if check_stale:
+        _check_features(
+            out, milestone, rendered, json_output=opts.json_output, verdict_stderr=to_stdout
+        )
+        return
+    if to_stdout:
+        return
+    _write_features(out, rendered, json_output=opts.json_output)

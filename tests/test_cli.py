@@ -137,6 +137,7 @@ PLAIN = re.compile(r"\x1b\[[0-9;]*m")
 IMPLEMENTED = {
     "build",
     "check",
+    "features",
     "gaps",
     "init",
     "layout",
