@@ -166,6 +166,7 @@ layers = [
     "absicht.codec",
     "absicht.findings",
     "absicht.git",
+    "absicht.schema",
     "absicht.models",
 ]
 

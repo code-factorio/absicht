@@ -27,6 +27,7 @@ from absicht.cli._common import (
 from absicht.findings import ExitCode, Severity
 from absicht.init import InitError, init_embedded, init_reference
 from absicht.models import SCHEMA_VERSION, State
+from absicht.schema import stale_schemas, write_schemas
 
 PANEL = "Step 1 — author and validate"
 """Where these commands appear in `ab --help`."""
@@ -158,7 +159,35 @@ def schema(
     Commit the output so editors give autocomplete and inline errors while
     authoring.
     """
-    unimplemented(ctx)
+    opts = options(ctx)
+    # `--check` compares against `--out` rather than always the committed
+    # `schema/`: one flag, one meaning. The pairing is odd only because the
+    # committed copy is the default — a CI job or a fork checking a copy
+    # elsewhere names the same directory it would regenerate into.
+    if check_stale:
+        stale = stale_schemas(out)
+        if opts.json_output:
+            typer.echo(
+                json.dumps(
+                    {"schema_version": SCHEMA_VERSION, "out": str(out), "stale": list(stale)}
+                )
+            )
+        elif stale:
+            for name in stale:
+                typer.echo(f"stale: {name}")
+            typer.echo(f"run ab schema --out {out} to refresh")
+        else:
+            typer.echo(f"{out} is up to date")
+        if stale:
+            raise typer.Exit(ExitCode.FINDINGS)
+        return
+    written = write_schemas(out)
+    if opts.json_output:
+        typer.echo(
+            json.dumps({"schema_version": SCHEMA_VERSION, "out": str(out), "wrote": list(written)})
+        )
+    else:
+        typer.echo(f"wrote {len(written)} schema files to {out}")
 
 
 @app.command(rich_help_panel=PANEL)
