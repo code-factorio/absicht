@@ -24,6 +24,8 @@ import os
 from pathlib import Path
 
 import pytest
+
+from absicht.codec import dump_singleton
 from absicht.load import (
     FileSource,
     LoadError,
@@ -32,8 +34,6 @@ from absicht.load import (
     load_store,
     resolve_store,
 )
-
-from absicht.codec import dump_singleton
 from absicht.models import Marker
 
 FIXTURES = Path(__file__).parent / "fixtures" / "systems"
@@ -252,9 +252,13 @@ def test_a_path_that_is_neither_store_nor_marker_is_no_store(tmp_path: Path) -> 
 
 
 def test_an_unparsable_marker_is_a_resolution_error(tmp_path: Path) -> None:
-    marker = _marker(tmp_path / ".absicht", "design: [unclosed\n")
+    """Written as raw text, not through `dump_singleton`: the point is a marker
+    that does not parse, and a round trip would launder it into a valid one."""
 
-    with pytest.raises(StoreResolutionError, match="marker"):
+    marker = tmp_path / ".absicht"
+    marker.write_text("design: [unclosed\n", encoding="utf-8")
+
+    with pytest.raises(StoreResolutionError, match=r"not a readable \.absicht marker"):
         resolve_store(marker)
 
 
