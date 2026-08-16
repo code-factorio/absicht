@@ -1,10 +1,11 @@
-"""``absicht.render``: the read-only projections behind ``ab show`` and
-``ab gaps`` — and, later, the site's pages.
+"""``absicht.render``: the read-only projections behind ``ab show``,
+``ab gaps`` and ``ab trace`` — and, later, the site's pages.
 
 The command contracts — exit codes, flags, the bytes on stdout — live in
-``tests/test_show_cli.py`` and ``tests/test_gaps_cli.py``. What is pinned here
-is the projections themselves, the shapes ``docs/tasks/26-render-site.md``
-builds on ("literally reuse" the show view; "a gaps page, reusing 23-gaps.md's
+``tests/test_show_cli.py``, ``tests/test_gaps_cli.py`` and
+``tests/test_trace_cli.py``. What is pinned here is the projections
+themselves, the shapes ``docs/tasks/26-render-site.md`` builds on
+("literally reuse" the show view; "a gaps page, reusing 23-gaps.md's
 worklist"):
 
 - ``--depth`` bounds the *outgoing* side only; the inbound side is one hop at
@@ -22,7 +23,10 @@ worklist"):
 - the gaps worklist's date boundaries — the ones no fixture holds, because a
   fixture pinned to "today" would rot: a question turns overdue strictly after
   its due date, an external expires strictly after its expiry date, and a
-  question a decision has already resolved leaves the worklist.
+  question a decision has already resolved leaves the worklist;
+- the trace walk's cycle guard: a hop onto an element already on the current
+  path is declined rather than followed, so a cyclic graph answers a bounded
+  set of simple paths and says the guard fired instead of hanging.
 """
 
 from __future__ import annotations
@@ -43,7 +47,7 @@ from absicht.models import (
     State,
     System,
 )
-from absicht.render import UnknownRefError, neighbourhood, worklist
+from absicht.render import UnknownRefError, neighbourhood, trace_paths, worklist
 from absicht.resolve import resolve
 
 FIXTURES = Path(__file__).parent / "fixtures" / "systems"
@@ -255,3 +259,33 @@ def test_worklist_expires_an_external_strictly_after_its_expiry_date() -> None:
     assert only.element.id == "external:yesterday"
     assert only.reasons == ("external-expired",)
     assert only.expires_on == TODAY - timedelta(days=1)
+
+
+# --- the trace paths -----------------------------------------------------------
+
+
+def test_a_cycle_ends_the_walk_and_says_so() -> None:
+    """`broken/`'s `contains` cycle is the input the walk must survive: the
+    guard is the simple-path invariant — a hop onto an element already on the
+    current path is declined — so the answer is a bounded set of paths plus
+    `cycle_hit`, not a hang. Exactly the two one-hop paths exist (down
+    through the edge loop-a authors, up through the one loop-b authors); the
+    hop back is declined both ways. `broken/` cannot reach this through the
+    CLI (its two unreadable files are `build`'s refusal), so the guard is
+    pinned here on the folded design."""
+    design = resolve(load_store(FIXTURES / "broken"))
+
+    result = trace_paths(design, "component:loop-a")
+
+    assert [tuple((step.field, step.up, step.ref) for step in path) for path in result.paths] == [
+        (("contains", False, "component:loop-b"),),
+        (("contains", True, "component:loop-b"),),
+    ]
+    assert result.cycle_hit is True
+
+
+def test_an_unknown_to_ref_raises_rather_than_answering_empty(clean: Design) -> None:
+    """`ab trace` maps this to `USAGE`: "no path to a nonexistent element" is
+    not an answer anyone should be able to mistake for a route check."""
+    with pytest.raises(UnknownRefError, match="decision:never"):
+        trace_paths(clean, "requirement:cancel-orders", to="decision:never-made")
