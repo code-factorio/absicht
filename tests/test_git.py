@@ -23,12 +23,14 @@ import subprocess
 from pathlib import Path
 
 import pytest
+
 from absicht.git import (
     GitError,
     changed_paths,
     current_rev,
     list_files_at_rev,
     read_file_at_rev,
+    repo_root,
     resolve_rev,
 )
 
@@ -135,6 +137,15 @@ def test_list_files_at_rev_enumerates_a_directory_at_that_rev(repo: Path) -> Non
 
 def test_list_files_at_rev_returns_nothing_for_a_directory_absent_at_that_rev(repo: Path) -> None:
     assert list_files_at_rev(Path("docs"), "HEAD", repo) == ()
+
+
+def test_repo_root_answers_from_any_subdirectory(repo: Path) -> None:
+    """Diff paths are printed relative to the toplevel whatever the cwd, so
+    joining a finding's store-relative `source` onto them needs the one
+    spelling both share."""
+    nested = repo / ".absicht" / "requirements"
+
+    assert repo_root(nested) == repo.resolve()
 
 
 def test_changed_paths_matches_the_hand_built_expectation(repo: Path) -> None:
