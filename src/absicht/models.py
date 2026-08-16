@@ -394,6 +394,31 @@ class Design(Record):
     milestones: tuple[Milestone, ...] = ()
 
 
+# ------------------------------------------------------------------- layout
+
+
+class Position(Record):
+    """One diagram node's pinned coordinates: where `ab render` draws the box."""
+
+    ref: Ref
+    x: float
+    y: float
+
+
+class Layout(Record):
+    """The `layout.yaml` singleton: one pinned position per diagram node.
+
+    Positions are design data, not a rendering detail — `ab layout` computes
+    them deterministically and pins them here, `ab render` reads them and
+    never invents its own, so boxes do not move between builds. A tuple in
+    id order like every other collection in this file: the dump's field
+    order is the model's own, and byte-identical output needs that order to
+    be data rather than dict insertion order.
+    """
+
+    positions: tuple[Position, ...] = ()
+
+
 # ------------------------------------------------------------------- packet
 
 

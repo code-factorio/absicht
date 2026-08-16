@@ -31,11 +31,11 @@ import shutil
 from pathlib import Path
 
 import pytest
-from absicht.layout import compute, read_layout
 from typer.testing import CliRunner
 
 from absicht.cli import app
 from absicht.cli._common import ExitCode
+from absicht.layout import compute, read_layout
 from absicht.models import SCHEMA_VERSION, Component, Design, System
 
 runner = CliRunner()
@@ -157,9 +157,12 @@ def test_check_names_the_element_without_a_position(store: Path) -> None:
     _pin(store, dict.fromkeys(covered, (1.0, 1.0)))
 
     result = runner.invoke(app, ["--store", str(store), "layout", "--check"])
+    json_result = runner.invoke(app, ["--store", str(store), "layout", "--check", "--json"])
 
     assert result.exit_code == ExitCode.FINDINGS
     assert result.stdout == f"no position for {uncovered}\n"
+    assert json_result.exit_code == ExitCode.FINDINGS
+    assert json.loads(json_result.stdout)["missing"] == [uncovered]
 
 
 def test_check_passes_when_every_element_is_positioned(store: Path) -> None:

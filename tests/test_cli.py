@@ -128,6 +128,7 @@ IMPLEMENTED = {
     "check",
     "gaps",
     "init",
+    "layout",
     "list",
     "migrate",
     "new",

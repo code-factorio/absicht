@@ -164,6 +164,7 @@ layers = [
     "absicht.init",
     "absicht.new",
     "absicht.migrate",
+    "absicht.layout",
     "absicht.build",
     "absicht.check",
     "absicht.resolve",

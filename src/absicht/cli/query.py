@@ -37,6 +37,15 @@ from absicht.cli._common import (
 )
 from absicht.findings import ExitCode
 from absicht.git import GitError
+from absicht.layout import (
+    LayoutError,
+    compute,
+    merge,
+    missing,
+    nodes,
+    read_layout,
+    write_layout,
+)
 from absicht.load import StoreResolutionError, resolve_store
 from absicht.models import (
     SCHEMA_VERSION,
@@ -64,8 +73,10 @@ PANEL = "Step 2 — build, query, look at it"
 """Where these commands appear in `ab --help`."""
 
 
-def _design(opts: GlobalOptions) -> Design:
-    """The load → resolve path every command in this group shares.
+def _design(opts: GlobalOptions) -> tuple[Path, Design]:
+    """The load → resolve path every command in this group shares: the
+    resolved store root alongside the `Design`, because `layout` both reads
+    the graph and writes `layout.yaml` back into the store it came from.
 
     One spelling of the three ways a query invocation breaks: no store, or a
     `--rev` that does not resolve / a store outside any repository (git reads,
@@ -75,7 +86,7 @@ def _design(opts: GlobalOptions) -> Design:
     """
     try:
         root = resolve_store(opts.store)
-        return build_design(root, rev=opts.rev)
+        return root, build_design(root, rev=opts.rev)
     except (StoreResolutionError, GitError, ValueError) as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(ExitCode.USAGE) from exc
@@ -101,7 +112,7 @@ def build(
     reads this and nothing else.
     """
     opts = options(ctx)
-    design = _design(opts)
+    _, design = _design(opts)
     text = design_json(design)
     if to_stdout:
         # `nl=False`: the document ends in the newline a file gets, so stdout
@@ -166,7 +177,7 @@ def show(
     if depth < 0:
         typer.echo("--depth counts hops out from REF; it cannot be negative", err=True)
         raise typer.Exit(ExitCode.USAGE)
-    design = _design(opts)
+    _, design = _design(opts)
     try:
         view = neighbourhood(design, ref, depth=depth)
     except UnknownRefError as exc:
@@ -242,7 +253,7 @@ def list_elements(
         typer.echo("--owner and --unowned are mutually exclusive", err=True)
         raise typer.Exit(ExitCode.USAGE)
     opts = options(ctx)
-    design = _design(opts)
+    _, design = _design(opts)
     scope = _milestone_scope(design, milestone)
     states = frozenset(state) if state else None
     tags = frozenset(tag) if tag else None
@@ -348,7 +359,7 @@ def gaps(
     elements, and expired external assumptions.
     """
     opts = options(ctx)
-    design = _design(opts)
+    _, design = _design(opts)
     target: Element | None = None
     if blocking is not None:
         target = Index.from_design(design).by_id.get(blocking)
@@ -407,7 +418,7 @@ def trace(
     Requirement to component to seam to decision, in either direction.
     """
     opts = options(ctx)
-    design = _design(opts)
+    _, design = _design(opts)
     try:
         traced = trace_paths(design, ref, to=to, up=up, down=down)
     except UnknownRefError as exc:
@@ -473,6 +484,51 @@ def layout(
 
     Positions are design data, not a rendering detail. Stable layout is what
     makes the diagrams worth having — if boxes move on every build, spatial
-    memory never forms.
+    memory never forms. The default and `--recompute` place only elements
+    without a pinned position; `--recompute-all` throws the pins away.
     """
-    unimplemented(ctx)
+    if check_positions and (recompute or recompute_all):
+        typer.echo("--check reads the pinned positions; it does not recompute them", err=True)
+        raise typer.Exit(ExitCode.USAGE)
+    if recompute and recompute_all:
+        typer.echo(
+            "--recompute keeps pinned positions and --recompute-all discards them; pick one",
+            err=True,
+        )
+        raise typer.Exit(ExitCode.USAGE)
+    opts = options(ctx)
+    root, design = _design(opts)
+    try:
+        pinned = read_layout(root)
+    except LayoutError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(ExitCode.FINDINGS) from exc
+    if check_positions:
+        lacking = missing(design, pinned)
+        if opts.json_output:
+            typer.echo(json.dumps({"schema_version": SCHEMA_VERSION, "missing": list(lacking)}))
+        elif lacking:
+            typer.echo("\n".join(f"no position for {ref}" for ref in lacking))
+        else:
+            typer.echo(f"every diagram element has a position ({len(nodes(design))})")
+        if lacking:
+            raise typer.Exit(ExitCode.FINDINGS)
+        return
+    fresh = compute(design, seed=seed)
+    result = fresh if recompute_all else merge(pinned, fresh)
+    path = write_layout(root, result)
+    kept = {position.ref for position in pinned.positions}
+    added = sum(1 for position in result.positions if position.ref not in kept)
+    if opts.json_output:
+        typer.echo(
+            json.dumps(
+                {
+                    "schema_version": SCHEMA_VERSION,
+                    "out": str(path),
+                    "added": added,
+                    "total": len(result.positions),
+                }
+            )
+        )
+    else:
+        typer.echo(f"wrote {path} ({added} added, {len(result.positions)} positions)")

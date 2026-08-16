@@ -11,9 +11,10 @@ continues, so a store with a single typo still yields everything else and
 knows nothing of `absicht.findings` severities — `check` translates; `build`
 and `packet` just want the data plus a list of what went wrong.
 
-`layout.yaml` is not read yet: there is no positions model to read it into
-(`docs/tasks/25-layout.md`), and guessing a shape ahead of one is how formats
-calcify. `resolve_store` lands the store-location modes from `cli.md`'s global
+`layout.yaml` stays outside `LoadedStore`: it is not an element collection
+but positions pinned by `ab layout` (`docs/tasks/25-layout.md`), and
+`absicht.layout` owns reading and writing it through the same codec.
+`resolve_store` lands the store-location modes from `cli.md`'s global
 flags table — the CLI maps its failure to `ExitCode.USAGE`.
 """
 
