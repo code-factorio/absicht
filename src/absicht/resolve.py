@@ -204,3 +204,24 @@ class Index:
             for ref in self.by_id
             if ref not in self.referenced_by and (prefix is None or ref.startswith(prefix))
         )
+
+
+def subtree(index: Index, ref: Ref) -> frozenset[Ref]:
+    """The subtree a ``--scope`` selects: ``ref`` plus everything reachable
+    from it by following refs outward. Dangling targets resolve to nothing
+    here either — they are ``ab check``'s to report, and on a page they stay
+    plain text rather than becoming links to nowhere.
+
+    Lives here, beside the ``Index`` it walks, because three commands scope
+    their output the same way — the site and diagram halves of ``ab render``
+    and ``ab diff`` — and one ``--scope`` flag should mean one thing wherever
+    it appears.
+    """
+    seen = {ref}
+    pending = [ref]
+    while pending:
+        for edge in index.references_from.get(pending.pop(), ()):
+            if edge.target in index.by_id and edge.target not in seen:
+                seen.add(edge.target)
+                pending.append(edge.target)
+    return frozenset(seen)

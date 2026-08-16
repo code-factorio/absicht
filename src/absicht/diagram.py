@@ -43,8 +43,8 @@ from pathlib import Path
 from absicht.git import GitError, commit_count, repo_root
 from absicht.layout import LayoutError, nodes, read_layout
 from absicht.models import Component, Design, Element, Position, Ref, Seam, State
-from absicht.render import UnknownRefError, mermaid, node_key, subtree
-from absicht.resolve import Index
+from absicht.render import UnknownRefError, mermaid, node_key
+from absicht.resolve import Index, subtree
 
 OVERLAYS = ("state", "milestone", "coverage", "churn")
 """The overlay vocabulary, the values ``ab render --overlay`` accepts. The

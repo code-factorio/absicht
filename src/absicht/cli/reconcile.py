@@ -15,6 +15,7 @@ from typing import Annotated
 
 import typer
 
+from absicht.build import BuildError
 from absicht.cli._app import app
 from absicht.cli._common import (
     DEFAULT_DIFF_BASE,
@@ -28,7 +29,11 @@ from absicht.cli._common import (
     options,
     unimplemented,
 )
+from absicht.diff import diff as diff_store
 from absicht.findings import ExitCode, Report
+from absicht.git import GitError
+from absicht.load import StoreResolutionError, resolve_store
+from absicht.render import UnknownRefError
 from absicht.verify import (
     VerifyUsageError,
     context_for,
@@ -180,7 +185,36 @@ def diff(
     Decisions added, seams whose contract moved, requirements added or dropped,
     state transitions.
     """
-    unimplemented(ctx)
+    opts = options(ctx)
+    try:
+        result = diff_store(
+            resolve_store(opts.store),
+            ref_a,
+            ref_b,
+            scope=scope,
+            # The CLI's `Kind` enum value, not the enum: `absicht.diff` sits
+            # below this layer and names kinds the way `Index.orphaned` does.
+            kind=None if kind is None else kind.value,
+        )
+    except (StoreResolutionError, GitError, UnknownRefError, ValueError) as exc:
+        # No store, a rev that does not resolve, an unknown `--scope` ref:
+        # all broken invocations.
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(ExitCode.USAGE) from exc
+    except BuildError as exc:
+        # A store that does not load cleanly at either revision is `build`'s
+        # FINDINGS-level refusal — a partial diff is not an answer either.
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(ExitCode.FINDINGS) from exc
+    output = effective_format(ctx, output_format, opts.json_output, json_member=DocFormat.JSON)
+    if output is DocFormat.JSON:
+        typer.echo(json.dumps(result.render_json()))
+        return
+    body = result.render_markdown() if output is DocFormat.MD else result.render_text()
+    # Empty stays silent, like `list`, `gaps` and `trace`: no blank line where
+    # a change would be.
+    if body:
+        typer.echo(body)
 
 
 @marker_app.command("sync")

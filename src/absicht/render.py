@@ -47,7 +47,7 @@ from absicht.models import (
     Ref,
     State,
 )
-from absicht.resolve import Index, Reference
+from absicht.resolve import Index, Reference, subtree
 
 log = logging.getLogger(__name__)
 
@@ -708,26 +708,6 @@ def generate_site(
         today=today,
     )
     return site.write()
-
-
-def subtree(index: Index, ref: Ref) -> frozenset[Ref]:
-    """The subtree a ``--scope`` renders: ``ref`` plus everything reachable
-    from it by following refs outward. Dangling targets resolve to nothing
-    here either — they are ``ab check``'s to report, and on a page they stay
-    plain text rather than becoming links to nowhere.
-
-    Public because ``absicht.diagram`` scopes a diagram the same way — one
-    ``--scope`` flag, one definition of what it keeps, across both halves of
-    ``ab render``.
-    """
-    seen = {ref}
-    pending = [ref]
-    while pending:
-        for edge in index.references_from.get(pending.pop(), ()):
-            if edge.target in index.by_id and edge.target not in seen:
-                seen.add(edge.target)
-                pending.append(edge.target)
-    return frozenset(seen)
 
 
 @dataclass(frozen=True, slots=True)

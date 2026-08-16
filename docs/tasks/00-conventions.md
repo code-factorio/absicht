@@ -15,6 +15,7 @@ in this list, nothing above:
 absicht.__main__
 absicht.cli
 absicht.status | absicht.markers
+absicht.diff                                      # borrows render's UnknownRefError, like diagram
 absicht.render | absicht.packet | absicht.verify   # resolved graph, read-only
 absicht.build
 absicht.check
