@@ -162,6 +162,7 @@ layers = [
     "absicht.cli",
     "absicht.diagram",
     "absicht.render",
+    "absicht.packet",
     "absicht.gherkin",
     "absicht.init",
     "absicht.new",

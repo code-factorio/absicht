@@ -4,7 +4,11 @@ This module represents, filters and renders findings; it never produces them.
 The rules that decide what is wrong live in ``absicht.check`` and
 ``absicht.verify``, each registering its ids in ``RULES`` at import time so
 ``ab check --explain ID`` — the only command with that flag, per
-``docs/spec/cli.md`` — has one home to print from.
+``docs/spec/cli.md`` — has one home to print from. ``absicht.packet``
+registers its one rule-shaped failure there the same way: assembly can hit a
+real problem with the design (a milestone with no scope) and represents it in
+this vocabulary rather than a third one, even though ``ab packet`` exposes no
+``--rule``.
 
 ``Severity`` and ``ExitCode`` are defined here rather than in
 ``absicht.cli._common``, where they started: the CLI sits at the top of the
@@ -75,7 +79,7 @@ class Finding(Record):
 
 
 RULES: dict[str, str] = {}
-"""Every rule id ``ab check`` and ``ab verify`` can produce, with its explanation.
+"""Every rule id a rule-producing module can emit, with its explanation.
 
 Rule modules add theirs at import time (``RULES["policy/x"] = "..."``). A plain
 dict, deliberately not a registry class: a dozen rules do not need a plugin
