@@ -70,11 +70,27 @@ _PACKET = Packet(milestone="milestone:m1")
 _LOCK = PacketLock(design_rev="0" * 40, scenarios_digest="deadbeef")
 
 
-def _git(repo: Path, *args: str) -> str:
+def _git(repo: Path, *args: str, env: dict[str, str] | None = None) -> str:
     """Fixture plumbing: run git in ``repo``, failing loudly if git does."""
     return subprocess.run(
-        ["git", "-C", str(repo), *args], capture_output=True, text=True, check=True
+        ["git", "-C", str(repo), *args],
+        capture_output=True,
+        text=True,
+        check=True,
+        env={**os.environ, **env} if env else None,
     ).stdout
+
+
+# A fixed instant for every `c1`: same content plus same stamp is the same
+# commit sha. test_the_resolved_diff_is_per_repo hands one repo's `HEAD~1` to
+# another repo as `--diff-base`, which only resolves when the two one-commit
+# repos share their sha — a property of the fixtures, never of the clock
+# (two commits landing in different seconds made CI's run fail with "Invalid
+# symmetric difference expression").
+_PINNED_COMMIT_DATES = {
+    "GIT_AUTHOR_DATE": "2026-01-01T00:00:00+00:00",
+    "GIT_COMMITTER_DATE": "2026-01-01T00:00:00+00:00",
+}
 
 
 def _init_repo(repo: Path) -> None:
@@ -85,7 +101,7 @@ def _init_repo(repo: Path) -> None:
     _git(repo, "config", "user.name", "absicht tests")
     _git(repo, "config", "commit.gpgsign", "false")
     _git(repo, "add", "-A")
-    _git(repo, "commit", "-qm", "c1")
+    _git(repo, "commit", "-qm", "c1", env=_PINNED_COMMIT_DATES)
 
 
 def _repo(tmp_path: Path, name: str, files: dict[str, str]) -> Path:
