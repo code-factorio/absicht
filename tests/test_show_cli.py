@@ -161,3 +161,16 @@ def test_a_negative_depth_is_a_usage_error() -> None:
 
     assert result.exit_code == ExitCode.USAGE
     assert "--depth" in result.stderr
+
+
+def test_structured_field_values_render_on_one_line() -> None:
+    """`data:order`'s `fields` is the clean fixture's one structured value —
+    neither a string nor a list of strings. It stays on the field's own line
+    as compact JSON rather than being dropped or given a bespoke
+    pretty-printer per shape."""
+
+    result = _show("data:order")
+
+    assert result.exit_code == ExitCode.OK
+    assert 'fields: [{"name": "id", "type": "uuid", "optional": false, "note": ""}' in result.stdout
+    assert "identity: id" in result.stdout
