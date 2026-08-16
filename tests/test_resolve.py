@@ -43,6 +43,8 @@ EXPECTED_COUNTS: dict[str, dict[str, int]] = {
         "components": 3,
         "seams": 1,
         "data": 1,
+        "resources": 1,
+        "behaviors": 2,
         "decisions": 1,
         "milestones": 1,
     },
@@ -52,10 +54,20 @@ EXPECTED_COUNTS: dict[str, dict[str, int]] = {
         "components": 2,
         "data": 1,
         "externals": 1,
+        "behaviors": 1,
         "questions": 2,
         "milestones": 1,
     },
-    "broken": {"externals": 1, "stories": 1, "components": 3, "decisions": 1, "questions": 1},
+    "broken": {
+        "externals": 1,
+        "stories": 1,
+        "components": 3,
+        "seams": 1,
+        "resources": 1,
+        "behaviors": 4,
+        "decisions": 1,
+        "questions": 1,
+    },
     "composite": {"externals": 1, "components": 2, "seams": 1, "data": 1},
 }
 
@@ -92,9 +104,10 @@ def test_by_id_holds_every_element_including_the_system() -> None:
 
     index = Index.from_design(design)
 
-    assert len(index.by_id) == 11  # the system plus ten elements
+    assert len(index.by_id) == 14  # the system plus thirteen elements
     assert index.by_id["system:acme"] is design.system
     assert index.by_id["seam:order-events"] is design.seams[0]
+    assert index.by_id["behavior:order-placed-v2"] is design.behaviors[1]
 
 
 def test_referenced_by_finds_the_requirement_behind_a_component() -> None:
@@ -118,6 +131,45 @@ def test_a_criterion_touch_is_indexed_against_its_story() -> None:
     assert (
         Reference(source="story:cancel-order", field="touches", target="seam:order-events")
         in index.referenced_by["seam:order-events"]
+    )
+
+
+def test_a_behaviors_refs_and_observations_are_indexed_under_it() -> None:
+    """An observation is to a behavior what a criterion is to a story: a
+    nested record whose one ref (`at`) is attributed to the element that
+    carries it. `iter_references` must therefore yield a behavior's `realizes`
+    and `supersedes`, then every observation's `at`, with the behavior as
+    source — which is also what lets the generic dangling-ref rule and the
+    index's reverse lookups cover observation refs for free."""
+
+    design = resolve(load_store(FIXTURES / "clean"))
+    index = Index.from_design(design)
+
+    assert index.references_from["behavior:order-placed-v2"] == (
+        Reference(
+            source="behavior:order-placed-v2", field="realizes", target="requirement:cancel-orders"
+        ),
+        Reference(
+            source="behavior:order-placed-v2", field="supersedes", target="behavior:order-placed"
+        ),
+        Reference(source="behavior:order-placed-v2", field="at", target="resource:order-cache"),
+        Reference(source="behavior:order-placed-v2", field="at", target="component:orders"),
+        Reference(source="behavior:order-placed-v2", field="at", target="resource:order-cache"),
+        Reference(source="behavior:order-placed-v2", field="at", target="behavior:order-placed"),
+        Reference(source="behavior:order-placed-v2", field="at", target="component:orders"),
+    )
+    # The reverse side: both edges onto the superseded behavior, and the
+    # observations' targets reachable from the resource.
+    assert index.referenced_by["behavior:order-placed"] == (
+        Reference(
+            source="behavior:order-placed-v2", field="supersedes", target="behavior:order-placed"
+        ),
+        Reference(source="behavior:order-placed-v2", field="at", target="behavior:order-placed"),
+    )
+    assert index.referenced_by["resource:order-cache"] == (
+        Reference(source="behavior:order-placed", field="at", target="resource:order-cache"),
+        Reference(source="behavior:order-placed-v2", field="at", target="resource:order-cache"),
+        Reference(source="behavior:order-placed-v2", field="at", target="resource:order-cache"),
     )
 
 

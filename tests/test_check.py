@@ -10,10 +10,10 @@ translation, and the decisions it rests on:
 - a validation finding names the offending field — or, for a whole-record
   validator, the thing it rejected — since ``Finding.message`` is all an
   agent fixing the store gets to read;
-- the shared fixtures stay the safety net: ``broken`` reports exactly its two
-  deliberately unparseable files and nothing else (its other defects are the
-  integrity and policy layers' to judge), while ``clean`` and ``brownfield``
-  parse without a word.
+- the shared fixtures stay the safety net: ``broken`` reports exactly its
+  three deliberately unparseable files and nothing else (its other defects
+  are the integrity and policy layers' to judge), while ``clean`` and
+  ``brownfield`` parse without a word.
 
 The integrity layer reads the resolved artifact instead of the load errors:
 
@@ -22,7 +22,10 @@ The integrity layer reads the resolved artifact instead of the load errors:
   ``Index`` is built from, so a ref-typed field added to a model is checked
   without this module learning about it. ``System.externals`` needs no
   multi-repo rule of its own: it is a plain ref-typed field, the sweep
-  covers it, and the finding lands on the system element.
+  covers it, and the finding lands on the system element. An observation's
+  ``at`` joins the sweep the same way, attributed to the behavior that
+  carries it — the generic walk covering it is why the addendum's
+  observation-at rule only needs to police *kind*, not existence.
 - a cycle in ``contains`` or ``depends_on`` is one finding per distinct
   cycle, not per edge — two disjoint loops are two findings, however many
   edges they span, and each relation is its own directed graph.
@@ -97,15 +100,19 @@ def test_every_load_error_reason_becomes_its_rule_at_error_severity(
     assert only.message == "what went wrong"
 
 
-def test_the_broken_store_reports_exactly_its_two_parse_failures() -> None:
+def test_the_broken_store_reports_exactly_its_three_parse_failures() -> None:
     """`06-fixtures.md` puts one clearly-named file per failure family in
-    `broken/`; only two fail at the schema layer. The rest parse on purpose —
+    `broken/`; only three fail at the schema layer. The rest parse on purpose —
     a dangling ref, a `contains` cycle and the policy cases are findings the
     integrity and policy layers own, not files the loader refused."""
 
     by_path = {found.source: found for found in schema_findings(load_store(FIXTURES / "broken"))}
 
-    assert set(by_path) == {"requirements/garbage.md", "stories/bad-anchor.md"}
+    assert set(by_path) == {
+        "requirements/garbage.md",
+        "stories/bad-anchor.md",
+        "behaviors/bad-timing.md",
+    }
 
     garbage = by_path["requirements/garbage.md"]
     assert garbage.rule_id == "schema/yaml-syntax"
@@ -119,6 +126,10 @@ def test_the_broken_store_reports_exactly_its_two_parse_failures() -> None:
         "criterion 'story:other-story#ac-1' is not anchored to 'story:bad-anchor'"
         in bad_anchor.message
     )
+
+    bad_timing = by_path["behaviors/bad-timing.md"]
+    assert bad_timing.rule_id == "schema/validation"
+    assert "`must_not` means at no point: omit `timing`" in bad_timing.message
 
 
 @pytest.mark.parametrize("name", ["clean", "brownfield"])
@@ -152,14 +163,17 @@ def _integrity(name: str) -> tuple[Finding, ...]:
     return integrity_findings(design, Index.from_design(design))
 
 
-def test_broken_reports_exactly_its_dangling_ref_and_its_contains_cycle() -> None:
-    """`broken/`'s two integrity defects, per `06-fixtures.md`: `dangling.md`
-    points at a ghost through `contains`, and `loop-a`/`loop-b` contain each
-    other — one cycle, one finding. The policy cases (the unowned unknown, the
-    one-way decision without rationale, the expired external) parse and resolve
-    fine, and the two files that fail to load never reach a `Design` at all."""
+def test_broken_reports_exactly_its_dangling_refs_and_its_contains_cycle() -> None:
+    """`broken/`'s three integrity findings, per `06-fixtures.md`: `dangling.md`
+    points at a ghost through `contains`, the dangling observation's `at` names
+    a resource nothing defines, and `loop-a`/`loop-b` contain each other — one
+    cycle, one finding. The observation finding is the generic sweep covering
+    the addendum's nested records: it names the behavior that carries the
+    observation, the `at` field and the missing target, with no rule of its
+    own. The policy cases parse and resolve fine, and the three files that
+    fail to load never reach a `Design` at all."""
 
-    (dangling, cycle) = _integrity("broken")
+    (dangling, observation, cycle) = _integrity("broken")
 
     assert dangling.rule_id == "integrity/dangling-ref"
     assert dangling.severity is Severity.ERROR
@@ -168,6 +182,17 @@ def test_broken_reports_exactly_its_dangling_ref_and_its_contains_cycle() -> Non
     assert "component:dangling" in dangling.message
     assert "contains" in dangling.message
     assert "component:ghost" in dangling.message
+
+    assert observation.rule_id == "integrity/dangling-ref"
+    assert observation.severity is Severity.ERROR
+    assert observation.ref == "behavior:dangling-observation"
+    assert observation.source == "behaviors/dangling-observation.md"
+    # Pinned exactly, like the cycle below: the finding names the behavior,
+    # the field and the missing target, and that text is user-facing.
+    assert observation.message == (
+        "behavior:dangling-observation's at points at resource:ghost-store, "
+        "which no element in the store defines"
+    )
 
     assert cycle.rule_id == "integrity/cycle"
     assert cycle.severity is Severity.ERROR

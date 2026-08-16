@@ -40,7 +40,7 @@ from absicht.models import Marker, State
 FIXTURES = Path(__file__).parent / "fixtures" / "systems"
 
 # What each fixture must load to: elements per kind, plus how many files fail
-# on the way. `broken`'s two failures are asserted by name in their own test.
+# on the way. `broken`'s three failures are asserted by name in their own test.
 EXPECTED: dict[str, dict[str, int]] = {
     "clean": {
         "externals": 0,
@@ -50,6 +50,8 @@ EXPECTED: dict[str, dict[str, int]] = {
         "components": 3,
         "seams": 1,
         "data": 1,
+        "resources": 1,
+        "behaviors": 2,
         "decisions": 1,
         "rejections": 0,
         "questions": 0,
@@ -64,6 +66,8 @@ EXPECTED: dict[str, dict[str, int]] = {
         "components": 2,
         "seams": 0,
         "data": 1,
+        "resources": 0,
+        "behaviors": 1,
         "decisions": 0,
         "rejections": 0,
         "questions": 2,
@@ -76,13 +80,15 @@ EXPECTED: dict[str, dict[str, int]] = {
         "non_functionals": 0,
         "stories": 1,
         "components": 3,
-        "seams": 0,
+        "seams": 1,
         "data": 0,
+        "resources": 1,
+        "behaviors": 4,
         "decisions": 1,
         "rejections": 0,
         "questions": 1,
         "milestones": 0,
-        "errors": 2,
+        "errors": 3,
     },
     "composite": {
         "externals": 1,
@@ -92,6 +98,8 @@ EXPECTED: dict[str, dict[str, int]] = {
         "components": 2,
         "seams": 1,
         "data": 1,
+        "resources": 0,
+        "behaviors": 0,
         "decisions": 0,
         "rejections": 0,
         "questions": 0,
@@ -110,11 +118,14 @@ def test_each_fixture_loads_to_its_expected_counts(name: str) -> None:
     assert loaded.system is not None
 
 
-def test_broken_reports_its_two_parse_failures_by_name() -> None:
+def test_broken_reports_its_three_parse_failures_by_name() -> None:
     """The walk continues past a bad file, and each error says what is wrong
-    with which path — never a stack trace for `check` to lift into a finding."""
+    with which path — never a stack trace for `check` to lift into a finding.
+    A broken behavior file is one finding among the rest, not a crash: the
+    `must_not`-with-`timing` shape is refused by `Observation`'s own validator
+    at parse time, so it surfaces here, at the load layer, like the others."""
 
-    (garbage, bad_anchor) = load_store(FIXTURES / "broken").errors
+    (garbage, bad_anchor, bad_timing) = load_store(FIXTURES / "broken").errors
 
     assert garbage.path == "requirements/garbage.md"
     assert "invalid YAML" in garbage.message
@@ -122,6 +133,9 @@ def test_broken_reports_its_two_parse_failures_by_name() -> None:
     assert bad_anchor.path == "stories/bad-anchor.md"
     assert "not anchored to 'story:bad-anchor'" in bad_anchor.message
     assert bad_anchor.reason is LoadErrorReason.VALIDATION
+    assert bad_timing.path == "behaviors/bad-timing.md"
+    assert "`must_not` means at no point: omit `timing`" in bad_timing.message
+    assert bad_timing.reason is LoadErrorReason.VALIDATION
 
 
 def test_broken_parses_its_check_layer_defects_without_flagging_them() -> None:

@@ -22,6 +22,7 @@ from absicht.codec import (
     parse_singleton,
 )
 from absicht.models import (
+    Behavior,
     Component,
     Criterion,
     DataEntity,
@@ -34,18 +35,23 @@ from absicht.models import (
     Marker,
     Milestone,
     NonFunctional,
+    Observation,
+    Outcome,
     QualityAttribute,
     Question,
     Record,
     Rejection,
     Requirement,
     ResolutionMethod,
+    Resource,
+    ResourceKind,
     Reversibility,
     Seam,
     SeamStyle,
     State,
     Story,
     System,
+    Timing,
     Unit,
     UnitWatermark,
 )
@@ -193,6 +199,44 @@ ELEMENTS: dict[str, tuple[Element, str]] = {
         ),
         "externals/stripe.md",
     ),
+    "resource": (
+        Resource(
+            id="resource:order-cache",
+            source="resources/order-cache.md",
+            title="Order cache",
+            state=State.SPECIFIED,
+            resource_kind=ResourceKind.STORE,
+            technology="Redis",
+        ),
+        "resources/order-cache.md",
+    ),
+    "behavior": (
+        Behavior(
+            id="behavior:order-placed-v2",
+            source="behaviors/order-placed-v2.md",
+            title="Order placed through checkout",
+            state=State.SPECIFIED,
+            trigger="A customer places an order through the new checkout.",
+            realizes=("requirement:cancel-orders",),
+            supersedes=("behavior:order-placed",),
+            observations=(
+                Observation(
+                    id="behavior:order-placed-v2#obs-1",
+                    statement="The order appears in the order cache",
+                    at="resource:order-cache",
+                    outcome=Outcome.MUST,
+                    timing=Timing.IMMEDIATE,
+                ),
+                Observation(
+                    id="behavior:order-placed-v2#obs-2",
+                    statement="No order is cached before payment clears",
+                    at="resource:order-cache",
+                    outcome=Outcome.MUST_NOT,
+                ),
+            ),
+        ),
+        "behaviors/order-placed-v2.md",
+    ),
 }
 
 # Singletons are plain YAML (`system.yaml`, a repo `.absicht` marker): no front
@@ -221,6 +265,23 @@ SINGLETONS: dict[str, tuple[Record, type[Record]]] = {
 @pytest.mark.parametrize(("element", "path"), ELEMENTS.values(), ids=list(ELEMENTS))
 def test_each_kind_survives_a_round_trip(element: Element, path: str) -> None:
     assert parse_element(dump_element(element), model=type(element), source=path) == element
+
+
+def test_a_behaviors_observations_serialize_inline_under_observations() -> None:
+    """The codec needs no behavior-specific code: it is generic over pydantic
+    models, and this test is the confirmation the store-wiring task asks for —
+    observations ride in the front matter as a nested record list exactly as a
+    story's criteria do under `acceptance:`, under the model's own field name,
+    so the on-disk spelling stays the format contract rather than a codec
+    special case."""
+
+    (behavior, path) = ELEMENTS["behavior"]
+
+    text = dump_element(behavior)
+
+    assert "observations:" in text
+    assert "behavior:order-placed-v2#obs-2" in text
+    assert parse_element(text, model=Behavior, source=path) == behavior
 
 
 @pytest.mark.parametrize(("record", "model"), SINGLETONS.values(), ids=list(SINGLETONS))

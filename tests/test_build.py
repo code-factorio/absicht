@@ -62,6 +62,11 @@ def test_each_fixture_builds_to_its_snapshot(name: str, snapshot: SnapshotAssert
 
 
 def test_two_builds_of_one_store_are_byte_identical(tmp_path: Path) -> None:
+    """`clean/` carries the addendum kinds (a resource, behaviors with inline
+    observations), so this is also the proof that `build` needs nothing new
+    for them: it is generic over `Design`, and byte-identical output over a
+    store containing the new kinds is that genericity holding."""
+
     first, second = tmp_path / "a" / "design.json", tmp_path / "b" / "design.json"
 
     for out in (first, second):
