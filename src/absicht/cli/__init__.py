@@ -11,9 +11,10 @@ the web and MCP surfaces later depend on them:
   consumer of this tool and the terminal is the secondary one.
 
 The modules are the delivery steps from ``docs/spec/cli.md``, which is
-also the order the bodies behind these signatures arrive in. Every command is
-currently a signature: the flags, their types and their defaults are the
-contract, and calling one exits ``ExitCode.INTERNAL`` with a note on stderr.
+also the order the bodies behind these signatures arrive in. A command
+without a body yet is still a signature: the flags, their types and their
+defaults are the contract, and calling one exits ``ExitCode.INTERNAL`` with
+a note on stderr.
 """
 
 from __future__ import annotations

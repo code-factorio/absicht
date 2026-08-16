@@ -161,6 +161,7 @@ layers = [
     "absicht.__main__",
     "absicht.cli",
     "absicht.resolve",
+    "absicht.init",
     "absicht.load",
     "absicht.codec",
     "absicht.findings",

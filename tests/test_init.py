@@ -31,14 +31,17 @@ DESIGN = "https://example.com/design"
 
 
 def test_embedded_init_scaffolds_a_system_and_nothing_else(tmp_path: Path) -> None:
-    result = runner.invoke(app, ["--store", str(tmp_path), "init", "--name", "ACME Orders"])
+    store = tmp_path / "store"
+
+    result = runner.invoke(app, ["--store", str(store), "init", "--name", "ACME Orders"])
 
     assert result.exit_code == ExitCode.OK
-    assert [path.name for path in tmp_path.iterdir()] == ["system.yaml"]
+    assert [path.name for path in tmp_path.iterdir()] == ["store"]
+    assert [path.name for path in store.iterdir()] == ["system.yaml"]
     # The kind directories are not created: load reads a missing one as empty,
     # and the id is the slugified name per 00-conventions.md's identity rule.
     assert parse_singleton(
-        (tmp_path / "system.yaml").read_text(encoding="utf-8"), model=System
+        (store / "system.yaml").read_text(encoding="utf-8"), model=System
     ) == System(id="system:acme-orders", title="ACME Orders")
 
 
@@ -51,7 +54,7 @@ def test_a_name_with_no_letters_or_digits_is_a_usage_error(tmp_path: Path, name:
 
 
 def test_a_second_init_without_force_is_a_usage_error(tmp_path: Path) -> None:
-    argv = ["--store", str(tmp_path), "init", "--name", "ACME"]
+    argv = ["--store", str(tmp_path / "store"), "init", "--name", "ACME"]
 
     assert runner.invoke(app, argv).exit_code == ExitCode.OK
 
@@ -62,23 +65,25 @@ def test_a_second_init_without_force_is_a_usage_error(tmp_path: Path) -> None:
 
 
 def test_force_writes_into_a_scaffolded_but_empty_store(tmp_path: Path) -> None:
-    argv = ["--store", str(tmp_path), "init", "--name", "ACME"]
+    store = tmp_path / "store"
+    argv = ["--store", str(store), "init", "--name", "ACME"]
     assert runner.invoke(app, argv).exit_code == ExitCode.OK
 
     again = runner.invoke(app, [*argv, "--force"])
 
     assert again.exit_code == ExitCode.OK
-    assert [path.name for path in tmp_path.iterdir()] == ["system.yaml"]
+    assert [path.name for path in store.iterdir()] == ["system.yaml"]
 
 
 def test_force_still_refuses_once_the_store_has_elements(tmp_path: Path) -> None:
-    argv = ["--store", str(tmp_path), "init", "--name", "ACME"]
+    store = tmp_path / "store"
+    argv = ["--store", str(store), "init", "--name", "ACME"]
     assert runner.invoke(app, argv).exit_code == ExitCode.OK
-    element = tmp_path / "components" / "orders.md"
+    element = store / "components" / "orders.md"
     element.parent.mkdir()
     element.write_text("---\nid: component:orders\ntitle: Orders\n---\n", encoding="utf-8")
 
-    again = runner.invoke(app, ["--store", str(tmp_path), "init", "--name", "ACME", "--force"])
+    again = runner.invoke(app, [*argv, "--force"])
 
     assert again.exit_code == ExitCode.USAGE
     assert "elements" in again.stderr
@@ -107,6 +112,16 @@ def test_reference_init_writes_exactly_a_marker_file(tmp_path: Path) -> None:
     assert parse_singleton(marker.read_text(encoding="utf-8"), model=Marker) == Marker(
         design=DESIGN
     )
+
+
+def test_a_reference_without_a_url_is_a_usage_error(tmp_path: Path) -> None:
+    marker = tmp_path / "m"
+
+    result = runner.invoke(app, ["--store", str(marker), "init", "--reference", "   "])
+
+    assert result.exit_code == ExitCode.USAGE
+    assert result.stdout == ""
+    assert not marker.exists()
 
 
 def test_a_store_directory_blocks_reference_init(tmp_path: Path) -> None:

@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Annotated
 
@@ -20,10 +21,12 @@ from absicht.cli._common import (
     JsonOption,
     Kind,
     ReportFormat,
+    options,
     unimplemented,
 )
-from absicht.findings import Severity
-from absicht.models import State
+from absicht.findings import ExitCode, Severity
+from absicht.init import InitError, init_embedded, init_reference
+from absicht.models import SCHEMA_VERSION, State
 
 PANEL = "Step 1 — author and validate"
 """Where these commands appear in `ab --help`."""
@@ -32,15 +35,49 @@ PANEL = "Step 1 — author and validate"
 @app.command(rich_help_panel=PANEL)
 def init(
     ctx: typer.Context,
+    embedded: Annotated[
+        bool,
+        typer.Option("--embedded", help="Store as .absicht/ in this repo. The default mode."),
+    ] = False,
+    reference: Annotated[
+        str | None,
+        typer.Option(
+            "--reference",
+            metavar="URL",
+            help="Write an .absicht file pointing at the store at URL.",
+        ),
+    ] = None,
     name: Annotated[str | None, typer.Option("--name", metavar="NAME", help="System name.")] = None,
     force: Annotated[
         bool,
-        typer.Option("--force", help="Write into a non-empty directory."),
+        typer.Option("--force", help="Write into an existing .absicht/ that has no elements yet."),
     ] = False,
     json_output: JsonOption = False,
 ) -> None:
     """Scaffold a store."""
-    unimplemented(ctx)
+    if embedded and reference is not None:
+        typer.echo("choose one mode: --embedded and --reference are mutually exclusive", err=True)
+        raise typer.Exit(ExitCode.USAGE)
+    opts = options(ctx)
+    try:
+        result = (
+            init_reference(opts.store, reference)
+            if reference is not None
+            else init_embedded(opts.store, name, force=force)
+        )
+    except InitError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(ExitCode.USAGE) from exc
+    if opts.json_output:
+        typer.echo(
+            json.dumps(
+                {"schema_version": SCHEMA_VERSION, "mode": result.mode, "path": str(result.path)}
+            )
+        )
+    elif result.mode == "reference":
+        typer.echo(f"wrote reference marker {result.path} pointing at {reference}")
+    else:
+        typer.echo(f"initialized embedded store at {result.path}")
 
 
 @app.command(rich_help_panel=PANEL)
