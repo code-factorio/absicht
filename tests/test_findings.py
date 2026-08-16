@@ -9,6 +9,7 @@ code-scanning needs in order to annotate a diff.
 from __future__ import annotations
 
 import pytest
+
 from absicht.findings import (
     RULES,
     ExitCode,
@@ -17,7 +18,6 @@ from absicht.findings import (
     Severity,
     finding,
 )
-
 from absicht.models import SCHEMA_VERSION
 
 

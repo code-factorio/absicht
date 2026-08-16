@@ -9,6 +9,7 @@ renamed in the code and not in the doc fails here.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import NoReturn
 
@@ -121,6 +122,12 @@ SURFACE: dict[str, tuple[list[str], list[str]]] = {
 # across lines and make a substring search lie.
 WIDE = {"COLUMNS": "200"}
 
+# Rich also styles help whenever it believes the environment wants color —
+# CI's GITHUB_ACTIONS, a harness's FORCE_COLOR — and the escape codes land
+# inside the flag names this test looks for. The gate is the flags' presence,
+# not the console's color state, so the search runs on the plain text.
+PLAIN = re.compile(r"\x1b\[[0-9;]*m")
+
 # Commands whose bodies have landed. The two parametrizations that assume a
 # bodyless command — exiting INTERNAL through `unimplemented`, and recording
 # the globals through the `seen` fixture's monkeypatched `unimplemented` —
@@ -150,7 +157,7 @@ def test_command_offers_every_documented_flag(name: str, flags: list[str]) -> No
     result = runner.invoke(app, [*argv, "--help"], env=WIDE)
 
     assert result.exit_code == ExitCode.OK
-    missing = [flag for flag in flags if flag not in result.output]
+    missing = [flag for flag in flags if flag not in PLAIN.sub("", result.output)]
     assert not missing, f"`ab {name}` is missing {missing}"
 
 
