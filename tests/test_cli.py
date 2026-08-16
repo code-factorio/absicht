@@ -149,6 +149,7 @@ IMPLEMENTED = {
     "schema",
     "show",
     "trace",
+    "verify",
 }
 NOT_IMPLEMENTED = [name for name in SURFACE if name not in IMPLEMENTED]
 
