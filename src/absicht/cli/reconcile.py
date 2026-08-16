@@ -36,6 +36,7 @@ from absicht.findings import ExitCode, Report
 from absicht.git import GitError
 from absicht.load import StoreResolutionError, resolve_store
 from absicht.markers import MarkerError
+from absicht.markers import check as check_marker
 from absicht.markers import sync as sync_marker
 from absicht.models import SCHEMA_VERSION
 from absicht.render import UnknownRefError
@@ -271,7 +272,20 @@ def marker_check(
     json_output: JsonOption = False,
 ) -> None:
     """Fail if a marker disagrees with the store."""
-    unimplemented(ctx)
+    opts = options(ctx)
+    _, design = _design(opts)
+    try:
+        findings = check_marker(design, repo)
+    except MarkerError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(ExitCode.USAGE) from exc
+    report = Report(findings=findings)
+    if opts.json_output:
+        typer.echo(json.dumps(report.render_json()))
+    elif body := report.render_text():
+        # Silence is the pass signal, the spelling `ab check` uses.
+        typer.echo(body)
+    raise typer.Exit(report.exit_code(strict=False))
 
 
 @marker_app.command("stamp")

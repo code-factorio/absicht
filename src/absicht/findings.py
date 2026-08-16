@@ -8,7 +8,9 @@ The rules that decide what is wrong live in ``absicht.check`` and
 registers its one rule-shaped failure there the same way: assembly can hit a
 real problem with the design (a milestone with no scope) and represents it in
 this vocabulary rather than a third one, even though ``ab packet`` exposes no
-``--rule``.
+``--rule``. ``absicht.markers`` registers its three marker-disagreement rules
+there for the same reason — ``ab marker check`` reports in this vocabulary
+but has no ``--rule`` of its own.
 
 ``Severity`` and ``ExitCode`` are defined here rather than in
 ``absicht.cli._common``, where they started: the CLI sits at the top of the
