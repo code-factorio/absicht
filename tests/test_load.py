@@ -34,7 +34,7 @@ from absicht.load import (
     load_store,
     resolve_store,
 )
-from absicht.models import Marker
+from absicht.models import Marker, State
 
 FIXTURES = Path(__file__).parent / "fixtures" / "systems"
 
@@ -74,12 +74,12 @@ EXPECTED: dict[str, dict[str, int]] = {
         "requirements": 0,
         "non_functionals": 0,
         "stories": 1,
-        "components": 1,
+        "components": 3,
         "seams": 0,
         "data": 0,
         "decisions": 1,
         "rejections": 0,
-        "questions": 0,
+        "questions": 1,
         "milestones": 0,
         "errors": 2,
     },
@@ -119,6 +119,24 @@ def test_broken_reports_its_two_parse_failures_by_name() -> None:
     assert "invalid YAML" in garbage.message
     assert bad_anchor.path == "stories/bad-anchor.md"
     assert "not anchored to 'story:bad-anchor'" in bad_anchor.message
+
+
+def test_broken_parses_its_check_layer_defects_without_flagging_them() -> None:
+    """The remaining defects are deliberately invalid *designs*, not broken
+    files: each loads without a `LoadError`, carrying the shape the check
+    layer exists to judge — a `contains` cycle and an `unknown` nobody owns
+    (`06-fixtures.md`: one clearly-named case per failure family, so a later
+    `check` task can point a rule at exactly the case that trips it)."""
+
+    loaded = load_store(FIXTURES / "broken")
+
+    components = {c.id: c for c in loaded.components}
+    assert components["component:loop-a"].contains == ("component:loop-b",)
+    assert components["component:loop-b"].contains == ("component:loop-a",)
+    (question,) = loaded.questions
+    assert question.id == "question:unowned-unknown"
+    assert question.state is State.UNKNOWN
+    assert question.owner is None
 
 
 def test_a_store_without_system_yaml_still_loads_its_elements(tmp_path: Path) -> None:
