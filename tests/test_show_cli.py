@@ -103,7 +103,23 @@ def test_depth_two_reaches_an_outgoing_hop_depth_one_leaves_out() -> None:
     assert two.exit_code == ExitCode.OK
     assert "seam:order-events" not in one.stdout
     assert "seam:order-events" in two.stdout
+    # And indented one level deeper than the hop that reached it, which is
+    # the distance-from-REF the indentation encodes.
+    assert "    seam:order-events (consumes)" in two.stdout
     assert one.stdout.count("story:cancel-order") == two.stdout.count("story:cancel-order") == 1
+
+
+def test_an_element_with_no_refs_on_either_side_is_just_itself() -> None:
+    """`system:acme` is the root — nothing points at the root, and `externals`
+    is empty — so both sections are omitted rather than printed as empty
+    headings, and the element still shows with its own fields."""
+
+    result = _show("system:acme")
+
+    assert result.exit_code == ExitCode.OK
+    assert "points at:" not in result.stdout
+    assert "referenced by:" not in result.stdout
+    assert "purpose: Sell things, honestly." in result.stdout
 
 
 def test_json_envelopes_the_element_and_both_directions() -> None:

@@ -78,6 +78,23 @@ def test_depth_zero_leaves_the_outgoing_side_unfollowed(clean: Design) -> None:
     assert view.incoming != ()
 
 
+def test_depth_three_reaches_a_third_hop(clean: Design) -> None:
+    """The budget decrements once per level, not once per two: the seam that
+    `orders` provides right back gets its own outgoing edges at the third
+    hop. The cycle makes this the sharp end of the depth arithmetic — one
+    level early or late and the fringe moves."""
+
+    view = neighbourhood(clean, "seam:order-events", depth=3)
+
+    provides = view.outgoing[0].deeper[1]
+    assert (provides.field, provides.other.id) == ("provides", "seam:order-events")
+    assert [hop.other.id for hop in provides.deeper] == [
+        "component:orders",
+        "component:cancellation",
+        "data:order",
+    ]
+
+
 def test_the_inbound_side_stays_one_hop_at_any_depth(clean: Design) -> None:
     """A depth that deep would find more if the inbound side expanded too —
     `story:cancel-order` is satisfied by nothing here, but `seam:order-events`
