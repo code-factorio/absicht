@@ -36,7 +36,6 @@ from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
-from absicht.runstore import RunResult
 from click.testing import Result
 from typer.testing import CliRunner
 
@@ -61,6 +60,7 @@ from absicht.models import (
     SeamStyle,
     State,
 )
+from absicht.runstore import RunResult
 
 runner = CliRunner()
 FIXTURES = Path(__file__).parent / "fixtures" / "systems"

@@ -26,6 +26,8 @@ import sqlite3
 from pathlib import Path
 
 import pytest
+
+from absicht import runstore
 from absicht.runstore import (
     IssuedPacket,
     Run,
@@ -37,8 +39,6 @@ from absicht.runstore import (
     record_run,
     runs_for,
 )
-
-from absicht import runstore
 
 RUNS_DB = Path("build") / "runs.db"
 
