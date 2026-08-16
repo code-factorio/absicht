@@ -1,6 +1,8 @@
 # serializer version: 1
 # name: test_each_fixture_builds_to_its_snapshot[brownfield]
   dict({
+    'behaviors': list([
+    ]),
     'components': list([
       dict({
         'body': '''
@@ -184,6 +186,8 @@
         'title': 'Every charge is auditable',
       }),
     ]),
+    'resources': list([
+    ]),
     'schema_version': 1,
     'seams': list([
     ]),
@@ -227,6 +231,8 @@
 # ---
 # name: test_each_fixture_builds_to_its_snapshot[clean]
   dict({
+    'behaviors': list([
+    ]),
     'components': list([
       dict({
         'body': '',
@@ -437,6 +443,8 @@
         'title': 'Orders can be cancelled',
       }),
     ]),
+    'resources': list([
+    ]),
     'schema_version': 1,
     'seams': list([
       dict({
@@ -545,6 +553,8 @@
 # ---
 # name: test_each_fixture_builds_to_its_snapshot[composite]
   dict({
+    'behaviors': list([
+    ]),
     'components': list([
       dict({
         'body': '',
@@ -658,6 +668,8 @@
     'rejections': list([
     ]),
     'requirements': list([
+    ]),
+    'resources': list([
     ]),
     'schema_version': 1,
     'seams': list([
