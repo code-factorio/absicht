@@ -1,11 +1,14 @@
 """Read-only projections of a resolved ``Design``, shared by every renderer.
 
-Two things today, both living here for the same reason: the site generator
+Three things today, all living here for the same reason: the site generator
 ``docs/tasks/26-render-site.md`` builds on them and cannot import up the stack
 — the element view behind ``ab show REF`` ("literally reuse 21-show.md's
-function, don't re-derive it") and the gaps worklist behind ``ab gaps``
-("a gaps page, reusing 23-gaps.md's worklist"). The CLI stays a thin adapter
-over both; the projections and their reasoning live here.
+function, don't re-derive it"), the gaps worklist behind ``ab gaps`` ("a gaps
+page, reusing 23-gaps.md's worklist") and the trace paths behind ``ab trace
+REF`` — plus the one mermaid emitter every ``--format mermaid`` output calls,
+so two diagram spellings cannot drift apart (docs/tasks/27-render-diagrams.md).
+The CLI stays a thin adapter over all of them; the projections and their
+reasoning live here.
 
 Rendering is deterministic because the data under it is: neighbours keep the
 order ``Index`` indexed them in, which is ``models.py``'s field declaration
@@ -15,13 +18,13 @@ order, so the same store always spells the same view.
 from __future__ import annotations
 
 import json
-from collections.abc import Iterator
+from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass
 from datetime import date
 from typing import Any
 
 from absicht.check import expired_externals
-from absicht.models import SCHEMA_VERSION, Design, Element, Question, State
+from absicht.models import SCHEMA_VERSION, Design, Element, Question, Ref, State
 from absicht.resolve import Index, Reference
 
 
@@ -299,3 +302,229 @@ def worklist(design: Design, *, today: date) -> tuple[Gap, ...]:
                 )
             )
     return tuple(gaps)
+
+
+# --- the mermaid emitter ---------------------------------------------------------
+
+
+def mermaid(nodes: Iterable[Ref], edges: Iterable[tuple[Ref, str, Ref]]) -> str:
+    """One ``graph TD`` diagram from refs and labelled, directed edges.
+
+    The one mermaid emitter in the project: ``ab trace --format mermaid``
+    calls it with the subgraph its paths cover, and ``ab render --format
+    mermaid`` (docs/tasks/27-render-diagrams.md) with its own node set, so
+    the two outputs cannot drift apart. Mermaid node ids may not carry the
+    ``:`` a ref is spelled with, so separators flatten to underscores and the
+    full ref rides along as the label. Both iterables are rendered in the
+    order given — determinism is the caller's duty, and both callers walk the
+    design deterministically.
+    """
+    return "\n".join(
+        [
+            "graph TD",
+            *(f'  {_node_id(ref)}["{ref}"]' for ref in nodes),
+            *(
+                f"  {_node_id(source)} -->|{field}| {_node_id(target)}"
+                for source, field, target in edges
+            ),
+        ]
+    )
+
+
+def _node_id(ref: Ref) -> str:
+    """The mermaid-safe spelling of a ref: unique per ref and stable, so the
+    same design always spells the same ids. Colons would end the id, dashes
+    read as mermaid syntax in some positions, so both flatten."""
+    return ref.replace(":", "_").replace("-", "_")
+
+
+# --- the trace paths -------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class Step:
+    """One hop of a traced path: the ref-typed field that carries the edge,
+    which way round it was followed, and the ref it arrives at.
+
+    ``up`` spells the direction against the ref's own arrow — the element
+    arrived at is the one whose field points back at where the walk came
+    from — because "up" and "down" are the words ``ab trace``'s flags use.
+    """
+
+    field: str
+    up: bool
+    ref: Ref
+
+
+@dataclass(frozen=True, slots=True)
+class Trace:
+    """The answer to ``ab trace``: every simple path out of (or between) refs.
+
+    Paths never repeat a ref, and that invariant is the whole cycle guard: a
+    cyclic graph answers a bounded set of paths instead of hanging.
+    ``cycle_hit`` says the guard fired — a hop onto a ref already on the
+    current path was declined. It is information about the shape of the graph
+    (the schema invites reciprocal pairs like ``provides``/``provider``), not
+    a finding; which relations may loop at all is ``ab check``'s
+    ``integrity/cycle`` rule's judgement.
+    """
+
+    start: Ref
+    target: Ref | None
+    paths: tuple[tuple[Step, ...], ...]
+    cycle_hit: bool
+
+    def render_text(self) -> str:
+        """One path per line, hops read left to right along the path:
+        ``-->`` for a ref the left element carries, ``<--`` for a hop against
+        one the right element carries."""
+        lines = [self._line(path) for path in self.paths]
+        if self.cycle_hit:
+            lines.append(
+                "note: a cycle was hit; paths stop at the first repeat rather than looping"
+            )
+        return "\n".join(lines)
+
+    def render_json(self) -> dict[str, object]:
+        """The ``--json``/``--format json`` envelope of ``00-conventions.md``:
+        each path a sequence of steps, every step naming its relation,
+        direction and arrival — plus the cycle flag, so a consumer knows the
+        walk was bounded."""
+        return {
+            "schema_version": SCHEMA_VERSION,
+            "from": self.start,
+            "to": self.target,
+            "paths": [
+                [
+                    {
+                        "field": step.field,
+                        "direction": "up" if step.up else "down",
+                        "ref": step.ref,
+                    }
+                    for step in path
+                ]
+                for path in self.paths
+            ],
+            "cycle_hit": self.cycle_hit,
+        }
+
+    def render_mermaid(self) -> str:
+        """The paths as one diagram: every element they cover as a node, every
+        hop as an edge labelled with its relation and pointing the way the
+        walk went. Auto-layout is mermaid's job — positions are `ab layout`'s
+        (docs/tasks/24-trace.md keeps them out of scope here).
+        """
+        edges: list[tuple[Ref, str, Ref]] = []
+        for path in self.paths:
+            at = self.start
+            for step in path:
+                edges.append((at, step.field, step.ref))
+                at = step.ref
+        nodes = dict.fromkeys([self.start, *(step.ref for path in self.paths for step in path)])
+        return mermaid(nodes, dict.fromkeys(edges))
+
+    def _line(self, path: tuple[Step, ...]) -> str:
+        line = self.start
+        for step in path:
+            arrow = f" <--{step.field}-- " if step.up else f" --{step.field}--> "
+            line += arrow + step.ref
+        return line
+
+
+def trace_paths(
+    design: Design, ref: str, *, to: str | None = None, up: bool = False, down: bool = False
+) -> Trace:
+    """Every simple path from ``ref`` outward and inward — or, with ``to``,
+    between ``ref`` and ``to`` — in deterministic walk order.
+
+    Direction: ``down`` follows refs the elements themselves carry, ``up``
+    follows refs pointing back at the walk's current element, and neither
+    flag (or both — redundant, not contradictory) walks either way. Without
+    ``to`` every prefix is itself an answer: "the requirement and the
+    component realizing it" is a traceability path, not noise around the
+    longer ones.
+
+    With ``to`` the walk is point-to-point, not the reachable set filtered:
+    a backward pass first marks every element that can still reach the
+    target under the same direction filter, and the walk only descends into
+    marked ones, so wide dead ends cost nothing.
+
+    Raises ``UnknownRefError`` for a ``ref`` or ``to`` no element has: a
+    broken invocation, not an empty answer — ``ab trace`` maps it to
+    ``USAGE``, like ``ab show``.
+    """
+    index = Index.from_design(design)
+    if ref not in index.by_id:
+        raise UnknownRefError(f"unknown ref {ref!r}: no element in this store has that id")
+    if to is not None and to not in index.by_id:
+        raise UnknownRefError(f"unknown --to ref {to!r}: no element in this store has that id")
+    downs, ups = down or not up, up or not down
+
+    def steps(node: Ref) -> tuple[Step, ...]:
+        """A node's hops under the direction filter: its own refs outward
+        first, then whoever points at it — each side in the order `Index`
+        holds, which is what makes the walk deterministic."""
+        hops: list[Step] = []
+        if downs:
+            hops += [
+                Step(field=edge.field, up=False, ref=edge.target)
+                # A dangling target resolves to no hop, the policy
+                # `Index.referenced_by` already holds — reporting it is
+                # `ab check`'s job, not a query's.
+                for edge in index.references_from.get(node, ())
+                if edge.target in index.by_id
+            ]
+        if ups:
+            hops += [
+                Step(field=edge.field, up=True, ref=edge.source)
+                for edge in index.referenced_by.get(node, ())
+            ]
+        return tuple(hops)
+
+    reaches = _reaches_target(index, to, steps) if to is not None else None
+    paths: list[tuple[Step, ...]] = []
+    visited = {ref}
+    cycle_hit = False
+
+    def walk(node: Ref, path: tuple[Step, ...]) -> None:
+        nonlocal cycle_hit
+        for step in steps(node):
+            if reaches is not None and step.ref not in reaches:
+                continue  # no route to the target from here; not a decline
+            if step.ref in visited:
+                # The cycle guard: following this hop would revisit an element
+                # already on the path. Saying so is the point of `cycle_hit`.
+                cycle_hit = True
+                continue
+            extended = (*path, step)
+            if to is None:
+                paths.append(extended)
+            elif step.ref == to:
+                paths.append(extended)
+                continue  # a path ends at the target; nothing lies beyond it
+            visited.add(step.ref)
+            walk(step.ref, extended)
+            visited.remove(step.ref)
+
+    walk(ref, ())
+    return Trace(start=ref, target=to, paths=tuple(paths), cycle_hit=cycle_hit)
+
+
+def _reaches_target(
+    index: Index, target: Ref, steps: Callable[[Ref], tuple[Step, ...]]
+) -> frozenset[Ref]:
+    """Every element with a route to ``target`` under ``steps`` — the prune
+    set for the point-to-point walk, computed backwards from the target so
+    the forward walk never enters a subtree it would have to abandon."""
+    reverse: dict[Ref, list[Ref]] = {}
+    for node in index.by_id:
+        for step in steps(node):
+            reverse.setdefault(step.ref, []).append(node)
+    reaches = {target}
+    queue = [target]
+    while queue:
+        for node in reverse.get(queue.pop(), ()):
+            if node not in reaches:
+                reaches.add(node)
+                queue.append(node)
+    return frozenset(reaches)

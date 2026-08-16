@@ -97,8 +97,9 @@ def test_the_known_chain_comes_back_with_every_relation_and_direction() -> None:
 def test_to_answers_only_paths_that_end_at_the_target() -> None:
     """Point-to-point, not the reachable set filtered: nothing here passes
     through the decision (its one ref points the other way), so every answer
-    ends at it — and `requirement:browse-catalog`'s side of the graph has no
-    route to it at all, which is an empty answer and `OK`."""
+    ends at it — and `system:acme` is unreachable from anywhere (the root
+    points at nothing and nothing points at it), which is an empty answer and
+    `OK`: no path found is information, not an error."""
     paths = [
         _steps(path)
         for path in _document("requirement:cancel-orders", "--to", "decision:event-log")["paths"]
@@ -107,11 +108,11 @@ def test_to_answers_only_paths_that_end_at_the_target() -> None:
     assert paths
     assert all(path[-1] == ("applies_to", "up", "decision:event-log") for path in paths)
 
-    result = _trace("requirement:browse-catalog", "--to", "decision:event-log")
+    result = _trace("requirement:cancel-orders", "--to", "system:acme")
 
     assert result.exit_code == ExitCode.OK
     assert result.stdout == ""
-    assert _document("requirement:browse-catalog", "--to", "decision:event-log")["paths"] == []
+    assert _document("requirement:cancel-orders", "--to", "system:acme")["paths"] == []
 
 
 def test_down_follows_only_the_elements_own_refs() -> None:
@@ -239,14 +240,14 @@ def test_text_spells_each_path_as_one_line_with_directional_arrows() -> None:
 
 
 def test_text_notes_the_cycle_hit_and_nothing_else_when_empty() -> None:
-    """The note is the last line of a text answer, and only the note prints
+    """The note is the last line of a text answer, and only silence prints
     when no path exists — no blank line where a path would be."""
     down = _trace("requirement:cancel-orders", "--down")
 
     assert down.exit_code == ExitCode.OK
     assert down.stdout.splitlines()[-1] == CYCLE_NOTE
 
-    empty = _trace("requirement:browse-catalog", "--to", "decision:event-log")
+    empty = _trace("requirement:cancel-orders", "--to", "system:acme")
 
     assert empty.exit_code == ExitCode.OK
     assert empty.stdout == ""

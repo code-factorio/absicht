@@ -55,6 +55,7 @@ from absicht.render import (
     Gap,
     UnknownRefError,
     neighbourhood,
+    trace_paths,
     worklist,
 )
 from absicht.resolve import Index
@@ -390,8 +391,14 @@ def trace(
         str | None,
         typer.Option("--to", metavar="REF", help="Paths between two elements."),
     ] = None,
-    up: Annotated[bool, typer.Option("--up", help="Default: both directions.")] = False,
-    down: Annotated[bool, typer.Option("--down", help="Default: both directions.")] = False,
+    up: Annotated[
+        bool,
+        typer.Option("--up", help="Follow refs pointing at REF. Default: both directions."),
+    ] = False,
+    down: Annotated[
+        bool,
+        typer.Option("--down", help="Follow REF's own refs. Default: both directions."),
+    ] = False,
     output_format: Annotated[TraceFormat, typer.Option("--format")] = TraceFormat.TEXT,
     json_output: JsonOption = False,
 ) -> None:
@@ -399,7 +406,22 @@ def trace(
 
     Requirement to component to seam to decision, in either direction.
     """
-    unimplemented(ctx)
+    opts = options(ctx)
+    design = _design(opts)
+    try:
+        traced = trace_paths(design, ref, to=to, up=up, down=down)
+    except UnknownRefError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(ExitCode.USAGE) from exc
+    output = effective_format(ctx, output_format, opts.json_output, json_member=TraceFormat.JSON)
+    if output is TraceFormat.JSON:
+        typer.echo(json.dumps(traced.render_json()))
+    elif output is TraceFormat.MERMAID:
+        typer.echo(traced.render_mermaid())
+    elif text := traced.render_text():
+        # Empty stays silent, like `list` and `gaps`: no blank line where a
+        # path would be.
+        typer.echo(text)
 
 
 @app.command(rich_help_panel=PANEL)

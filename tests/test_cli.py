@@ -123,7 +123,18 @@ WIDE = {"COLUMNS": "200"}
 # skip them here; a landed command covers the same ground against its real
 # behaviour in its own test module (the `--json` fold included, per
 # docs/adr/0001). The flag-presence test stays over the whole surface.
-IMPLEMENTED = {"build", "check", "gaps", "init", "list", "migrate", "new", "schema", "show"}
+IMPLEMENTED = {
+    "build",
+    "check",
+    "gaps",
+    "init",
+    "list",
+    "migrate",
+    "new",
+    "schema",
+    "show",
+    "trace",
+}
 NOT_IMPLEMENTED = [name for name in SURFACE if name not in IMPLEMENTED]
 
 
