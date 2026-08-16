@@ -24,10 +24,10 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from absicht.render import UnknownRefError, neighbourhood
 
 from absicht.load import load_store
 from absicht.models import SCHEMA_VERSION, Design
+from absicht.render import UnknownRefError, neighbourhood
 from absicht.resolve import resolve
 
 FIXTURES = Path(__file__).parent / "fixtures" / "systems"
@@ -65,6 +65,17 @@ def test_the_outgoing_side_expands_to_the_asked_depth_and_no_further(clean: Desi
     # back — the cycle the budget must bound, not chase — and every hop at the
     # fringe is a leaf. Expanding those again is depth 3's job.
     assert all(hop.deeper == () for hop in orders.deeper)
+
+
+def test_depth_zero_leaves_the_outgoing_side_unfollowed(clean: Design) -> None:
+    """Zero hops means the element's own refs are not followed — the view is
+    the element plus whoever points at it, and `--depth 0` must not quietly
+    mean the same as the default."""
+
+    view = neighbourhood(clean, "component:cancellation", depth=0)
+
+    assert view.outgoing == ()
+    assert view.incoming != ()
 
 
 def test_the_inbound_side_stays_one_hop_at_any_depth(clean: Design) -> None:
