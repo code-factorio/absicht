@@ -12,7 +12,8 @@ frame first —
 - ``context_for`` resolves one diff per ``--repo`` against ``--diff-base`` —
   the multi-repo shape the rules will read;
 - ``--rule``/``--exclude-rule`` select which rules run (against fake rules
-  registered for the test, since 41's real ones do not exist yet), an unknown
+  registered for the test, so the selection stays pinned independently of
+  what the real rule set happens to find over the clean store), an unknown
   id is a usage error, and ``--strict`` promotes the warnings that survive;
 - ``--report`` writes the rendered report *in addition to* stdout, and an
   empty report stays silent on stdout while still writing the (empty) file.
@@ -272,17 +273,16 @@ def test_a_diff_base_that_does_not_resolve_is_a_usage_error(tmp_path: Path) -> N
 # ----------------------------------------------------------------- the command
 
 
-def test_without_rules_the_report_is_an_empty_pass(
-    sealed: tuple[Path, Path], tmp_path: Path
-) -> None:
-    """No rule bodies exist yet (41's job); the frame still has to answer OK,
-    stay silent on stdout in text — the pass signal a human greps for — and
-    honour --report even for an empty rendering."""
+def test_an_empty_report_is_an_empty_pass(sealed: tuple[Path, Path], tmp_path: Path) -> None:
+    """A run with nothing to say still has to answer OK, stay silent on stdout
+    in text — the pass signal a human greps for — and honour --report even for
+    an empty rendering. One rule selected, one that has nothing to say over the
+    empty diff: the rules are real now, so the emptiness has to be earned."""
     repo, lock = sealed
     written = tmp_path / "reported.txt"
 
-    plain = _verify(lock, repo, "--report", str(written))
-    as_json = _verify(lock, repo, "--format", "json")
+    plain = _verify(lock, repo, "--rule", "verify/scope", "--report", str(written))
+    as_json = _verify(lock, repo, "--rule", "verify/scope", "--format", "json")
 
     assert plain.exit_code == ExitCode.OK
     assert plain.stdout == ""
@@ -357,10 +357,15 @@ def test_sarif_flows_through_the_same_pipeline(sealed: tuple[Path, Path], fake_r
 
 
 def test_the_default_packet_is_discovered_from_the_build_dir(tmp_path: Path) -> None:
+    """Discovery is what this pins, so the run narrows to one rule with nothing
+    to say over the empty diff — the store is not an implementing repo and the
+    criteria rules would rightly complain about it."""
     with _cwd(tmp_path / "cwd") as cwd:
         store, out = _seal(tmp_path, "--format", "json")
 
-        result = runner.invoke(app, ["verify", "--repo", str(store), "--diff-base", "HEAD"])
+        result = runner.invoke(
+            app, ["verify", "--repo", str(store), "--diff-base", "HEAD", "--rule", "verify/scope"]
+        )
 
     assert result.exit_code == ExitCode.OK
     assert result.stdout == ""
@@ -541,6 +546,27 @@ def test_an_implementation_in_another_repo_does_not_cover_a_changed_file(
 
     assert [f.source for f in findings] == ["src/core/api.py"]
     assert str(elsewhere) in findings[0].message
+
+
+def test_a_bare_implementation_path_applies_to_every_repo(tmp_path: Path) -> None:
+    """``implemented_by`` with no ``#`` names no repo: the single-repo
+    spelling, where ``src/core`` is already unambiguous."""
+    bare = Component(
+        id="component:core", title="Core", state=State.SPECIFIED, implemented_by=("src/core",)
+    )
+    packet = Packet(milestone="milestone:m", elements=(_full(bare),))
+    repo = _diff_repo(
+        tmp_path,
+        "code",
+        {"src/core/api.py": "one\n"},
+        {"src/core/api.py": "two\n", "README.md": "words\n"},
+    )
+
+    findings = _rule(
+        _context_for(tmp_path, packet, repos=(repo,), diff_base="HEAD~1"), "verify/scope"
+    )
+
+    assert [f.source for f in findings] == ["README.md"]
 
 
 # ------------------------------------------------------- verify/out-of-scope
