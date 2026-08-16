@@ -9,6 +9,7 @@ asks whether it is the code that was asked for, which needs the design to answer
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Annotated
 
@@ -17,12 +18,23 @@ import typer
 from absicht.cli._app import app
 from absicht.cli._common import (
     DEFAULT_DIFF_BASE,
+    DEFAULT_PACKET_DIR,
     DocFormat,
     JsonOption,
     Kind,
     PlainFormat,
     ReportFormat,
+    effective_format,
+    options,
     unimplemented,
+)
+from absicht.findings import ExitCode, Report
+from absicht.verify import (
+    VerifyUsageError,
+    context_for,
+    discover_sealed_packet,
+    load_sealed_packet,
+    run_rules,
 )
 
 PANEL = "Step 4 — verify what came back"
@@ -75,7 +87,47 @@ def verify(
     files are unmodified against the sealed digest; and that step definitions
     contain assertions.
     """
-    unimplemented(ctx)
+    opts = options(ctx)
+    try:
+        # The one sealed packet in the build dir, or the one --packet names:
+        # zero or several candidates is a guess verify refuses to make.
+        path = packet if packet is not None else discover_sealed_packet(DEFAULT_PACKET_DIR)
+        brief, lock = load_sealed_packet(path)
+        context = context_for(
+            brief, lock, diff_base=diff_base, repos=tuple(repo) if repo else (Path(),)
+        )
+        result = run_rules(
+            context,
+            include=frozenset(rule) if rule is not None else None,
+            exclude=frozenset(exclude_rule or ()),
+        )
+    except VerifyUsageError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(ExitCode.USAGE) from exc
+    body = _report_body(
+        result,
+        effective_format(ctx, output_format, opts.json_output, json_member=ReportFormat.JSON),
+    )
+    if body:
+        typer.echo(body)
+    if report is not None:
+        # In addition to stdout, never instead of it: --report says "write",
+        # and the format flags already govern what goes to stdout.
+        report.parent.mkdir(parents=True, exist_ok=True)
+        report.write_text((body + "\n") if body else "", encoding="utf-8")
+    raise typer.Exit(result.exit_code(strict=strict))
+
+
+def _report_body(result: Report, output_format: ReportFormat) -> str:
+    """The report as one string in the asked-for shape — what stdout shows and
+    `--report` writes, so the two cannot drift. An empty text report is the
+    empty string: silence is the pass signal a human greps for, the spelling
+    `ab check` already uses."""
+    if output_format is ReportFormat.JSON:
+        return json.dumps(result.render_json())
+    if output_format is ReportFormat.SARIF:
+        return json.dumps(result.render_sarif())
+    return result.render_text()
 
 
 @app.command(rich_help_panel=PANEL)

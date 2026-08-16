@@ -447,3 +447,20 @@ class Packet(Record):
     rejections: tuple[Ref, ...] = ()  # do not re-propose these
     criteria: tuple[Criterion, ...] = ()
     scenarios_digest: str = ""  # hash of the emitted .feature files
+
+
+class PacketLock(Record):
+    """The `packet.lock` sidecar: what a sealed packet was sealed against.
+
+    Written beside the packet body by `ab packet --seal` and read back by
+    `ab verify` — the only reader — so a verification can run offline, in CI,
+    with no design store: the store commit the packet was built from
+    (`design_rev`) and the digest of the rendered `.feature` files
+    (`scenarios_digest`) are everything "handed over against this" means. Both
+    ends go through this model, so the writer's and reader's spelling of the
+    file cannot drift.
+    """
+
+    schema_version: int = SCHEMA_VERSION
+    design_rev: str
+    scenarios_digest: str

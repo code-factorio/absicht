@@ -163,6 +163,7 @@ layers = [
     "absicht.diagram",
     "absicht.render",
     "absicht.packet",
+    "absicht.verify",
     "absicht.gherkin",
     "absicht.init",
     "absicht.new",

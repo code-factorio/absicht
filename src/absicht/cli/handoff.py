@@ -28,7 +28,7 @@ from absicht.cli.query import _design
 from absicht.findings import ExitCode
 from absicht.gherkin import render_feature, scenario_digest
 from absicht.git import GitError, current_rev, repo_root, resolve_rev
-from absicht.models import SCHEMA_VERSION, Criterion, Design, Packet
+from absicht.models import SCHEMA_VERSION, Criterion, Design, Packet, PacketLock
 from absicht.packet import PacketFindingError, PacketUsageError, assemble
 from absicht.render import packet_markdown
 from absicht.resolve import Index
@@ -229,17 +229,15 @@ def _write_artifacts(
         written.append(f"wrote {features_root} ({count} feature file{'s' if count > 1 else ''})")
     if sealed:
         # JSON, not YAML: machine-read by `ab verify`, never hand-authored,
-        # so it sides with the artifact rather than the store's files.
+        # so it sides with the artifact rather than the store's files. The
+        # `PacketLock` model is the one spelling of it — `ab verify`'s loader
+        # reads the file back through the same model, so the two ends cannot
+        # drift.
         lock_path = out_dir / "packet.lock"
         lock_path.write_text(
-            json.dumps(
-                {
-                    "schema_version": SCHEMA_VERSION,
-                    "design_rev": packet.design_rev,
-                    "scenarios_digest": packet.scenarios_digest,
-                },
-                indent=2,
-            )
+            PacketLock(
+                design_rev=packet.design_rev, scenarios_digest=packet.scenarios_digest
+            ).model_dump_json(indent=2)
             + "\n",
             encoding="utf-8",
         )
