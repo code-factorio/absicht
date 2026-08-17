@@ -593,7 +593,7 @@ def test_the_behavior_lists_reach_the_command_output(tmp_path: Path) -> None:
     assert "behavior:catalog-telemetry" not in fidelities
     # The carried observations spell the effective timing beside the authored.
     audit = next(e for e in document["elements"] if e["ref"] == "behavior:cancel-audit")
-    (observation,) = audit["observations"]
+    (observation,) = audit["element"]["observations"]
     assert observation["effective_timing"] == "immediate"
 
 
@@ -612,7 +612,7 @@ def test_the_md_document_carries_both_behavior_sections(tmp_path: Path) -> None:
     )
     # The must-not-break section leads with the addendum's framing.
     not_break_at = document.index("## Behaviors that must not break")
-    assert "standing expectations" in document[not_break_at:]
+    assert "Standing expectations" in document[not_break_at:]
     assert "regression" in document[not_break_at:]
     assert "### Order guard" in document[not_break_at:]
     assert (

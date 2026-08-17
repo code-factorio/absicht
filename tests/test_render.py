@@ -621,6 +621,7 @@ def _behavior_packet() -> Packet:
                 "trigger": f"{title} happens.",
                 "lifecycle": "active",
                 "observations": observations,
+                "body": "",
             },
         )
 
@@ -636,7 +637,7 @@ def _behavior_packet() -> Packet:
             PacketElement(
                 ref="component:core",
                 fidelity=Fidelity.FULL,
-                element={"id": "component:core", "title": "Core"},
+                element={"id": "component:core", "title": "Core", "body": ""},
             ),
             behavior(
                 "behavior:a",
@@ -700,7 +701,7 @@ def test_packet_markdown_separates_the_two_behavior_lists() -> None:
     # The must-not-break section leads with the addendum's framing: standing
     # expectations, and breaking one is a regression.
     not_break_section = document[not_break_at:]
-    assert "standing expectations" in not_break_section
+    assert "Standing expectations" in not_break_section
     assert "regression" in not_break_section
     # A `must_not` observation has no when to spell.
     assert "### The guard holds" in not_break_section
