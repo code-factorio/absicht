@@ -21,6 +21,7 @@ decisions the spec leaves to the implementation:
 from __future__ import annotations
 
 import os
+from datetime import date
 from pathlib import Path
 
 import pytest
@@ -229,6 +230,52 @@ def test_an_unreadable_file_is_a_load_error_not_a_crash(tmp_path: Path) -> None:
             path="components/locked.md", message="permission denied", reason=LoadErrorReason.IO
         ),
     )
+
+
+# ----------------------------------------------------------------- notes
+
+
+def test_notes_load_into_their_own_collection(tmp_path: Path) -> None:
+    """`notes/` is walked like a kind directory, but into a collection the
+    `Design` never sees: notes are committed store contents and not elements
+    (docs/tasks/50-addendum-conventions.md), which is why the tuple lives on
+    `LoadedStore` beside — never inside — the element kinds."""
+
+    _write(tmp_path, "system.yaml", _SYSTEM)
+    _write(
+        tmp_path,
+        "notes/stuck.md",
+        "---\nid: note:stuck1\ncreated: 2026-08-01\npromoted_to: question:retention\n---\n"
+        "What this became.\n",
+    )
+    _write(
+        tmp_path, "notes/loose.md", "---\nid: note:loose1\ncreated: 2026-08-02\n---\nA thought.\n"
+    )
+
+    loaded = load_store(tmp_path)
+
+    assert [n.id for n in loaded.notes] == ["note:loose1", "note:stuck1"]
+    assert loaded.notes[0].created == date(2026, 8, 2)
+    assert loaded.notes[1].promoted_to == "question:retention"
+    assert loaded.errors == ()
+
+
+def test_a_broken_note_file_is_one_load_error_like_any_other(tmp_path: Path) -> None:
+    """The tolerance contract covers `notes/` too: one bad file is a finding
+    for `ab check`, never a reason to lose the rest of the inbox."""
+
+    _write(tmp_path, "system.yaml", _SYSTEM)
+    _write(
+        tmp_path, "notes/bad.md", "---\nid: note:bad123\ncreated: 2026-08-01\nref: not a ref\n---\n"
+    )
+    _write(tmp_path, "notes/kept.md", "---\nid: note:kept12\ncreated: 2026-08-01\n---\nKept.\n")
+
+    loaded = load_store(tmp_path)
+
+    assert [n.id for n in loaded.notes] == ["note:kept12"]
+    assert len(loaded.errors) == 1
+    assert loaded.errors[0].path == "notes/bad.md"
+    assert loaded.errors[0].reason is LoadErrorReason.VALIDATION
 
 
 # ------------------------------------------------------- store location modes

@@ -33,6 +33,13 @@ SURFACE: dict[str, tuple[list[str], list[str]]] = {
         ["new", "component", "some-slug"],
         ["--title", "--state", "--owner", "--edit", "--print"],
     ),
+    # `ab note` is its own group because notes are not elements: there is no
+    # `ab new note` and no `ab list note` (docs/tasks/50-addendum-conventions.md).
+    "note add": (["note", "add", "a thought"], ["--ref", "--edit"]),
+    "note list": (["note", "list"], ["--ref", "--all", "--format"]),
+    "note show": (["note", "show", "note:a1b2c3"], []),
+    "note promote": (["note", "promote", "note:a1b2c3", "question", "retention"], []),
+    "note drop": (["note", "drop", "note:a1b2c3"], []),
     "check": (
         ["check"],
         [
@@ -149,6 +156,11 @@ IMPLEMENTED = {
     "marker sync",
     "migrate",
     "new",
+    "note add",
+    "note drop",
+    "note list",
+    "note promote",
+    "note show",
     "packet",
     "render",
     "schema",
