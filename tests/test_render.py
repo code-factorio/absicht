@@ -53,6 +53,7 @@ from absicht.models import (
     Component,
     Criterion,
     CriterionKind,
+    DataEntity,
     Design,
     External,
     ExternalKind,
@@ -66,6 +67,8 @@ from absicht.models import (
     Requirement,
     Resource,
     ResourceKind,
+    Seam,
+    SeamStyle,
     State,
     Story,
     System,
@@ -473,6 +476,78 @@ def test_an_unknown_to_ref_raises_rather_than_answering_empty(clean: Design) -> 
     not an answer anyone should be able to mistake for a route check."""
     with pytest.raises(UnknownRefError, match="decision:never"):
         trace_paths(clean, "requirement:cancel-orders", to="decision:never-made")
+
+
+def _dense() -> Design:
+    """A three-layer fan — one requirement, four components, four seams, four
+    data entities, every layer fully cross-linked — the smallest shape whose
+    simple-path count (80 from the requirement, downward alone) says what a
+    realistically dense store says: the complete enumeration `trace_paths`
+    promises is exponential, and a real store (absicht's own, 121 elements)
+    reaches millions of paths for a single start.
+
+    Built rather than loaded because no fixture should carry a shape whose
+    purpose is to be too big to walk.
+    """
+    width = 4
+    components = tuple(
+        Component(
+            id=f"component:c{i}",
+            title=f"C{i}",
+            provides=tuple(f"seam:s{j}" for j in range(width)),
+        )
+        for i in range(width)
+    )
+    seams = tuple(
+        Seam(
+            id=f"seam:s{j}",
+            title=f"S{j}",
+            style=SeamStyle.SCHEMA,
+            carries=tuple(f"data:d{k}" for k in range(width)),
+        )
+        for j in range(width)
+    )
+    data = tuple(DataEntity(id=f"data:d{k}", title=f"D{k}") for k in range(width))
+    return Design(
+        system=System(id="system:dense", title="Dense"),
+        requirements=(
+            Requirement(
+                id="requirement:r",
+                title="R",
+                realized_by=tuple(component.id for component in components),
+            ),
+        ),
+        components=components,
+        seams=seams,
+        data=data,
+    )
+
+
+def test_the_walk_stops_at_the_path_limit_and_says_so() -> None:
+    """The limit is a budget on materialized paths, spent in deterministic
+    walk order: exactly `limit` paths come back, the flag says the answer was
+    cut short rather than complete, and the paths that did come back are the
+    first `limit` of the uncapped enumeration — the same walk, stopped
+    earlier, never a different order."""
+    full = trace_paths(_dense(), "requirement:r", limit=None)
+    assert len(full.paths) == 80  # 16 two-hop + 64 three-hop, downward alone
+    assert full.truncated is False
+
+    capped = trace_paths(_dense(), "requirement:r", limit=10)
+
+    assert len(capped.paths) == 10
+    assert capped.paths == full.paths[:10]
+    assert capped.truncated is True
+
+
+def test_the_limit_reached_note_renders_in_every_format() -> None:
+    """A truncated trace must not read as exhaustive in any of the three
+    formats — the same discipline `cycle_hit` already follows, one spelling
+    per format, additive in `--json`."""
+    capped = trace_paths(_dense(), "requirement:r", limit=1)
+
+    assert "path limit" in capped.render_text()
+    assert capped.render_json()["truncated"] is True
 
 
 # --- the packet document -------------------------------------------------------------
