@@ -15,7 +15,7 @@ from typing import Annotated
 
 import typer
 
-from absicht.check import integrity_findings, policy_findings, schema_findings
+from absicht.check import integrity_findings, note_findings, policy_findings, schema_findings
 from absicht.cli._app import app
 from absicht.cli._common import (
     DEFAULT_DIFF_BASE,
@@ -243,6 +243,9 @@ def _report_for(root: Path) -> Report:
         return Report(findings=tuple(findings))
     index = Index.from_design(design)
     findings.extend(integrity_findings(design, index))
+    # The note rule reads the loaded collection, not the design — notes are
+    # exempt from the graph by construction, so they join the report here.
+    findings.extend(note_findings(loaded, index))
     findings.extend(policy_findings(design, index, today=date.today()))
     return Report(findings=tuple(findings))
 

@@ -170,6 +170,7 @@ layers = [
     "absicht.verify",
     "absicht.gherkin",
     "absicht.init",
+    "absicht.notes",
     "absicht.new",
     "absicht.migrate",
     "absicht.layout",

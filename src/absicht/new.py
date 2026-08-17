@@ -156,11 +156,11 @@ def create(store: Path, element: Element, *, edit: bool = False) -> Path:
         raise NewError(f"{element.id} already exists in the store at {root}")
     if path.exists():
         raise NewError(f"{path} already exists: ab new never overwrites")
-    editor = _editor(edit)
+    editor = editor_argv(edit)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(dump_element(element), encoding="utf-8")
     if editor:
-        _run_editor(editor, path)
+        run_editor(editor, path)
     return path
 
 
@@ -175,12 +175,14 @@ def _ids(root: Path) -> dict[str, Element]:
     return Index.from_design(design).by_id
 
 
-def _editor(edit: bool) -> list[str]:
+def editor_argv(edit: bool) -> list[str]:
     """The `$EDITOR` argv `--edit` will run, resolved before anything is written.
 
     `shlex.split` because `$EDITOR` may carry arguments ("code -w"); an unset
     or empty `$EDITOR` is a broken invocation, not a no-op the command
-    silently swallows.
+    silently swallows. Public because `absicht.notes`' `--edit` is the same
+    bargain — write, then open the written file — and a second spelling of it
+    would be the drift this module exists to prevent.
     """
     if not edit:
         return []
@@ -190,7 +192,7 @@ def _editor(edit: bool) -> list[str]:
     return editor
 
 
-def _run_editor(editor: list[str], path: Path) -> None:
+def run_editor(editor: list[str], path: Path) -> None:
     """Open the written file in the editor, in the foreground."""
     # Same bargain as absicht.git: an argv list, never a shell. The command
     # word comes from `$EDITOR` as data, so the partial-path check has

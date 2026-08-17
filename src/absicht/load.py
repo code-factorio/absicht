@@ -2,9 +2,9 @@
 
 `load` is the only layer that knows a store is a directory layout (pinned in
 `docs/tasks/00-conventions.md`, extended by `docs/tasks/50-addendum-conventions.md`
-with `resources/` and `behaviors/`): `system.yaml` plus one directory per
-kind, one `<slug>.md` file per element. Everything above it — `check`,
-`build`, `packet` — reads a `LoadedStore` and never a `Path`.
+with `resources/`, `behaviors/` and `notes/`): `system.yaml` plus one
+directory per kind, one `<slug>.md` file per element. Everything above it —
+`check`, `build`, `packet` — reads a `LoadedStore` and never a `Path`.
 
 Tolerance is the contract: one broken file is one `LoadError` and the walk
 continues, so a store with a single typo still yields everything else and
@@ -40,12 +40,13 @@ from absicht.models import (
     Component,
     DataEntity,
     Decision,
-    Element,
     External,
     Marker,
     Milestone,
     NonFunctional,
+    Note,
     Question,
+    Record,
     Rejection,
     Requirement,
     Resource,
@@ -101,6 +102,11 @@ class LoadedStore:
     Mirrors `Design`'s fields minus `system`, which is optional here because a
     store without a `system.yaml` still has elements worth reporting on.
     Refusing to fold a systemless store is `build`'s job, one layer up.
+
+    `notes` is the one deliberate asymmetry: notes are store contents but not
+    elements (addendum §6), so they are carried beside the kind tuples and
+    never folded into a `Design` — `ab note` and the single note check rule
+    are their readers, and nothing else ever sees them.
     """
 
     system: System | None
@@ -117,6 +123,7 @@ class LoadedStore:
     rejections: tuple[Rejection, ...] = ()
     questions: tuple[Question, ...] = ()
     milestones: tuple[Milestone, ...] = ()
+    notes: tuple[Note, ...] = ()
     errors: tuple[LoadError, ...] = ()
 
 
@@ -176,6 +183,10 @@ def load_store(root: Path, *, source: FileSource | None = None) -> LoadedStore:
         rejections=_load_kind(root, src, "rejections", Rejection, errors),
         questions=_load_kind(root, src, "questions", Question, errors),
         milestones=_load_kind(root, src, "milestones", Milestone, errors),
+        # Walked last, into the collection the Design never sees: a note file
+        # is store contents like any other, and its parse failures are
+        # findings like any other, but nothing past this layer folds it in.
+        notes=_load_kind(root, src, "notes", Note, errors),
         errors=tuple(errors),
     )
 
@@ -194,7 +205,7 @@ def _load_system(root: Path, source: FileSource, errors: list[LoadError]) -> Sys
         return None
 
 
-def _load_kind[E: Element](
+def _load_kind[E: Record](
     root: Path, source: FileSource, directory: str, model: type[E], errors: list[LoadError]
 ) -> tuple[E, ...]:
     kind_dir = root / directory

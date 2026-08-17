@@ -26,6 +26,7 @@ from absicht.cli._app import app, main
 # above step 2, so the sorter is off for this block.
 # isort: off
 from absicht.cli import author  # noqa: F401
+from absicht.cli import note  # noqa: F401
 from absicht.cli import query  # noqa: F401
 from absicht.cli import handoff  # noqa: F401
 from absicht.cli import reconcile  # noqa: F401

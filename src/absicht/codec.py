@@ -6,7 +6,9 @@ which is what keeps the file format swappable later. The format itself is
 pinned in `docs/tasks/00-conventions.md`: one element per file as YAML front
 matter (every field except the loader-set `source` and the never-parsed
 `body`) between `---` lines, followed by the Markdown body verbatim;
-singletons (`system.yaml`, a repo `.absicht` marker) are plain YAML.
+singletons (`system.yaml`, a repo `.absicht` marker) are plain YAML. Notes
+share the element shape without being elements — they are never folded into
+the `Design` — so they go through the same two functions below.
 
 The decisions that document leaves open are made here and pinned in
 `tests/test_codec.py`:
@@ -32,7 +34,7 @@ from typing import cast
 import yaml
 from pydantic import ValidationError
 
-from absicht.models import Element, Record
+from absicht.models import Element, Note, Record
 
 _DELIMITER = "---"
 """Front-matter delimiter, as in Jekyll/Hugo. `...` is not accepted."""
@@ -55,14 +57,20 @@ class CodecValidationError(CodecError):
     """The text parsed, but the record's fields did not validate."""
 
 
-def dump_element(element: Element) -> str:
-    """Render one element: front matter, then the body verbatim."""
-    header = _dump_yaml(_authored_fields(element))
-    return f"{_DELIMITER}\n{header}{_DELIMITER}\n{element.body}"
+def dump_element(record: Element | Note) -> str:
+    """Render one front-matter record: the header, then the body verbatim.
+
+    Notes are not elements — they never enter the `Design` — but their files
+    are the same shape (front matter fields, Markdown body), pinned as one
+    format by docs/tasks/50-addendum-conventions.md, so they ride this
+    spelling rather than growing a second one.
+    """
+    header = _dump_yaml(_authored_fields(record))
+    return f"{_DELIMITER}\n{header}{_DELIMITER}\n{record.body}"
 
 
-def parse_element[E: Element](text: str, *, model: type[E], source: str) -> E:
-    """Read one element, stamping `source` from the path the loader is reading."""
+def parse_element[R: Record](text: str, *, model: type[R], source: str) -> R:
+    """Read one front-matter record, stamping `source` from the path the loader reads."""
     front_matter, body = _split_front_matter(text)
     fields = _load_mapping(front_matter, what="front matter")
     fields["source"] = source

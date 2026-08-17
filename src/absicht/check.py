@@ -16,7 +16,9 @@ are checked as their own directed graphs. Criteria anchoring is the spec's
 third integrity line but cannot be violated here: ``Story``'s own validator
 rejects a misanchored criterion at parse time, so it can only ever surface
 as a ``schema/validation`` load error; its id stays registered, marked
-handled upstream, for ``--explain`` to answer with.
+handled upstream, for ``--explain`` to answer with. Notes stay outside that
+walk by construction — they are not in the ``Design`` — and their single
+rule reads the loader's collection instead.
 
 The policy layer passes judgement on the same resolved artifact — states,
 staleness and accountability rather than structure. Its severities are a
@@ -86,6 +88,15 @@ RULES.update(
             "criterion anchored to another story at parse time, and the failure "
             "surfaces as schema/validation on that story's file. No integrity "
             "finding can carry this id."
+        ),
+        "integrity/note-promoted-to-unresolvable": (
+            "A note's promoted_to names the element it became, and that element "
+            "must exist: the promotion is a note's one claim on the record, and a "
+            "target no element defines leaves it pointing at something nobody can "
+            "read. Always an error. This is the only rule that reads notes — they "
+            "are outside the Design and exempt from graph validation by "
+            "construction, so their refs are never walked; only a claimed "
+            "promotion must resolve."
         ),
     }
 )
@@ -209,6 +220,30 @@ def _cycles(graph: dict[Ref, tuple[Ref, ...]]) -> Iterator[tuple[Ref, ...]]:
             yield tuple(cycle)
         else:
             return
+
+
+def note_findings(loaded: LoadedStore, index: Index) -> tuple[Finding, ...]:
+    """The one rule that reads notes: a ``promoted_to`` no element defines.
+
+    Notes never join ``iter_references`` — the exemption is structural, not a
+    filter — so this walks the loader's own collection against the index.
+    ``index`` must be ``Index.from_design`` of the store these notes loaded
+    from, the same pairing every other layer here holds.
+    """
+    return tuple(
+        finding(
+            "integrity/note-promoted-to-unresolvable",
+            severity=Severity.ERROR,
+            message=(
+                f"{note.id} is promoted to {note.promoted_to}, "
+                "which no element in the store defines"
+            ),
+            ref=note.id,
+            source=note.source or None,
+        )
+        for note in loaded.notes
+        if note.promoted_to is not None and note.promoted_to not in index.by_id
+    )
 
 
 # --- the policy layer --------------------------------------------------------
