@@ -634,6 +634,14 @@ class Packet(Record):
     design_rev: str = ""
     outcome: str = ""
     elements: tuple[PacketElement, ...] = ()
+    satisfy: tuple[Ref, ...] = ()
+    """The behaviors this slice must newly satisfy — the new work. The
+    behaviors themselves ride in ``elements`` at ``Fidelity.FULL``, one hop of
+    composition expanded beside them (addendum §5, §4.2)."""
+    must_not_break: tuple[Ref, ...] = ()
+    """The active behaviors whose observations touch the milestone's scope —
+    standing expectations, not new work. Breaking one is a regression; the
+    mechanical form of "do not regress the rest of the system" (§5)."""
     must_hold: tuple[Ref, ...] = ()
     may_decide: tuple[str, ...] = ()
     unresolved: tuple[Ref, ...] = ()

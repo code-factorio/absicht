@@ -24,7 +24,20 @@ from types import UnionType
 from typing import get_args, get_origin, get_type_hints
 
 from absicht.load import LoadedStore
-from absicht.models import Behavior, Design, Element, Record, Ref, Scope, State, Story
+from absicht.models import (
+    Behavior,
+    Design,
+    Element,
+    Observation,
+    Outcome,
+    Record,
+    Ref,
+    Resource,
+    Scope,
+    State,
+    Story,
+    Timing,
+)
 
 
 class ResolveError(Exception):
@@ -336,3 +349,21 @@ def superseded_by(index: Index, ref: Ref) -> tuple[Ref, ...]:
             }
         )
     )
+
+
+def effective_timing(index: Index, observation: Observation) -> Timing | None:
+    """The timing that governs one observation over a resolved design:
+    §1.2's table as ``Observation.effective_timing`` spells it, fed by what
+    ``at`` resolved to — and ``None`` exactly for ``must_not``, which carries
+    no when at all.
+
+    One home for the plumbing so the views (``show``) and the packet spell
+    the same answer instead of two reimplementations: a dangling ``at``
+    resolves to no resource kind and defaults ``immediate``, the same
+    "resolves to nothing" policy the rest of this module holds.
+    """
+    if observation.outcome is Outcome.MUST_NOT:
+        return None
+    target = index.by_id.get(observation.at)
+    resource_kind = target.resource_kind if isinstance(target, Resource) else None
+    return observation.effective_timing(resource_kind)

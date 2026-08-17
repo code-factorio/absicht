@@ -105,8 +105,10 @@ def packet(
     """Assemble the brief for one milestone.
 
     Milestone scope at full fidelity, one ring of neighbouring contracts, the
-    decisions and NFRs that must hold, explicit freedoms, known unknowns, and the
-    rejections that must not be re-proposed.
+    behaviors this slice must newly satisfy and the active ones it must not
+    break (composition expanded one hop), the decisions and NFRs that must
+    hold, explicit freedoms, known unknowns, and the rejections that must not
+    be re-proposed.
     """
     opts = options(ctx)
     _refuse(seal=seal, to_stdout=to_stdout, features=features, horizon=horizon)

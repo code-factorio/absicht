@@ -15,6 +15,18 @@
   - responsibility: Decide whether an order can still be cancelled, and start the refund.
   - consumes: seam:order-events
   
+  ## Behaviors to satisfy
+  
+  The new work: behaviors this slice must newly satisfy.
+  
+  (none)
+  
+  ## Behaviors that must not break
+  
+  Standing expectations touching this slice's scope — breaking one is a regression.
+  
+  (none)
+  
   ## Contract ring
   
   - `requirement:cancel-orders` — Orders can be cancelled

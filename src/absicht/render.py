@@ -44,12 +44,10 @@ from absicht.models import (
     Fidelity,
     Lifecycle,
     Observation,
-    Outcome,
     Packet,
     PacketElement,
     Question,
     Ref,
-    Resource,
     Scope,
     State,
     Timing,
@@ -59,6 +57,7 @@ from absicht.resolve import (
     Reference,
     composed_by,
     composes,
+    effective_timing,
     inherited_owners,
     scope_of,
     subtree,
@@ -330,22 +329,13 @@ def _neighbourhood(index: Index, ref: str, *, depth: int) -> Neighbourhood:
 def _observation_views(element: Element, index: Index) -> tuple[ObservationView, ...]:
     """A behavior's observations with the timing that governs each — what
     `at` resolved to decides the default when the author said nothing, the
-    same §1.2 table `Observation.effective_timing` spells. A dangling `at`
-    resolves to no resource kind and so defaults `immediate`, the same
-    "resolves to no neighbour" policy the outgoing side holds."""
+    one spelling of that plumbing `absicht.resolve.effective_timing` holds."""
     if not isinstance(element, Behavior):
         return ()
-    views: list[ObservationView] = []
-    for observation in element.observations:
-        target = index.by_id.get(observation.at)
-        resource_kind = target.resource_kind if isinstance(target, Resource) else None
-        effective = (
-            None
-            if observation.outcome is Outcome.MUST_NOT
-            else observation.effective_timing(resource_kind)
-        )
-        views.append(ObservationView(observation, effective))
-    return tuple(views)
+    return tuple(
+        ObservationView(observation, effective_timing(index, observation))
+        for observation in element.observations
+    )
 
 
 def _observation_qualifiers(view: ObservationView) -> str:
@@ -790,13 +780,16 @@ def _reaches_target(
 
 def packet_markdown(packet: Packet, *, features_dir: str | None = None) -> str:
     """The ``--format md`` spelling of a ``Packet``: the brief an agent reads
-    end to end (docs/tasks/32-packet-cli.md).
+    end to end (docs/tasks/32-packet-cli.md, 57-packet-behaviors.md).
 
     Scope at full detail and the contract ring summarized to one line each —
-    the ring is context to respect, not something to implement. The obligation
-    sections print ``(none)`` rather than disappearing: "nothing constrains
-    you" and "no rejection forbids anything" are facts an agent acts on, and a
-    missing heading would read as a rendering gap instead.
+    the ring is context to respect, not something to implement — with the two
+    behavior lists as their own clearly separated sections between them: the
+    work, then the guardrails, each behavior's observations rendered with the
+    effective timing assembly already folded in. The obligation sections print
+    ``(none)`` rather than disappearing: "nothing constrains you" and "no
+    rejection forbids anything" are facts an agent acts on, and a missing
+    heading would read as a rendering gap instead.
 
     ``features_dir`` names where the ``.feature`` files landed when they were
     rendered, as the caller spelled it — relative, so the document stays
@@ -807,10 +800,13 @@ def packet_markdown(packet: Packet, *, features_dir: str | None = None) -> str:
     # document's header covers it, so Scope is every other full element.
     milestone = next(element for element in packet.elements if element.ref == packet.milestone)
     identity = f"`{packet.milestone}`" + (f" — {packet.outcome}" if packet.outcome else "")
+    behavior_sections = _behavior_sections(packet)
     scope = [
         element
         for element in packet.elements
-        if element.fidelity is Fidelity.FULL and element.ref != packet.milestone
+        if element.fidelity is Fidelity.FULL
+        and element.ref != packet.milestone
+        and element.ref not in behavior_sections.owned
     ]
     ring = [element for element in packet.elements if element.fidelity is Fidelity.CONTRACT]
     criteria = [_criterion_text(criterion) for criterion in packet.criteria]
@@ -820,6 +816,8 @@ def packet_markdown(packet: Packet, *, features_dir: str | None = None) -> str:
         [f"# Packet: {milestone.element['title']}"],
         [identity],
         _doc_section("## Scope", _scope_blocks(scope)),
+        behavior_sections.satisfy,
+        behavior_sections.must_not_break,
         _doc_section("## Contract ring", [f"- `{e.ref}` — {e.element['title']}" for e in ring]),
         _doc_section("## Must hold", [f"- `{ref}`" for ref in packet.must_hold]),
         _doc_section("## May decide", [f"- {freedom}" for freedom in packet.may_decide]),
@@ -836,6 +834,99 @@ def _doc_section(heading: str, body: list[str]) -> list[str]:
     return [heading, "", *(body or ["(none)"])]
 
 
+@dataclass(frozen=True, slots=True)
+class _BehaviorSections:
+    """The packet document's two behavior sections and the set of behavior
+    refs they own — what Scope must not duplicate."""
+
+    satisfy: list[str]
+    must_not_break: list[str]
+    owned: frozenset[Ref]
+
+
+def _behavior_sections(packet: Packet) -> _BehaviorSections:
+    """The two behavior sections of docs/tasks/57-packet-behaviors.md:
+    satisfy (the new work) and must-not-break (standing expectations — the
+    addendum's framing leads the section, because breaking one is a
+    regression, not a missed feature).
+
+    Composition renders one hop: each listed behavior is followed by a block
+    per behavior its observations compose that the packet carries, and what
+    *those* compose stays the reference inside an observation, expanded
+    nowhere. A behavior neither section owns still renders — in Scope — so an
+    ``--include``-forced one cannot vanish from the document.
+    """
+    by_ref = {element.ref: element for element in packet.elements}
+    listed = frozenset((*packet.satisfy, *packet.must_not_break))
+    owned: set[Ref] = set(listed)
+
+    def section(heading: str, lead: str, refs: tuple[Ref, ...]) -> list[str]:
+        body: list[str] = []
+        for ref in refs:
+            element = by_ref.get(ref)
+            if element is None:
+                # Named by the milestone but carried nowhere — a dangling ref,
+                # `ab check`'s finding. The list still says it was named.
+                body.append(f"- `{ref}`")
+                continue
+            if body:
+                body.append("")
+            body += _element_block(element)
+            for observation in _carried_observations(element):
+                at = str(observation["at"])
+                target = by_ref.get(at)
+                if at.startswith("behavior:") and target is not None and at not in listed:
+                    owned.add(at)
+                    body += [
+                        "",
+                        *_element_block(
+                            target, heading=f"#### Composes: `{at}` — {target.element['title']}"
+                        ),
+                    ]
+        return [heading, "", lead, "", *(body or ["(none)"])]
+
+    return _BehaviorSections(
+        satisfy=section(
+            "## Behaviors to satisfy",
+            "The new work: behaviors this slice must newly satisfy.",
+            packet.satisfy,
+        ),
+        must_not_break=section(
+            "## Behaviors that must not break",
+            "Standing expectations touching this slice's scope — breaking one is a regression.",
+            packet.must_not_break,
+        ),
+        owned=frozenset(owned),
+    )
+
+
+def _carried_observations(element: PacketElement) -> list[dict[str, object]]:
+    """The observations an element's carried dump holds — empty for every kind
+    that has none, which is every kind but a behavior."""
+    return cast("list[dict[str, object]]", element.element.get("observations", []))
+
+
+def _observation_bullets(element: PacketElement) -> list[str]:
+    """One bullet per carried observation: the same qualifiers ``show`` spells
+    — outcome, effective timing (never for ``must_not``), what it points at —
+    read from the dump assembly already folded the timing into, so the agent
+    never computes a default and the two documents cannot drift apart."""
+    return [
+        f"- `{observation['id']}` — {observation['statement']} ({_carried_qualifiers(observation)})"
+        for observation in _carried_observations(element)
+    ]
+
+
+def _carried_qualifiers(observation: dict[str, object]) -> str:
+    """The qualifiers of one carried observation, ``show``'s order: the
+    outcome, the effective timing when there is one, then what it points at."""
+    qualifiers = [str(observation["outcome"])]
+    if (timing := observation.get("effective_timing")) is not None:
+        qualifiers.append(str(timing))
+    qualifiers.append(f"at {observation['at']}")
+    return ", ".join(qualifiers)
+
+
 def _scope_blocks(elements: Sequence[PacketElement]) -> list[str]:
     """The Scope section's body: one block per element, a blank line between."""
     lines: list[str] = []
@@ -846,17 +937,23 @@ def _scope_blocks(elements: Sequence[PacketElement]) -> list[str]:
     return lines
 
 
-def _element_block(element: PacketElement) -> list[str]:
+def _element_block(element: PacketElement, *, heading: str | None = None) -> list[str]:
     """One scope element at full fidelity: title heading, ref, its own fields
     in declaration order minus the heading four, prose last — ``show --format
-    md``'s shape, so the two documents read the same way."""
+    md``'s shape, so the two documents read the same way. Behaviors render
+    their observations as the bullet list assembly folded the timing into,
+    never as a compact JSON field; ``heading`` overrides the title line, which
+    is how a composed behavior names the one-hop edge it arrived by."""
     fields = element.element
-    lines = [f"### {fields['title']}", "", f"`{element.ref}`"]
+    lines = [heading if heading is not None else f"### {fields['title']}", "", f"`{element.ref}`"]
     lines += [
         f"- {name}: {_value_text(value)}"
         for name, value in fields.items()
-        if name not in ("id", "title", "source", "body") and value not in ("", None, [])
+        if name not in ("id", "title", "source", "body", "observations")
+        and value not in ("", None, [])
     ]
+    if fields.get("observations"):
+        lines += ["", *_doc_section("Observations:", _observation_bullets(element))]
     if body := fields["body"]:
         lines += ["", str(body).rstrip()]
     return lines
