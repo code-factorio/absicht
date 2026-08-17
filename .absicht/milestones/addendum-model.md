@@ -20,6 +20,8 @@ scope:
 - component:verify
 - component:render
 - component:diagram
+- component:cli
+- component:new
 must_hold:
 - decision:resource-kind-three-values
 - decision:derive-dont-store
@@ -37,6 +39,7 @@ done_when:
 depends_on:
 - milestone:step-2-build-query-site
 - milestone:step-3-handoff
+- milestone:step-4-verify
 ---
 
 Tasks 50 through 60, tickets 32qgzq through 4r5xrr. CLI before site on every

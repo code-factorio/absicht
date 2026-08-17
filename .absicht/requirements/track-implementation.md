@@ -12,5 +12,8 @@ realized_by:
 
 status computes drift from watermarks and implementation refs; diff compares
 the design between revisions as elements rather than lines; marker sync,
-check and stamp manage the discovery hints in implementing repos. The store
-wins over every marker.
+check and stamp manage the discovery hints in implementing repos — optional
+on purpose, because a public library with a private design and a vendor
+repo nobody can write to both have to work. The store wins over every
+marker. Embedded, nothing can be behind: status reports implementation
+coverage and unmet done_when instead of drift.

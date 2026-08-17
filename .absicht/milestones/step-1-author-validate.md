@@ -29,8 +29,10 @@ must_hold:
 done_when:
 - story:validate-a-store#ac-1
 - story:validate-a-store#ac-2
-depends_on: []
+depends_on:
+- milestone:foundations
 ---
 
-Tickets pnqsrz through vwv3z7. Landed before the rest; every later step
-assumes check passed.
+Its own tickets run pnqsrz through vwv3z7 (tasks 10-17); the foundations
+wave it stands on is milestone:foundations. Landed before the rest; every
+later step assumes check passed.

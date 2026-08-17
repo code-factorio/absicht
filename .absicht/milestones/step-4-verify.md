@@ -21,6 +21,7 @@ done_when:
 - story:check-what-came-back#ac-1
 - story:track-drift#ac-1
 depends_on:
+- milestone:step-2-build-query-site
 - milestone:step-3-handoff
 ---
 

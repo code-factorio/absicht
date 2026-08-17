@@ -25,8 +25,9 @@ observations:
   outcome: must
   timing: immediate
 - id: behavior:verify-reports-unchecked-observations#obs-4
-  statement: A packet was issued for this milestone before the run
+  statement: The verified packet's issuance sits in the same run store,
+    beside the run
   at: behavior:packet-bounds-the-work
-  outcome: must
+  outcome: should
   timing: immediate
 ---

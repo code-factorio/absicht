@@ -11,7 +11,6 @@ includes:
 scope:
 - component:gherkin
 - component:packet
-- component:runstore
 must_hold:
 - nfr:offline-operation
 unresolved:

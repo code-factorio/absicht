@@ -22,4 +22,6 @@ codebase but a design belongs to a system and a system is a composition.
 
 A directory is embedded, a file is reference. One name is one directory
 entry, so the modes are exclusive by filesystem, not by convention.
-`system.yaml` pins the units it composes, like a lockfile, either way.
+`system.yaml` pins the units it composes, like a lockfile, either way. A
+unit is anything with its own release cadence, not anything with its own
+deployment — a library, a service, a component inside a monolith.
