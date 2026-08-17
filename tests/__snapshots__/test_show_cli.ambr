@@ -17,6 +17,8 @@
   referenced by:
     seam:order-events (provider)
     data:order (owner_component)
+    behavior:order-placed-v2 (at)
+    behavior:order-placed-v2 (at)
     decision:event-log (applies_to)
   
   '''

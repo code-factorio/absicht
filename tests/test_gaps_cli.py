@@ -72,6 +72,7 @@ def test_brownfield_mix_attributes_every_reason() -> None:
     expired external is the one single-reason entry: its state is fine, its
     trust lapsed."""
     assert _reasons(BROWNFIELD) == {
+        "behavior:reconciliation-fires": ["state=observed", "unowned"],
         "component:legacy-billing": ["state=observed", "unowned"],
         "component:shadow-report": ["state=observed", "unowned"],
         "data:audit-log": ["state=observed", "unowned"],
@@ -182,4 +183,4 @@ def test_json_folds_into_a_default_format_only() -> None:
 
     assert folded.exit_code == ExitCode.OK
     assert json.loads(folded.stdout)["schema_version"] == SCHEMA_VERSION
-    assert explicit.stdout.startswith("component:legacy-billing")
+    assert explicit.stdout.startswith("behavior:reconciliation-fires")

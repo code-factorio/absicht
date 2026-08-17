@@ -1,9 +1,10 @@
 """Walk a store on disk into raw per-kind tuples, tolerant of bad files.
 
 `load` is the only layer that knows a store is a directory layout (pinned in
-`docs/tasks/00-conventions.md`): `system.yaml` plus one directory per kind,
-one `<slug>.md` file per element. Everything above it — `check`, `build`,
-`packet` — reads a `LoadedStore` and never a `Path`.
+`docs/tasks/00-conventions.md`, extended by `docs/tasks/50-addendum-conventions.md`
+with `resources/` and `behaviors/`): `system.yaml` plus one directory per
+kind, one `<slug>.md` file per element. Everything above it — `check`,
+`build`, `packet` — reads a `LoadedStore` and never a `Path`.
 
 Tolerance is the contract: one broken file is one `LoadError` and the walk
 continues, so a store with a single typo still yields everything else and
@@ -35,6 +36,7 @@ from absicht.codec import (
     parse_singleton,
 )
 from absicht.models import (
+    Behavior,
     Component,
     DataEntity,
     Decision,
@@ -46,6 +48,7 @@ from absicht.models import (
     Question,
     Rejection,
     Requirement,
+    Resource,
     Seam,
     Story,
     System,
@@ -108,6 +111,8 @@ class LoadedStore:
     components: tuple[Component, ...] = ()
     seams: tuple[Seam, ...] = ()
     data: tuple[DataEntity, ...] = ()
+    resources: tuple[Resource, ...] = ()
+    behaviors: tuple[Behavior, ...] = ()
     decisions: tuple[Decision, ...] = ()
     rejections: tuple[Rejection, ...] = ()
     questions: tuple[Question, ...] = ()
@@ -165,6 +170,8 @@ def load_store(root: Path, *, source: FileSource | None = None) -> LoadedStore:
         components=_load_kind(root, src, "components", Component, errors),
         seams=_load_kind(root, src, "seams", Seam, errors),
         data=_load_kind(root, src, "data", DataEntity, errors),
+        resources=_load_kind(root, src, "resources", Resource, errors),
+        behaviors=_load_kind(root, src, "behaviors", Behavior, errors),
         decisions=_load_kind(root, src, "decisions", Decision, errors),
         rejections=_load_kind(root, src, "rejections", Rejection, errors),
         questions=_load_kind(root, src, "questions", Question, errors),

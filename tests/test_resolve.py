@@ -107,7 +107,9 @@ def test_by_id_holds_every_element_including_the_system() -> None:
     assert len(index.by_id) == 14  # the system plus thirteen elements
     assert index.by_id["system:acme"] is design.system
     assert index.by_id["seam:order-events"] is design.seams[0]
-    assert index.by_id["behavior:order-placed-v2"] is design.behaviors[1]
+    # `order-placed-v2.md` sorts before `order-placed.md`, so the replacement
+    # is the first behavior on disk.
+    assert index.by_id["behavior:order-placed-v2"] is design.behaviors[0]
 
 
 def test_referenced_by_finds_the_requirement_behind_a_component() -> None:
@@ -167,9 +169,9 @@ def test_a_behaviors_refs_and_observations_are_indexed_under_it() -> None:
         Reference(source="behavior:order-placed-v2", field="at", target="behavior:order-placed"),
     )
     assert index.referenced_by["resource:order-cache"] == (
+        Reference(source="behavior:order-placed-v2", field="at", target="resource:order-cache"),
+        Reference(source="behavior:order-placed-v2", field="at", target="resource:order-cache"),
         Reference(source="behavior:order-placed", field="at", target="resource:order-cache"),
-        Reference(source="behavior:order-placed-v2", field="at", target="resource:order-cache"),
-        Reference(source="behavior:order-placed-v2", field="at", target="resource:order-cache"),
     )
 
 

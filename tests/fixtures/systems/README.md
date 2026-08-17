@@ -16,17 +16,18 @@ the format `00-conventions.md` pins: `system.yaml` as plain YAML, one
   between them exercise `must`, `must_not`, `should` and both timings.
 - **`brownfield/`** — an honest reading of a legacy system: `observed`
   elements without rationale, one `unknown` requirement with no owner (the gap
-  `ab gaps` exists to surface), orphaned elements nothing points at
-  (`component:shadow-report`, `data:audit-log`), two open questions — one past
-  its `due_on` and blocking the not-yet-committed `milestone:reconcile-mvp`,
-  one still inside its (far-future) due date — one external whose
-  assumptions expired in the past (`external:payment-api`, the counterpart to
-  `composite/`'s current one and the fixture `ab gaps --overdue`,
-  `--blocking` and the `external-expired` reason run against), and one
-  `observed` behavior (`behavior:reconciliation-fires`, what an import of a
-  brownfield system produces). Loads without errors; the findings it should
-  produce are policy *warnings* for `ab check`, not load failures — `observed`
-  being unexplained is the honest brownfield default.
+  `ab gaps` exists to surface), the orphaned `data:audit-log` nothing points
+  at (`component:shadow-report` lost its orphan status when the observed
+  behavior below began watching it — an observation is a reference), two open
+  questions — one past its `due_on` and blocking the not-yet-committed
+  `milestone:reconcile-mvp`, one still inside its (far-future) due date — one
+  external whose assumptions expired in the past (`external:payment-api`, the
+  counterpart to `composite/`'s current one and the fixture `ab gaps
+  --overdue`, `--blocking` and the `external-expired` reason run against),
+  and one `observed` behavior (`behavior:reconciliation-fires`, what an import
+  of a brownfield system produces). Loads without errors; the findings it
+  should produce are policy *warnings* for `ab check`, not load failures —
+  `observed` being unexplained is the honest brownfield default.
 - **`broken/`** — one clearly-named file per failure family, so a later
   `ab check` task can point `--rule X` at exactly the case that trips it.
   Three files fail at load time, on purpose: `requirements/garbage.md` is not

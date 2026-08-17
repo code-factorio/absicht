@@ -141,6 +141,10 @@ def test_json_envelopes_the_element_and_both_directions() -> None:
     assert [(link["field"], link["source"]["id"]) for link in document["referenced_by"]] == [
         ("provider", "seam:order-events"),
         ("owner_component", "data:order"),
+        # The two observations that watch this component, attributed to the
+        # behavior that carries them.
+        ("at", "behavior:order-placed-v2"),
+        ("at", "behavior:order-placed-v2"),
         ("applies_to", "decision:event-log"),
     ]
 

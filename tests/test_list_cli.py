@@ -93,14 +93,13 @@ def test_tag_filters_out_elements_without_the_tag() -> None:
 
 
 def test_orphaned_finds_the_disconnected_elements() -> None:
-    """`component:legacy-billing`, `component:shadow-report` and
-    `data:audit-log` are the elements nothing points at — what brownfield was
-    built around. `requirement:audit-trail` is pointed at by its story, so it
-    is not orphaned: `--orphaned` reads `referenced_by`, not `state`."""
-    assert _ids(BROWNFIELD, "component", "--orphaned") == [
-        "component:legacy-billing",
-        "component:shadow-report",
-    ]
+    """`data:audit-log` is the element nothing points at — what brownfield was
+    built around. The two components the observed behavior watches are no
+    longer orphaned: an observation is a reference, and what points at them is
+    what gives them meaning. `requirement:audit-trail` is pointed at by its
+    story, so it is not orphaned either: `--orphaned` reads `referenced_by`,
+    not `state`."""
+    assert _ids(BROWNFIELD, "component", "--orphaned") == []
     assert _ids(BROWNFIELD, "data", "--orphaned") == ["data:audit-log"]
     assert _ids(BROWNFIELD, "requirement", "--orphaned") == []
 

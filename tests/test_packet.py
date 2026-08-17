@@ -98,6 +98,11 @@ def test_horizon_two_adds_the_second_ring_still_at_contract() -> None:
         "component:orders": Fidelity.CONTRACT,
         "data:order": Fidelity.CONTRACT,
         "story:cancel-order": Fidelity.CONTRACT,
+        # The behaviors realize the requirement one ring in, so the second
+        # ring carries them at contract fidelity — an agent working the scope
+        # sees the expectations attached to the requirement it serves.
+        "behavior:order-placed-v2": Fidelity.CONTRACT,
+        "behavior:order-placed": Fidelity.CONTRACT,
     }
     # The ring does not leak into the brief's obligations: `decision:event-log`
     # applies to component:orders, which is a neighbour, not scope.
@@ -173,7 +178,7 @@ def test_exclude_drops_what_the_horizon_would_have_pulled_in() -> None:
     )
 
     assert "story:cancel-order" not in {e.ref for e in packet.elements}
-    assert len(packet.elements) == 6  # the horizon-2 packet, minus the story
+    assert len(packet.elements) == 8  # the horizon-2 packet, minus the story
 
     # Excluding something the packet never carried is a no-op, not an error:
     # there is nothing to drop.

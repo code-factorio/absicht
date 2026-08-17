@@ -24,7 +24,7 @@ from types import UnionType
 from typing import get_args, get_origin, get_type_hints
 
 from absicht.load import LoadedStore
-from absicht.models import Design, Element, Record, Ref, Story
+from absicht.models import Behavior, Design, Element, Record, Ref, Story
 
 
 class ResolveError(Exception):
@@ -57,6 +57,8 @@ def resolve(loaded: LoadedStore) -> Design:
         components=loaded.components,
         seams=loaded.seams,
         data=loaded.data,
+        resources=loaded.resources,
+        behaviors=loaded.behaviors,
         decisions=loaded.decisions,
         rejections=loaded.rejections,
         questions=loaded.questions,
@@ -95,6 +97,13 @@ def iter_references(design: Design) -> Iterator[Reference]:
             # are attributed to the story that carries it.
             for criterion in element.acceptance:
                 yield from _references_of(criterion, source=element.id)
+        if isinstance(element, Behavior):
+            # An observation is the same shape of nested record: its `at` is
+            # attributed to the behavior that carries it, which is what lets
+            # the generic dangling-ref sweep and the index's reverse lookups
+            # cover observation refs with no rule of their own.
+            for observation in element.observations:
+                yield from _references_of(observation, source=element.id)
 
 
 def _elements(design: Design) -> tuple[Element, ...]:
@@ -110,6 +119,8 @@ def _elements(design: Design) -> tuple[Element, ...]:
         *design.components,
         *design.seams,
         *design.data,
+        *design.resources,
+        *design.behaviors,
         *design.decisions,
         *design.rejections,
         *design.questions,

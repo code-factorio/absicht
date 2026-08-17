@@ -184,7 +184,9 @@ def test_json_carries_the_full_view_and_the_body_flag(clean: Design) -> None:
     ]
     assert hop["deeper"][0]["deeper"] == []
     assert [(link["field"], link["source"]["id"]) for link in with_body["referenced_by"]] == [
-        ("satisfies", "story:cancel-order")
+        ("satisfies", "story:cancel-order"),
+        ("realizes", "behavior:order-placed-v2"),
+        ("realizes", "behavior:order-placed"),
     ]
 
 
@@ -456,7 +458,7 @@ def test_the_site_is_byte_identical_across_runs(clean: Design, tmp_path: Path) -
 
     first = _site_bytes(tmp_path / "first")
     assert first == _site_bytes(tmp_path / "second")
-    assert len(first) == 14  # eleven element pages, index, traceability, gaps
+    assert len(first) == 17  # fourteen element pages, index, traceability, gaps
 
 
 def test_the_change_detection_notices_edits_additions_and_removals(tmp_path: Path) -> None:

@@ -2,6 +2,39 @@
 # name: test_each_fixture_builds_to_its_snapshot[brownfield]
   dict({
     'behaviors': list([
+      dict({
+        'body': '',
+        'confidence': 'assumed',
+        'id': 'behavior:reconciliation-fires',
+        'lifecycle': 'active',
+        'observations': list([
+          dict({
+            'at': 'component:shadow-report',
+            'id': 'behavior:reconciliation-fires#obs-1',
+            'outcome': 'must',
+            'statement': 'A mismatch row is written to the shadow report',
+            'timing': 'immediate',
+          }),
+          dict({
+            'at': 'component:legacy-billing',
+            'id': 'behavior:reconciliation-fires#obs-2',
+            'outcome': 'must',
+            'statement': 'The legacy billing job retries three times before giving up',
+            'timing': None,
+          }),
+        ]),
+        'owner': None,
+        'realizes': list([
+        ]),
+        'source': 'behaviors/reconciliation-fires.md',
+        'state': 'observed',
+        'supersedes': list([
+        ]),
+        'tags': list([
+        ]),
+        'title': 'Nightly reconciliation fires',
+        'trigger': 'The nightly reconciliation job runs.',
+      }),
     ]),
     'components': list([
       dict({
@@ -232,6 +265,89 @@
 # name: test_each_fixture_builds_to_its_snapshot[clean]
   dict({
     'behaviors': list([
+      dict({
+        'body': '',
+        'confidence': 'assumed',
+        'id': 'behavior:order-placed-v2',
+        'lifecycle': 'active',
+        'observations': list([
+          dict({
+            'at': 'resource:order-cache',
+            'id': 'behavior:order-placed-v2#obs-1',
+            'outcome': 'must',
+            'statement': 'The order appears in the order cache',
+            'timing': 'immediate',
+          }),
+          dict({
+            'at': 'component:orders',
+            'id': 'behavior:order-placed-v2#obs-2',
+            'outcome': 'must',
+            'statement': "The order shows in the customer's order list",
+            'timing': 'eventual',
+          }),
+          dict({
+            'at': 'resource:order-cache',
+            'id': 'behavior:order-placed-v2#obs-3',
+            'outcome': 'must_not',
+            'statement': 'No order is cached before payment clears',
+            'timing': None,
+          }),
+          dict({
+            'at': 'behavior:order-placed',
+            'id': 'behavior:order-placed-v2#obs-4',
+            'outcome': 'must',
+            'statement': 'The superseded order-placed behavior still fires while readers migrate',
+            'timing': 'eventual',
+          }),
+          dict({
+            'at': 'component:orders',
+            'id': 'behavior:order-placed-v2#obs-5',
+            'outcome': 'should',
+            'statement': 'The cache warms before the first read',
+            'timing': None,
+          }),
+        ]),
+        'owner': None,
+        'realizes': list([
+          'requirement:cancel-orders',
+        ]),
+        'source': 'behaviors/order-placed-v2.md',
+        'state': 'specified',
+        'supersedes': list([
+          'behavior:order-placed',
+        ]),
+        'tags': list([
+        ]),
+        'title': 'Order placed through checkout',
+        'trigger': 'A customer places an order through the new checkout.',
+      }),
+      dict({
+        'body': '',
+        'confidence': 'assumed',
+        'id': 'behavior:order-placed',
+        'lifecycle': 'superseded',
+        'observations': list([
+          dict({
+            'at': 'resource:order-cache',
+            'id': 'behavior:order-placed#obs-1',
+            'outcome': 'must',
+            'statement': 'The order appears in the order cache',
+            'timing': 'immediate',
+          }),
+        ]),
+        'owner': None,
+        'realizes': list([
+          'requirement:cancel-orders',
+        ]),
+        'source': 'behaviors/order-placed.md',
+        'state': 'specified',
+        'supersedes': list([
+        ]),
+        'tags': list([
+        ]),
+        'title': 'Order placed',
+        'trigger': 'A customer places an order.',
+      }),
     ]),
     'components': list([
       dict({
@@ -444,6 +560,19 @@
       }),
     ]),
     'resources': list([
+      dict({
+        'body': '',
+        'confidence': 'assumed',
+        'id': 'resource:order-cache',
+        'owner': None,
+        'resource_kind': 'store',
+        'source': 'resources/order-cache.md',
+        'state': 'specified',
+        'tags': list([
+        ]),
+        'technology': 'Redis',
+        'title': 'Order cache',
+      }),
     ]),
     'schema_version': 1,
     'seams': list([

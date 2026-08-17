@@ -168,8 +168,10 @@ def test_down_follows_only_the_elements_own_refs() -> None:
 
 
 def test_up_follows_only_refs_pointing_at_the_start() -> None:
-    """The upstream side of the same requirement is one story satisfied by it
-    and one milestone including that story — a chain with no way back, so
+    """The upstream side of the same requirement is one story satisfied by it,
+    one milestone including that story, and the two behaviors realizing it —
+    the superseded one reachable onward through both its supersession and the
+    replacement's composing observation. Still a chain with no way back, so
     unlike downstream nothing is declined on the way."""
     document = _document("requirement:cancel-orders", "--up")
 
@@ -178,6 +180,16 @@ def test_up_follows_only_refs_pointing_at_the_start() -> None:
         (
             ("satisfies", "up", "story:cancel-order"),
             ("includes", "up", "milestone:m1"),
+        ),
+        (("realizes", "up", "behavior:order-placed-v2"),),
+        (("realizes", "up", "behavior:order-placed"),),
+        (
+            ("realizes", "up", "behavior:order-placed"),
+            ("supersedes", "up", "behavior:order-placed-v2"),
+        ),
+        (
+            ("realizes", "up", "behavior:order-placed"),
+            ("at", "up", "behavior:order-placed-v2"),
         ),
     ]
     assert document["cycle_hit"] is False
@@ -267,8 +279,14 @@ def test_mermaid_is_one_graph_td_block_of_refs_and_relations() -> None:
         '  requirement_cancel_orders["requirement:cancel-orders"]',
         '  story_cancel_order["story:cancel-order"]',
         '  milestone_m1["milestone:m1"]',
+        '  behavior_order_placed_v2["behavior:order-placed-v2"]',
+        '  behavior_order_placed["behavior:order-placed"]',
         "  requirement_cancel_orders -->|satisfies| story_cancel_order",
         "  story_cancel_order -->|includes| milestone_m1",
+        "  requirement_cancel_orders -->|realizes| behavior_order_placed_v2",
+        "  requirement_cancel_orders -->|realizes| behavior_order_placed",
+        "  behavior_order_placed -->|supersedes| behavior_order_placed_v2",
+        "  behavior_order_placed -->|at| behavior_order_placed_v2",
     ]
 
 
