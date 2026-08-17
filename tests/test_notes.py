@@ -447,8 +447,12 @@ def test_check_on_a_note_with_an_unresolvable_promoted_to_is_exactly_that_rule(
     (only,) = json.loads(result.stdout)["findings"]
     assert only["rule_id"] == "integrity/note-promoted-to-unresolvable"
     assert only["severity"] == "error"
-    assert "note:stuck1" in only["message"]
-    assert "component:ghost" in only["message"]
+    # Pinned whole: the finding names the note, the dead target, and nothing
+    # vaguer — it is all an agent fixing the store gets to read.
+    assert only["message"] == (
+        "note:stuck1 is promoted to component:ghost, which no element in the store defines"
+    )
+    assert only["ref"] == "note:stuck1"
     assert only["source"] == "notes/stuck1.md"
 
 
