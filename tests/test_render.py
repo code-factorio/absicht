@@ -530,7 +530,10 @@ def test_the_walk_stops_at_the_path_limit_and_says_so() -> None:
     first `limit` of the uncapped enumeration — the same walk, stopped
     earlier, never a different order."""
     full = trace_paths(_dense(), "requirement:r", limit=None)
-    assert len(full.paths) == 80  # 16 two-hop + 64 three-hop, downward alone
+    # Both directions by default, so the reverse edges multiply too: this
+    # three-layer fan of four holds 127,476 simple paths from one start —
+    # the explosion in miniature, and the count the fixture is built to pin.
+    assert len(full.paths) == 127_476
     assert full.truncated is False
 
     capped = trace_paths(_dense(), "requirement:r", limit=10)
