@@ -176,3 +176,5 @@
 {"id":"01M06P13SX5X0XTQMWQAAAH3DH","ts":"2026-08-17T01:40:27.069Z","ticket":"sy44rs","op":"comment","actor":"agent/absicht-workflow","text":"Implemented via 2 commit(s): b0f6452a1342e1d4f9847c031a0848e7a5609ecf..ff281e8aa56a47548393801a572b7a9885f4b907"}
 {"id":"01M06P13XRQXKV64WMCHGV2EE3","ts":"2026-08-17T01:40:27.192Z","ticket":"sy44rs","op":"set","actor":"agent/absicht-workflow","set":{"status":"done"},"reason":"spec docs/tasks/52-store-wiring.md delivered"}
 {"id":"01M06PNZF7MFQ024RSGZQVF3QQ","ts":"2026-08-17T01:51:50.759Z","ticket":"1cxxdy","op":"set","actor":"agent/absicht-workflow","set":{"status":"in_progress","assignee":"agent/absicht-workflow"}}
+{"id":"01M06SQ56DG7FQWH8YQYEJQR1A","ts":"2026-08-17T02:44:55.117Z","ticket":"1cxxdy","op":"comment","actor":"agent/absicht-workflow","text":"Implemented via 3 commit(s): 36e7e76 Pin the note capture channel in tests, before it exists..98abc2a Notes: storage, loading, and the ab note command group"}
+{"id":"01M06SQ59QYJ2WYZ92KSR5NZWN","ts":"2026-08-17T02:44:55.223Z","ticket":"1cxxdy","op":"set","actor":"agent/absicht-workflow","set":{"status":"done"},"reason":"spec docs/tasks/53-notes.md delivered"}
