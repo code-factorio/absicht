@@ -348,7 +348,13 @@ def test_the_scaffolded_kinds_are_what_ab_check_accepts(store: Path) -> None:
     """`ab check` accepts both templates once the author's part is assumed:
     an owner for each (`unknown` asks for one), and the observations the
     behavior template deliberately does not generate — the one finding a
-    fresh behavior owes its authoring-not-being-done-yet, excluded here."""
+    fresh behavior owes its authoring-not-being-done-yet, excluded here.
+    The store's own system element is completed by hand first: `ab init`
+    scaffolds it `unknown` and unowned, which is its own finding, not the
+    templates'."""
+    (store / "system.yaml").write_text(
+        "id: system:acme\ntitle: ACME\nstate: specified\n", encoding="utf-8"
+    )
     assert new(store, "resource", "state-store", "--owner", "platform").exit_code == ExitCode.OK
 
     result = runner.invoke(app, ["--store", str(store), "check"])

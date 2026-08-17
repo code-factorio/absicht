@@ -279,6 +279,13 @@ def test_inherited_owners_is_section_sevens_rule_over_the_index() -> None:
                     "component:seen",
                 ),
             ),
+            Requirement(
+                id="requirement:rival",
+                title="Rival",
+                state=State.SPECIFIED,
+                owner="rival-team",
+                realized_by=("component:contested",),
+            ),
             Requirement(id="requirement:mid", title="Mid", realized_by=("component:deep",)),
         ),
         stories=(

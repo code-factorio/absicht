@@ -346,14 +346,16 @@ def test_inheritance_goes_one_level_no_deeper(inheritance: Path) -> None:
 
 def test_the_text_line_marks_the_inherited_owner(inheritance: Path) -> None:
     """The human-readable surface says whose it is and how it came to be
-    known: `owner: platform (inherited)`, beside the reasons."""
+    known: `owner: platform (inherited)`, between the reasons and the title.
+    The row is found by prefix rather than spelled whole, so the pin is the
+    annotation and its place, not the id-column padding."""
     result = _gaps(inheritance, "--kind", "requirement")
 
     assert result.exit_code == ExitCode.OK
-    assert (
-        "requirement:spike        state=unknown  owner: platform (inherited)  Spike it"
-        in result.stdout.splitlines()
+    spike = next(
+        line for line in result.stdout.splitlines() if line.startswith("requirement:spike")
     )
+    assert spike.endswith("state=unknown  owner: platform (inherited)  Spike it")
 
 
 def test_owner_filters_by_the_inherited_owner_too(inheritance: Path) -> None:

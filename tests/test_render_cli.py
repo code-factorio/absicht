@@ -175,6 +175,20 @@ def test_an_element_page_carries_the_prose_body(tmp_path: Path) -> None:
     assert "<h2>Context</h2>" in decision
 
 
+def test_a_behavior_page_carries_its_observations(tmp_path: Path) -> None:
+    """The page reuses the show view, so a behavior's observations arrive with
+    it — one line each, the same spelling the text format prints, and no
+    compact JSON blob where a statement would be."""
+    result = _render(CLEAN, tmp_path)
+
+    assert result.exit_code == ExitCode.OK
+    page = (tmp_path / "elements" / "behavior" / "order-placed-v2.html").read_text(encoding="utf-8")
+    assert "<h2>Observations</h2>" in page
+    assert "behavior:order-placed-v2#obs-3  must_not, at resource:order-cache" in page
+    assert "behavior:order-placed-v2#obs-5  should, immediate, at component:orders" in page
+    assert '"statement"' not in page
+
+
 def test_the_traceability_page_links_requirements_to_what_realizes_them(
     tmp_path: Path,
 ) -> None:

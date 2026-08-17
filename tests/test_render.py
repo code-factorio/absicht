@@ -339,6 +339,13 @@ def test_worklist_inherits_the_single_referencing_owner() -> None:
                 owner="platform",
                 realized_by=("component:watched", "component:owned", "component:contested"),
             ),
+            Requirement(
+                id="requirement:rival",
+                title="Rival",
+                state=State.SPECIFIED,
+                owner="rival-team",
+                realized_by=("component:contested",),
+            ),
             Requirement(id="requirement:mid", title="Mid", realized_by=("component:deep",)),
         ),
         stories=(
