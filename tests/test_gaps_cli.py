@@ -20,6 +20,12 @@ What these tests pin, per ``docs/tasks/23-gaps.md``:
   into a default ``--format`` without overriding an explicit one
   (docs/adr/0001).
 
+Since the model addendum: a behavior with no observations joins the worklist
+— the query-side twin of ``policy/behavior-needs-observations``, the way
+unowned elements appear both places — and §7's owner inheritance annotates
+an unowned ``unknown`` with the owner of the single element referencing it,
+marked ``inherited``, never stored.
+
 A non-empty worklist still exits ``OK``: a worklist is the answer, not a
 finding about the design — that judgement is ``ab check``'s, and every test
 below asserts the exit code against ``brownfield/``, which is never empty.
@@ -31,6 +37,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+import pytest
 from typer.testing import CliRunner
 
 from absicht.cli import app
@@ -184,3 +191,175 @@ def test_json_folds_into_a_default_format_only() -> None:
     assert folded.exit_code == ExitCode.OK
     assert json.loads(folded.stdout)["schema_version"] == SCHEMA_VERSION
     assert explicit.stdout.startswith("behavior:reconciliation-fires")
+
+
+# --- the addendum's additions ----------------------------------------------------
+
+
+def _write(root: Path, rel: str, text: str) -> None:
+    path = root / rel
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+
+
+@pytest.fixture
+def unobserved(tmp_path: Path) -> Path:
+    """The zero-observation behavior beside an observed one, in the smallest
+    store that holds the pair: `broken/` has the case but cannot reach a
+    query (its parse failures are `build`'s refusal), and growing a shared
+    fixture would move other tickets' exact-match worklist assertions."""
+    root = tmp_path / "unobserved"
+    _write(root, "system.yaml", "id: system:probe\ntitle: Probe\nstate: specified\nowner: root\n")
+    _write(
+        root,
+        "components/probe.md",
+        "---\nid: component:probe\ntitle: Probe\nstate: specified\nowner: root\n---\n",
+    )
+    _write(
+        root,
+        "behaviors/bare.md",
+        "---\nid: behavior:bare\ntitle: Bare\nstate: specified\ntrigger: Something happens.\n---\n",
+    )
+    _write(
+        root,
+        "behaviors/watched.md",
+        "---\nid: behavior:watched\ntitle: Watched\nstate: observed\nowner: root\n"
+        "trigger: Something else happens.\nobservations:\n"
+        "- id: behavior:watched#obs-1\n  statement: The probe saw it\n"
+        "  at: component:probe\n  outcome: must\n---\n",
+    )
+    return root
+
+
+def test_a_behavior_with_no_observations_is_a_gap_line(unobserved: Path) -> None:
+    """The policy rule's query-side twin: the expectation with nothing
+    observable is unfinished whatever its state — `behavior:bare` is
+    `specified` and still lands on the worklist, for that reason alone.
+    Its sibling stays on the list for its `observed` state and nothing else,
+    which is what pins the reason to the zero, not to the kind."""
+    assert _reasons(unobserved) == {
+        "behavior:bare": ["no-observations"],
+        "behavior:watched": ["state=observed"],
+    }
+
+
+# --- §7 owner inheritance --------------------------------------------------------
+
+
+@pytest.fixture
+def inheritance(tmp_path: Path) -> Path:
+    """§7 in full, one file per case: `requirement:spike` inherits from the
+    single referencing element that carries an owner;
+    `requirement:self-owned` has an owner of its own; `component:contested`
+    is referenced by two owners; and `component:deep` is referenced only by
+    an ownerless unknown that itself inherits — the one-level bound. No
+    fixture carries owners on referencing elements; the case gets a store of
+    its own rather than moving other tickets' exact-match assertions."""
+    root = tmp_path / "inheritance"
+    _write(root, "system.yaml", "id: system:inheritance\ntitle: Inheritance\nstate: specified\n")
+    _write(root, "requirements/spike.md", "---\nid: requirement:spike\ntitle: Spike it\n---\n")
+    _write(
+        root,
+        "stories/spike-carrier.md",
+        "---\nid: story:spike-carrier\ntitle: Spike carrier\nstate: specified\nowner: platform\n"
+        "satisfies:\n- requirement:spike\n---\n",
+    )
+    _write(
+        root,
+        "requirements/self-owned.md",
+        "---\nid: requirement:self-owned\ntitle: Self owned\nowner: qa\n---\n",
+    )
+    _write(
+        root,
+        "stories/qa-carrier.md",
+        "---\nid: story:qa-carrier\ntitle: Qa carrier\nstate: specified\nowner: platform\n"
+        "satisfies:\n- requirement:self-owned\n---\n",
+    )
+    _write(root, "components/contested.md", "---\nid: component:contested\ntitle: Contested\n---\n")
+    _write(
+        root,
+        "requirements/by-a.md",
+        "---\nid: requirement:by-a\ntitle: By A\nstate: specified\nowner: team-a\nrealized_by:\n"
+        "- component:contested\n---\n",
+    )
+    _write(
+        root,
+        "requirements/by-b.md",
+        "---\nid: requirement:by-b\ntitle: By B\nstate: specified\nowner: team-b\nrealized_by:\n"
+        "- component:contested\n---\n",
+    )
+    _write(root, "components/deep.md", "---\nid: component:deep\ntitle: Deep\n---\n")
+    _write(
+        root,
+        "requirements/mid.md",
+        "---\nid: requirement:mid\ntitle: Mid\nrealized_by:\n- component:deep\n---\n",
+    )
+    _write(
+        root,
+        "stories/top.md",
+        "---\nid: story:top\ntitle: Top\nstate: specified\nowner: platform\nsatisfies:\n"
+        "- requirement:mid\n---\n",
+    )
+    return root
+
+
+def _entries(store: Path, *flags: str) -> dict[str, dict[str, Any]]:
+    """The worklist as ref → entry, for the tests that read past `reasons`."""
+    return {gap["ref"]: gap for gap in _document(store, *flags)["gaps"]}
+
+
+def test_an_unowned_unknown_reports_its_single_referencing_owner(
+    inheritance: Path,
+) -> None:
+    """§7's inheritance: `requirement:spike` has no owner of its own and
+    exactly one referencing element that does — it answers to platform,
+    marked inherited in its own field, and stops being called unowned."""
+    entries = _entries(inheritance)
+
+    assert entries["requirement:spike"]["owner_inherited"] == "platform"
+    assert entries["requirement:spike"]["reasons"] == ["state=unknown"]
+    # An authored owner always stands: qa keeps the entry, inheritance or not.
+    assert entries["requirement:self-owned"]["owner_inherited"] is None
+    assert entries["requirement:self-owned"]["reasons"] == ["state=unknown"]
+
+
+def test_two_referencing_owners_inherit_nothing(inheritance: Path) -> None:
+    """Ambiguity is not a guess: `component:contested` is referenced by an
+    owner and another owner, so no owner is reported and the element stays
+    unowned on the worklist."""
+    entries = _entries(inheritance)
+
+    assert entries["component:contested"]["owner_inherited"] is None
+    assert entries["component:contested"]["reasons"] == ["state=unknown", "unowned"]
+
+
+def test_inheritance_goes_one_level_no_deeper(inheritance: Path) -> None:
+    """`requirement:mid` inherits platform from `story:top`; the
+    `component:deep` it references inherits nothing — mid's own `owner` is
+    empty, and the owner mid itself inherited is never chained on."""
+    entries = _entries(inheritance)
+
+    assert entries["requirement:mid"]["owner_inherited"] == "platform"
+    assert entries["component:deep"]["owner_inherited"] is None
+    assert entries["component:deep"]["reasons"] == ["state=unknown", "unowned"]
+
+
+def test_the_text_line_marks_the_inherited_owner(inheritance: Path) -> None:
+    """The human-readable surface says whose it is and how it came to be
+    known: `owner: platform (inherited)`, beside the reasons."""
+    result = _gaps(inheritance, "--kind", "requirement")
+
+    assert result.exit_code == ExitCode.OK
+    assert (
+        "requirement:spike        state=unknown  owner: platform (inherited)  Spike it"
+        in result.stdout.splitlines()
+    )
+
+
+def test_owner_filters_by_the_inherited_owner_too(inheritance: Path) -> None:
+    """`--owner platform` answers with both of platform's unknowns: the one
+    it owns outright and the one it owns by §7's inheritance."""
+    assert set(_reasons(inheritance, "--owner", "platform")) == {
+        "requirement:mid",
+        "requirement:spike",
+    }

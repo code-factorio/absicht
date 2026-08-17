@@ -46,6 +46,7 @@ import pytest
 from absicht.load import load_store
 from absicht.models import (
     SCHEMA_VERSION,
+    Behavior,
     Component,
     Criterion,
     CriterionKind,
@@ -53,11 +54,18 @@ from absicht.models import (
     External,
     ExternalKind,
     Fidelity,
+    Observation,
+    Outcome,
     Packet,
     PacketElement,
     Question,
+    Requirement,
+    Resource,
+    ResourceKind,
     State,
+    Story,
     System,
+    Timing,
 )
 from absicht.render import (
     SiteServer,
@@ -283,6 +291,147 @@ def test_worklist_expires_an_external_strictly_after_its_expiry_date() -> None:
     assert only.element.id == "external:yesterday"
     assert only.reasons == ("external-expired",)
     assert only.expires_on == TODAY - timedelta(days=1)
+
+
+def test_worklist_gaps_a_behavior_with_no_observations() -> None:
+    """The query-side twin of `policy/behavior-needs-observations`: the
+    expectation with nothing observable is unfinished whatever its state —
+    a `specified` behavior lands on the worklist for that reason alone."""
+    design = Design(
+        system=System(id="system:tiny", title="Tiny", state=State.SPECIFIED, owner="a"),
+        behaviors=(
+            Behavior(
+                id="behavior:bare",
+                title="Bare",
+                state=State.SPECIFIED,
+                owner="a",
+                trigger="Something happens.",
+            ),
+        ),
+    )
+
+    (only,) = worklist(design, today=TODAY)
+
+    assert only.element.id == "behavior:bare"
+    assert only.reasons == ("no-observations",)
+
+
+def test_worklist_inherits_the_single_referencing_owner() -> None:
+    """§7 in the worklist: an unowned `unknown` with exactly one referencing
+    owner answers to it — carried on the entry, never stored — and stops
+    being `unowned`; an own owner, a second referencing owner, or an
+    ownerless referencer means it does not. `component:deep`'s only referencer
+    is the ownerless `requirement:mid`, whose own inherited owner (platform,
+    via `story:top`) is never chained on: one level, no deeper."""
+    design = Design(
+        system=System(id="system:tiny", title="Tiny", state=State.SPECIFIED, owner="a"),
+        components=(
+            Component(id="component:watched", title="Watched"),
+            Component(id="component:owned", title="Owned", owner="qa"),
+            Component(id="component:contested", title="Contested"),
+            Component(id="component:deep", title="Deep"),
+        ),
+        requirements=(
+            Requirement(
+                id="requirement:carrier",
+                title="Carrier",
+                state=State.SPECIFIED,
+                owner="platform",
+                realized_by=("component:watched", "component:owned", "component:contested"),
+            ),
+            Requirement(id="requirement:mid", title="Mid", realized_by=("component:deep",)),
+        ),
+        stories=(
+            Story(
+                id="story:top",
+                title="Top",
+                state=State.SPECIFIED,
+                owner="platform",
+                satisfies=("requirement:mid",),
+            ),
+        ),
+    )
+
+    by_id = {gap.element.id: gap for gap in worklist(design, today=TODAY)}
+
+    assert by_id["component:watched"].owner_inherited == "platform"
+    assert by_id["component:watched"].reasons == ("state=unknown",)
+    assert by_id["component:owned"].owner_inherited is None
+    assert by_id["component:owned"].reasons == ("state=unknown",)
+    assert by_id["component:contested"].owner_inherited is None
+    assert by_id["component:contested"].reasons == ("state=unknown", "unowned")
+    assert by_id["requirement:mid"].owner_inherited == "platform"
+    assert by_id["component:deep"].owner_inherited is None
+    assert by_id["component:deep"].reasons == ("state=unknown", "unowned")
+
+
+# --- observations in the show view ----------------------------------------------
+
+
+def test_the_effective_timing_follows_the_resource_kind_when_unsaid() -> None:
+    """§1.2's table, as the show view spells it: an authored timing wins, an
+    unsaid one follows what `at` resolved to — a stream defaults eventual,
+    everything else immediate — and `must_not` has no timing to render, at
+    no point having no when."""
+    design = Design(
+        system=System(id="system:tiny", title="Tiny", state=State.SPECIFIED, owner="a"),
+        components=(Component(id="component:c", title="C", state=State.SPECIFIED, owner="a"),),
+        resources=(
+            Resource(
+                id="resource:events",
+                title="Events",
+                state=State.SPECIFIED,
+                owner="a",
+                resource_kind=ResourceKind.STREAM,
+                technology="Kafka",
+            ),
+        ),
+        behaviors=(
+            Behavior(
+                id="behavior:emits",
+                title="Emits",
+                state=State.SPECIFIED,
+                owner="a",
+                trigger="A message is published.",
+                observations=(
+                    Observation(
+                        id="behavior:emits#obs-1",
+                        statement="An event is emitted",
+                        at="resource:events",
+                        outcome=Outcome.MUST,
+                    ),
+                    Observation(
+                        id="behavior:emits#obs-2",
+                        statement="A component acted",
+                        at="component:c",
+                        outcome=Outcome.MUST,
+                    ),
+                    Observation(
+                        id="behavior:emits#obs-3",
+                        statement="Nothing is logged",
+                        at="resource:events",
+                        outcome=Outcome.MUST_NOT,
+                    ),
+                    Observation(
+                        id="behavior:emits#obs-4",
+                        statement="An event lands now",
+                        at="resource:events",
+                        outcome=Outcome.MUST,
+                        timing=Timing.IMMEDIATE,
+                    ),
+                ),
+            ),
+        ),
+    )
+
+    view = neighbourhood(design, "behavior:emits", depth=1)
+
+    assert [observation.effective_timing for observation in view.observations] == [
+        Timing.EVENTUAL,  # unsaid, at a stream
+        Timing.IMMEDIATE,  # unsaid, at a non-resource
+        None,  # must_not: at no point, no when
+        Timing.IMMEDIATE,  # authored, and the authored value wins
+    ]
 
 
 # --- the trace paths -----------------------------------------------------------

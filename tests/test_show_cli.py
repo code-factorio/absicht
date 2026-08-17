@@ -195,3 +195,60 @@ def test_structured_field_values_render_on_one_line() -> None:
     assert result.exit_code == ExitCode.OK
     assert 'fields: [{"name": "id", "type": "uuid", "optional": false, "note": ""}' in result.stdout
     assert "identity: id" in result.stdout
+
+
+# --- behaviors (model addendum) --------------------------------------------------
+
+
+def test_a_composing_behavior_names_the_behavior_it_composes() -> None:
+    """§4.2: `behavior:order-placed-v2` observes `behavior:order-placed` —
+    composition, through an observation's `at`, attributed to the behavior
+    that carries it — so the composed behavior appears among the refs out,
+    named with the field that reached it."""
+    result = _show("behavior:order-placed-v2")
+
+    assert result.exit_code == ExitCode.OK
+    assert "behavior:order-placed (at)" in result.stdout
+
+
+def test_observations_render_readably_not_as_a_json_blob() -> None:
+    """`show`'s body of a behavior is its observations: one line each with
+    the statement, what it points at, the outcome and the timing that
+    governs — the effective one, following §1.2's table when the author said
+    nothing, and none at all for `must_not`, which carries no timing."""
+    result = _show("behavior:order-placed-v2")
+
+    assert result.exit_code == ExitCode.OK
+    assert (
+        "  behavior:order-placed-v2#obs-1  must, immediate, at resource:order-cache"
+        " — The order appears in the order cache"
+    ) in result.stdout.splitlines()
+    assert (
+        "  behavior:order-placed-v2#obs-3  must_not, at resource:order-cache"
+        " — No order is cached before payment clears"
+    ) in result.stdout.splitlines()
+    # obs-5 authored no timing and points at a component: effective immediate.
+    assert (
+        "  behavior:order-placed-v2#obs-5  should, immediate, at component:orders"
+        " — The cache warms before the first read"
+    ) in result.stdout.splitlines()
+    # The compact JSON blob the field used to render as is gone.
+    assert '"statement"' not in result.stdout
+
+
+def test_json_carries_the_effective_timing_beside_the_authored_one() -> None:
+    """The envelope stays additive: `timing` is exactly what the file said
+    (null when unsaid), `effective_timing` is the derived answer a consumer
+    acts on — and null for `must_not`, which has no when."""
+    document = json.loads(_show("behavior:order-placed-v2", "--format", "json").stdout)
+
+    observations = {
+        observation["id"]: observation for observation in document["element"]["observations"]
+    }
+
+    assert observations["behavior:order-placed-v2#obs-1"]["timing"] == "immediate"
+    assert observations["behavior:order-placed-v2#obs-1"]["effective_timing"] == "immediate"
+    assert observations["behavior:order-placed-v2#obs-3"]["timing"] is None
+    assert observations["behavior:order-placed-v2#obs-3"]["effective_timing"] is None
+    assert observations["behavior:order-placed-v2#obs-5"]["timing"] is None
+    assert observations["behavior:order-placed-v2#obs-5"]["effective_timing"] == "immediate"

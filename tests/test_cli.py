@@ -68,6 +68,7 @@ SURFACE: dict[str, tuple[list[str], list[str]]] = {
             "--tag",
             "--milestone",
             "--orphaned",
+            "--lifecycle",
             "--format",
         ],
     ),

@@ -25,19 +25,22 @@ from absicht.cli import app
 from absicht.cli._common import ExitCode, Kind
 from absicht.codec import dump_element, parse_element
 from absicht.load import load_store
-from absicht.models import SCHEMA_VERSION, Component
+from absicht.models import SCHEMA_VERSION, Behavior, Component, Resource, ResourceKind
 from absicht.new import NewError, scaffold
 from absicht.resolve import Index, resolve
 
 runner = CliRunner()
 
-# The three kinds whose model has a required field no default exists for, and
-# the placeholder `ab new` fills it with: the enum's first declared member,
-# named again in a comment in the element's body.
-PLACEHOLDER: dict[str, tuple[str, str]] = {
-    "seam": ("style", "call"),
-    "nfr": ("attribute", "latency"),
-    "external": ("external_kind", "service"),
+# The kinds whose model has required fields no default exists for, and the
+# placeholders `ab new` fills them with: the enum's first declared member
+# where an enum is involved, an obviously-replaceable string where the field
+# is free text — each named again in a comment in the element's body.
+PLACEHOLDER: dict[str, tuple[tuple[str, str], ...]] = {
+    "seam": (("style", "call"),),
+    "nfr": (("attribute", "latency"),),
+    "external": (("external_kind", "service"),),
+    "resource": (("resource_kind", "store"), ("technology", "replace me")),
+    "behavior": (("trigger", "replace me"),),
 }
 
 
@@ -154,11 +157,13 @@ def test_every_kind_scaffolds_a_loadable_round_trippable_file(store: Path, kind:
     assert loaded.errors == ()
     element = Index.from_design(resolve(loaded)).by_id[f"{kind.value}:probe"]
     assert element.title == "Probe"
-    if kind.value in PLACEHOLDER:
-        field, value = PLACEHOLDER[kind.value]
-        assert getattr(element, field).value == value
+    placeholders = PLACEHOLDER.get(kind.value, ())
+    for field, value in placeholders:
+        # `str()` spells an enum member as its value, so the comparison is
+        # the same one line for the enum placeholders and the free-text ones.
+        assert str(getattr(element, field)) == value
         assert "placeholder" in element.body
-    else:
+    if not placeholders:
         assert element.body == ""
 
 
@@ -294,3 +299,82 @@ def test_scaffolding_an_unknown_kind_names_the_culprit() -> None:
         scaffold("widget", "x")
 
     assert "widget" in str(raised.value)
+
+
+# --- the addendum's kinds --------------------------------------------------------
+
+
+def test_new_resource_lands_in_resources_with_both_placeholders(store: Path) -> None:
+    """A resource's two required fields have no defaults, so the template
+    fills both and owns up to both: `store` is the first `ResourceKind`
+    declared, and `replace me` is not a technology anybody would ship."""
+    result = new(store, "resource", "session-cache")
+
+    assert result.exit_code == ExitCode.OK
+    assert [path.name for path in (store / "resources").iterdir()] == ["session-cache.md"]
+    element = parse_element(
+        (store / "resources" / "session-cache.md").read_text(encoding="utf-8"),
+        model=Resource,
+        source="resources/session-cache.md",
+    )
+    assert element.resource_kind is ResourceKind.STORE
+    assert element.technology == "replace me"
+    assert "placeholder" in element.body
+
+
+def test_new_behavior_carries_the_worked_observation_example(store: Path) -> None:
+    """The behavior template is where an author first meets observations: the
+    worked example from addendum §3.3, commented out in the body, anchored to
+    THIS behavior's id so the `#obs-1` pattern is shown rather than described.
+    Observation ids are authored inline, never generated — the file starts
+    with zero observations, exactly as a story starts with no criteria."""
+    result = new(store, "behavior", "new-chat-session")
+
+    assert result.exit_code == ExitCode.OK
+    assert [path.name for path in (store / "behaviors").iterdir()] == ["new-chat-session.md"]
+    element = parse_element(
+        (store / "behaviors" / "new-chat-session.md").read_text(encoding="utf-8"),
+        model=Behavior,
+        source="behaviors/new-chat-session.md",
+    )
+    assert element.trigger == "replace me"
+    assert element.observations == ()
+    assert "behavior:new-chat-session#obs-1" in element.body
+    assert "outcome: must" in element.body
+    assert "timing: immediate" in element.body
+
+
+def test_the_scaffolded_kinds_are_what_ab_check_accepts(store: Path) -> None:
+    """`ab check` accepts both templates once the author's part is assumed:
+    an owner for each (`unknown` asks for one), and the observations the
+    behavior template deliberately does not generate — the one finding a
+    fresh behavior owes its authoring-not-being-done-yet, excluded here."""
+    assert new(store, "resource", "state-store", "--owner", "platform").exit_code == ExitCode.OK
+
+    result = runner.invoke(app, ["--store", str(store), "check"])
+
+    assert result.exit_code == ExitCode.OK
+    assert result.stdout == ""
+
+    assert new(store, "behavior", "emits", "--owner", "platform").exit_code == ExitCode.OK
+
+    result = runner.invoke(
+        app,
+        ["--store", str(store), "check", "--exclude-rule", "policy/behavior-needs-observations"],
+    )
+
+    assert result.exit_code == ExitCode.OK
+    assert result.stdout == ""
+
+
+@pytest.mark.parametrize("kind", ["resource", "behavior"])
+def test_print_is_byte_stable_for_the_new_kinds(store: Path, kind: str) -> None:
+    """Two `--print` runs agree, and agree with the file a write would have
+    produced: the template is a function of the slug, nothing else."""
+    first = new(store, kind, "probe", "--print")
+    second = new(store, kind, "probe", "--print")
+
+    assert first.exit_code == ExitCode.OK
+    assert first.stdout == second.stdout
+    assert new(store, kind, "probe").exit_code == ExitCode.OK
+    assert first.stdout == ((store / f"{kind}s" / "probe.md").read_text(encoding="utf-8") + "\n")

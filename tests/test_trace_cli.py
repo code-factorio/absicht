@@ -215,6 +215,21 @@ def test_the_walk_reports_the_hops_it_declined_as_a_cycle_hit() -> None:
     assert _document("requirement:cancel-orders", "--down")["cycle_hit"] is True
 
 
+def test_the_addendums_edges_join_the_downward_walk_too() -> None:
+    """The up-walk pins above reach the addendum's edges through
+    `realizes`; downward from a behavior the three are each a first hop:
+    `realizes` to the requirement, `supersedes` to the replaced behavior, an
+    observation's `at` to what it watches (a resource, or another behavior —
+    composition). `iter_references` yields all three, so no trace-side kind
+    filter could drop one without the index noticing."""
+    paths = [_steps(path) for path in _document("behavior:order-placed-v2", "--down")["paths"]]
+
+    assert (("realizes", "down", "requirement:cancel-orders"),) in paths
+    assert (("supersedes", "down", "behavior:order-placed"),) in paths
+    assert (("at", "down", "resource:order-cache"),) in paths
+    assert (("at", "down", "behavior:order-placed"),) in paths
+
+
 # --- the formats -----------------------------------------------------------------
 
 

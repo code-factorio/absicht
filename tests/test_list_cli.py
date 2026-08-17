@@ -16,6 +16,12 @@ What these tests pin, per ``docs/tasks/22-list.md``:
 - the one ``Kind``/``Design`` field-name mismatch (``nfr`` vs
   ``non_functionals``) is handled — pinned by asking for a kind no fixture
   stores yet and getting an empty answer rather than a crash.
+
+Since the model addendum: ``resource`` and ``behavior`` list like every other
+kind; ``--lifecycle`` filters the behavior's second axis (§5 — a behavior can
+be perfectly `specified` and no longer true); and §7's owner inheritance
+joins `--owner`/`--unowned`, so an unowned `unknown` answers to the single
+element referencing it that carries an owner — one level, never stored.
 """
 
 from __future__ import annotations
@@ -24,6 +30,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+import pytest
 from typer.testing import CliRunner
 
 from absicht.cli import app
@@ -184,3 +191,121 @@ def test_the_nfr_kind_maps_to_its_differently_spelled_field() -> None:
 
     assert result.exit_code == ExitCode.OK
     assert result.stdout == ""
+
+
+# --- the addendum's kinds --------------------------------------------------------
+
+
+def test_the_new_kinds_list_like_every_other_kind() -> None:
+    """`resource` and `behavior` are plain `Kind`s — same rows, same envelope
+    — and the behavior's own second axis rides in the element like any
+    field, which is what `--lifecycle` then selects on."""
+    assert _ids(CLEAN, "resource") == ["resource:order-cache"]
+
+    document = json.loads(_list(CLEAN, "behavior", "--format", "json").stdout)
+
+    assert document["kind"] == "behavior"
+    by_id = {element["id"]: element for element in document["elements"]}
+    assert by_id["behavior:order-placed"]["lifecycle"] == "superseded"
+
+
+def test_lifecycle_filters_behaviors_second_axis() -> None:
+    """`--lifecycle` is the axis `state` is not (addendum §5).
+    `behavior:order-placed` is the clean fixture's superseded one; its
+    replacement and the catalog behavior stay active."""
+    assert _ids(CLEAN, "behavior", "--lifecycle", "superseded") == ["behavior:order-placed"]
+    assert _ids(CLEAN, "behavior", "--lifecycle", "active") == [
+        "behavior:catalog-browsable",
+        "behavior:order-placed-v2",
+    ]
+
+
+def test_lifecycle_on_a_kind_without_the_axis_is_usage() -> None:
+    """Only behaviors carry the axis. Silently ignoring the flag would answer
+    `ab list component --lifecycle superseded` with every component — a lie
+    about the filter, worse than a refusal."""
+    result = _list(CLEAN, "component", "--lifecycle", "active")
+
+    assert result.exit_code == ExitCode.USAGE
+    assert "--lifecycle" in result.stderr
+    assert result.stdout == ""
+
+
+# --- §7 owner inheritance --------------------------------------------------------
+
+
+@pytest.fixture
+def inheritance(tmp_path: Path) -> Path:
+    """§7's owner inheritance in the smallest store that holds it:
+    `requirement:inherits` is an unowned `unknown` whose one referencing
+    element carries an owner; `requirement:self-owned` has an owner of its
+    own; `component:contested` is referenced by two elements with two
+    different owners. No fixture carries an owner on a referencing element,
+    and growing one would move other tickets' exact-match worklist
+    assertions — the case gets a store of its own instead."""
+    root = tmp_path / "inheritance"
+    _write(root, "system.yaml", "id: system:inheritance\ntitle: Inheritance\nstate: specified\n")
+    _write(
+        root,
+        "requirements/inherits.md",
+        "---\nid: requirement:inherits\ntitle: Inherits\nstate: unknown\n---\n",
+    )
+    _write(
+        root,
+        "requirements/self-owned.md",
+        "---\nid: requirement:self-owned\ntitle: Self owned\nstate: unknown\nowner: qa\n---\n",
+    )
+    _write(
+        root,
+        "components/contested.md",
+        "---\nid: component:contested\ntitle: Contested\nstate: unknown\n---\n",
+    )
+    _write(
+        root,
+        "requirements/by-a.md",
+        "---\nid: requirement:by-a\ntitle: By A\nstate: specified\nowner: team-a\nrealized_by:\n"
+        "- component:contested\n---\n",
+    )
+    _write(
+        root,
+        "requirements/by-b.md",
+        "---\nid: requirement:by-b\ntitle: By B\nstate: specified\nowner: team-b\nrealized_by:\n"
+        "- component:contested\n---\n",
+    )
+    _write(
+        root,
+        "stories/carrier.md",
+        "---\nid: story:carrier\ntitle: Carrier\nstate: specified\nowner: platform\nsatisfies:\n"
+        "- requirement:inherits\n- requirement:self-owned\n---\n",
+    )
+    return root
+
+
+def _write(root: Path, rel: str, text: str) -> None:
+    path = root / rel
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+
+
+def test_owner_groups_the_unknown_that_inherits_its_referencers(
+    inheritance: Path,
+) -> None:
+    """`--owner platform` answers with `requirement:inherits` even though its
+    own `owner` is empty: grouping by owner is where §7's inheritance lives,
+    and the group that would own the unknown is the one that referenced it."""
+    assert _ids(inheritance, "requirement", "--owner", "platform") == ["requirement:inherits"]
+
+
+def test_an_element_with_its_own_owner_is_never_overridden(inheritance: Path) -> None:
+    """`story:carrier` (owned by platform) satisfies both requirements, but
+    `requirement:self-owned` answers to qa alone: inheritance is for the
+    ownerless, and an authored owner always stands."""
+    assert _ids(inheritance, "requirement", "--owner", "qa") == ["requirement:self-owned"]
+
+
+def test_unowned_means_no_owner_not_even_an_inherited_one(inheritance: Path) -> None:
+    """The inherited side of the same coin: an unknown that answers to
+    platform leaves `--unowned`, while `component:contested` — referenced by
+    an owner and another owner — stays ownerless: ambiguity is not a guess."""
+    assert _ids(inheritance, "requirement", "--unowned") == []
+    assert _ids(inheritance, "component", "--unowned") == ["component:contested"]

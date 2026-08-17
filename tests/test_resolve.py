@@ -29,8 +29,15 @@ from pathlib import Path
 import pytest
 
 from absicht.load import load_store
-from absicht.models import Component, Design, Requirement, Story, System
-from absicht.resolve import Index, Reference, ResolveError, iter_references, resolve
+from absicht.models import Component, Design, Requirement, State, Story, System
+from absicht.resolve import (
+    Index,
+    Reference,
+    ResolveError,
+    inherited_owners,
+    iter_references,
+    resolve,
+)
 
 FIXTURES = Path(__file__).parent / "fixtures" / "systems"
 
@@ -240,3 +247,57 @@ def test_orphaned_reports_the_one_element_nothing_points_at() -> None:
     # orphan `ab list --orphaned` exists to surface.
     assert index.orphaned() == ("system:tiny", "story:s", "component:loner")
     assert index.orphaned("component") == ("component:loner",)
+
+
+def test_inherited_owners_is_section_sevens_rule_over_the_index() -> None:
+    """The §7 map `ab gaps` and `ab list --owner` both read: an unowned
+    `unknown` inherits the owner of the single element referencing it — one
+    level (a referencer's own inherited owner is never chained on), never
+    stored. An own owner, a second referencing owner, an ownerless
+    referencer, or a finished state means no entry."""
+    design = Design(
+        system=System(id="system:tiny", title="Tiny", state=State.SPECIFIED, owner="a"),
+        components=(
+            Component(id="component:watched", title="Watched"),
+            Component(id="component:owned", title="Owned", owner="qa"),
+            Component(id="component:contested", title="Contested"),
+            Component(id="component:deep", title="Deep"),
+            # A finished unknown: inheritance is §7's rule about *unknowns*,
+            # and an `observed` element does not acquire an owner by it.
+            Component(id="component:seen", title="Seen", state=State.OBSERVED),
+        ),
+        requirements=(
+            Requirement(
+                id="requirement:carrier",
+                title="Carrier",
+                state=State.SPECIFIED,
+                owner="platform",
+                realized_by=(
+                    "component:watched",
+                    "component:owned",
+                    "component:contested",
+                    "component:seen",
+                ),
+            ),
+            Requirement(id="requirement:mid", title="Mid", realized_by=("component:deep",)),
+        ),
+        stories=(
+            Story(
+                id="story:top",
+                title="Top",
+                state=State.SPECIFIED,
+                owner="platform",
+                satisfies=("requirement:mid",),
+            ),
+        ),
+    )
+
+    index = Index.from_design(design)
+
+    assert inherited_owners(index) == {
+        "component:watched": "platform",  # exactly one referencing owner
+        "requirement:mid": "platform",  # ditto, through the story
+    }
+    # component:owned carries qa; :contested has two referencing owners;
+    # :seen is observed, not unknown; :deep's only referencer (requirement:mid)
+    # has no owner of its own, and mid's inherited one is not chained on.
