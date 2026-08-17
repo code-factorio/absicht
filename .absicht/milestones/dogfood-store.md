@@ -5,6 +5,8 @@ state: constrained
 owner: vfeenstr
 outcome: absicht's own design truth lives in .absicht/ and every ab command
   reads a store that describes absicht
+must_hold:
+- decision:trace-answers-are-bounded
 includes:
 - story:represent-the-design
 scope:

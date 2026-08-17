@@ -198,6 +198,12 @@ reports that owner on its line, marked `(inherited)` — and as
 Traceability paths through the graph: requirement to component to seam to
 decision, in either direction.
 
+Enumeration is bounded: a dense graph holds exponentially many simple paths,
+so the walk carries a budget — 1000 paths, spent in deterministic walk order
+— and says `truncated` in every format when the answer was cut short rather
+than complete. The site's traceability page shows the first 50 per
+requirement and spells its own cut.
+
 - `--to REF` paths between two elements
 - `--up` / `--down` direction. Default both
 - `--format {text,json,mermaid}`
