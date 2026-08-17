@@ -552,13 +552,18 @@ def test_packet_markdown_carries_every_obligation_and_each_scope_block() -> None
     # The ring stays summarized to one line, never a block of its own.
     assert "- `seam:edge` — Edge" in document
     assert "### Edge" not in document
-    # Every obligation section lists what it carries, not `(none)`.
-    assert "- `decision:adr`" in document
-    assert "- `nfr:latency`" in document
-    assert "- the retry policy" in document
-    assert "- `question:q`" in document
-    assert "- `rejection:big-bang`" in document
-    assert "(none)" not in document
+    # Every obligation section lists what it carries, not `(none)` — checked
+    # per section, because the behavior sections legitimately spell an empty
+    # list out (nothing to satisfy is a fact an agent acts on).
+    for heading, carried in (
+        ("## Must hold", "- `decision:adr`"),
+        ("## May decide", "- the retry policy"),
+        ("## Unresolved", "- `question:q`"),
+        ("## Rejections", "- `rejection:big-bang`"),
+    ):
+        section = document.split(heading, 1)[1].split("\n## ", 1)[0]
+        assert carried in section
+        assert "(none)" not in section
     # A two-line given joins with ", "; a structural criterion carries its
     # statement under its kind.
     assert "given a user, an order; when the user cancels; then it works" in document
@@ -582,6 +587,139 @@ def test_packet_markdown_drops_the_dash_when_the_outcome_is_empty() -> None:
     )
 
     assert "`milestone:m`\n\n## Scope\n\n(none)" in document
+
+
+def _behavior_packet() -> Packet:
+    """One packet carrying both behavior lists with everything
+    docs/tasks/57-packet-behaviors.md demands of the document: a satisfy
+    behavior composing another behavior one hop out, which references a third
+    without expanding it, and a must-not-break observation with no timing to
+    spell. Built by hand like `_packet_document`, for the same reason: what is
+    under test is the rendering of the model, not the selection that fills it."""
+
+    def observation(
+        observation_id: str, statement: str, at: str, outcome: str, effective: str | None
+    ) -> dict[str, object]:
+        """One observation exactly as assembly carries it: the authored dump
+        with the derived ``effective_timing`` beside it."""
+        return {
+            "id": observation_id,
+            "statement": statement,
+            "at": at,
+            "outcome": outcome,
+            "timing": None,
+            "effective_timing": effective,
+        }
+
+    def behavior(ref: str, title: str, observations: list[dict[str, object]]) -> PacketElement:
+        return PacketElement(
+            ref=ref,
+            fidelity=Fidelity.FULL,
+            element={
+                "id": ref,
+                "title": title,
+                "trigger": f"{title} happens.",
+                "lifecycle": "active",
+                "observations": observations,
+            },
+        )
+
+    return Packet(
+        milestone="milestone:m",
+        outcome="The thing keeps working.",
+        elements=(
+            PacketElement(
+                ref="milestone:m",
+                fidelity=Fidelity.FULL,
+                element={"id": "milestone:m", "title": "M"},
+            ),
+            PacketElement(
+                ref="component:core",
+                fidelity=Fidelity.FULL,
+                element={"id": "component:core", "title": "Core"},
+            ),
+            behavior(
+                "behavior:a",
+                "A happens",
+                [
+                    observation(
+                        "behavior:a#obs-1",
+                        "A observes the core",
+                        "component:core",
+                        "must",
+                        "immediate",
+                    ),
+                    observation(
+                        "behavior:a#obs-2", "A makes B occur", "behavior:b", "must", "eventual"
+                    ),
+                ],
+            ),
+            behavior(
+                "behavior:b",
+                "B happens",
+                [
+                    observation(
+                        "behavior:b#obs-1", "B makes C occur", "behavior:c", "must", "eventual"
+                    )
+                ],
+            ),
+            behavior(
+                "behavior:guard",
+                "The guard holds",
+                [
+                    observation(
+                        "behavior:guard#obs-1", "Nothing leaks", "resource:log", "must_not", None
+                    )
+                ],
+            ),
+        ),
+        satisfy=("behavior:a",),
+        must_not_break=("behavior:guard",),
+    )
+
+
+def test_packet_markdown_separates_the_two_behavior_lists() -> None:
+    document = packet_markdown(_behavior_packet())
+
+    satisfy_at = document.index("## Behaviors to satisfy")
+    not_break_at = document.index("## Behaviors that must not break")
+    # Two clearly separated sections, the work before the guardrails.
+    assert satisfy_at < not_break_at
+    satisfy_section = document[satisfy_at:not_break_at]
+    # The satisfy block with its observations, the effective timing spelled so
+    # the agent never computes a default.
+    assert "### A happens" in satisfy_section
+    assert "`behavior:a`" in satisfy_section
+    assert (
+        "- `behavior:a#obs-1` — A observes the core (must, immediate, at component:core)"
+        in satisfy_section
+    )
+    assert (
+        "- `behavior:a#obs-2` — A makes B occur (must, eventual, at behavior:b)" in satisfy_section
+    )
+    # The must-not-break section leads with the addendum's framing: standing
+    # expectations, and breaking one is a regression.
+    not_break_section = document[not_break_at:]
+    assert "standing expectations" in not_break_section
+    assert "regression" in not_break_section
+    # A `must_not` observation has no when to spell.
+    assert "### The guard holds" in not_break_section
+    assert (
+        "- `behavior:guard#obs-1` — Nothing leaks (must_not, at resource:log)" in not_break_section
+    )
+    # Behaviors the sections own do not duplicate into Scope.
+    scope = document.split("## Scope", 1)[1].split("\n## ", 1)[0]
+    assert "behavior:" not in scope
+
+
+def test_packet_markdown_expands_composition_one_hop_and_no_further() -> None:
+    document = packet_markdown(_behavior_packet())
+
+    # B joins under the behavior that composes it, observations included.
+    assert "#### Composes: `behavior:b` — B happens" in document
+    assert "- `behavior:b#obs-1` — B makes C occur (must, eventual, at behavior:c)" in document
+    # C stays what that observation references — expanded nowhere.
+    assert "Composes: `behavior:c`" not in document
 
 
 # --- the site --------------------------------------------------------------------

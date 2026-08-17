@@ -24,7 +24,12 @@ is ``tests/test_packet.py``'s; here it is the command around it:
   tree's;
 - the judgement calls the spec leaves open are pinned, not left untested:
   ``--stdout --seal`` is a usage error (a seal with nowhere durable to put the
-  lock), and ``--no-features --seal`` too (a digest over zero files).
+  lock), and ``--no-features --seal`` too (a digest over zero files);
+- the addendum's behavior content (``docs/tasks/57-packet-behaviors.md``) read
+  off a store an author wrote: the satisfy and must-not-break lists in both
+  formats, the two md sections with the regression framing and the effective
+  timing spelled per observation, and the byte-identical artifact §8's
+  regenerate-rather-than-store premise rests on.
 """
 
 from __future__ import annotations
@@ -506,3 +511,134 @@ def test_a_future_run_store_fails_the_command_before_it_writes(tmp_path: Path) -
     assert result.exit_code == ExitCode.SCHEMA_MISMATCH
     assert "runs.db" in result.stderr
     assert not (tmp_path / "out").exists()
+
+
+# ------------------------------------------------------- behaviors (57)
+
+
+def _behavior_store(tmp_path: Path) -> Path:
+    """The clean fixture plus the behaviors ``docs/tasks/57`` adds around its
+    scope: one the milestone must newly satisfy, one standing guard over the
+    scope component, one touching nothing in scope — the two behavior lists,
+    read end to end off a store an author wrote."""
+    root = tmp_path / "store"
+    shutil.copytree(CLEAN, root)
+    (root / "behaviors" / "cancel-audit.md").write_text(
+        "---\n"
+        "id: behavior:cancel-audit\n"
+        "title: Cancel audit\n"
+        "state: specified\n"
+        "trigger: A customer cancels an order.\n"
+        "observations:\n"
+        "- id: behavior:cancel-audit#obs-1\n"
+        "  statement: The cancellation is audited\n"
+        "  at: component:cancellation\n"
+        "  outcome: must\n"
+        "---\n",
+        encoding="utf-8",
+    )
+    (root / "behaviors" / "guard.md").write_text(
+        "---\n"
+        "id: behavior:guard\n"
+        "title: Order guard\n"
+        "state: specified\n"
+        "trigger: Anything cancels an order.\n"
+        "observations:\n"
+        "- id: behavior:guard#obs-1\n"
+        "  statement: No cancellation is audited twice\n"
+        "  at: component:cancellation\n"
+        "  outcome: must_not\n"
+        "---\n",
+        encoding="utf-8",
+    )
+    (root / "behaviors" / "catalog-telemetry.md").write_text(
+        "---\n"
+        "id: behavior:catalog-telemetry\n"
+        "title: Catalog telemetry\n"
+        "state: specified\n"
+        "trigger: A customer opens the catalog.\n"
+        "observations:\n"
+        "- id: behavior:catalog-telemetry#obs-1\n"
+        "  statement: The catalog view is counted\n"
+        "  at: component:catalog\n"
+        "  outcome: must\n"
+        "---\n",
+        encoding="utf-8",
+    )
+    milestone = root / "milestones" / "m1.md"
+    milestone.write_text(
+        milestone.read_text(encoding="utf-8").replace(
+            "includes:\n- story:cancel-order\n",
+            "includes:\n- story:cancel-order\n- behavior:cancel-audit\n",
+        ),
+        encoding="utf-8",
+    )
+    return root
+
+
+def test_the_behavior_lists_reach_the_command_output(tmp_path: Path) -> None:
+    store = _behavior_store(tmp_path)
+
+    result = _packet("--stdout", "--format", "json", "--no-features", store=store)
+
+    assert result.exit_code == ExitCode.OK
+    document = json.loads(result.stdout)
+    assert document["satisfy"] == ["behavior:cancel-audit"]
+    assert document["must_not_break"] == ["behavior:guard"]
+    fidelities = {element["ref"]: element["fidelity"] for element in document["elements"]}
+    assert fidelities["behavior:cancel-audit"] == "full"
+    assert fidelities["behavior:guard"] == "full"
+    # Touching nothing in scope is touching no list: the telemetry behavior
+    # rides in no ring the horizon finds from cancellation either.
+    assert "behavior:catalog-telemetry" not in fidelities
+    # The carried observations spell the effective timing beside the authored.
+    audit = next(e for e in document["elements"] if e["ref"] == "behavior:cancel-audit")
+    (observation,) = audit["observations"]
+    assert observation["effective_timing"] == "immediate"
+
+
+def test_the_md_document_carries_both_behavior_sections(tmp_path: Path) -> None:
+    store = _behavior_store(tmp_path)
+
+    result = _packet("--stdout", "--no-features", store=store)
+
+    assert result.exit_code == ExitCode.OK
+    document = result.stdout
+    assert "## Behaviors to satisfy" in document
+    assert "### Cancel audit" in document
+    assert (
+        "- `behavior:cancel-audit#obs-1` — The cancellation is audited "
+        "(must, immediate, at component:cancellation)" in document
+    )
+    # The must-not-break section leads with the addendum's framing.
+    not_break_at = document.index("## Behaviors that must not break")
+    assert "standing expectations" in document[not_break_at:]
+    assert "regression" in document[not_break_at:]
+    assert "### Order guard" in document[not_break_at:]
+    assert (
+        "- `behavior:guard#obs-1` — No cancellation is audited twice "
+        "(must_not, at component:cancellation)" in document[not_break_at:]
+    )
+
+
+def test_the_same_store_assembles_a_byte_identical_artifact(tmp_path: Path) -> None:
+    """§8's premise end to end: regeneration replaces storage, so the same
+    store re-packeted must land the same bytes — both formats, lists included."""
+    store = _behavior_store(tmp_path)
+
+    for name in ("one", "two"):
+        for output_format in ("md", "json"):
+            result = _packet(
+                "--out",
+                str(tmp_path / name),
+                "--no-features",
+                "--format",
+                output_format,
+                store=store,
+            )
+            assert result.exit_code == ExitCode.OK
+
+    for artifact in ("packet.md", "packet.json"):
+        assert (tmp_path / "one" / artifact).read_bytes() == (
+            tmp_path / "two" / artifact
+        ).read_bytes()

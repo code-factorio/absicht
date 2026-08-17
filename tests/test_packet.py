@@ -20,6 +20,11 @@ What these tests pin:
   not include) plus the acceptance of the included stories, deduplicated.
 - A milestone with no scope is a finding about the design, not a usage error:
   the milestone exists, it is just unusable as a packet target.
+- The addendum's behavior content (docs/tasks/57-packet-behaviors.md):
+  ``satisfy`` as ``includes`` filtered to behavior refs, ``must_not_break`` as
+  the active behaviors touching scope minus satisfy (superseded never), the
+  one-hop composition expansion, and the effective timing carried beside every
+  observation so an agent never computes a default.
 """
 
 from __future__ import annotations
@@ -31,21 +36,28 @@ import pytest
 from absicht.findings import Severity
 from absicht.load import load_store
 from absicht.models import (
+    Behavior,
     Component,
     Criterion,
     Decision,
     Design,
     Fidelity,
+    Lifecycle,
     Milestone,
     NonFunctional,
+    Observation,
+    Outcome,
     Packet,
     QualityAttribute,
     Question,
     Rejection,
+    Resource,
+    ResourceKind,
     Seam,
     SeamStyle,
     Story,
     System,
+    Timing,
 )
 from absicht.packet import PacketFindingError, PacketUsageError, assemble
 from absicht.resolve import Index, resolve
@@ -455,3 +467,294 @@ def test_a_scope_member_nothing_points_at_still_expands_outward() -> None:
         "component:solo": Fidelity.FULL,
         "seam:feed": Fidelity.CONTRACT,
     }
+
+
+# --------------------------------------------- behaviors (docs/tasks/57)
+
+
+def _assembled(design: Design, milestone: str) -> Packet:
+    """``assemble`` over an inline design at the default horizon, nothing
+    forced either way — the shape every behavior test below starts from."""
+    return assemble(
+        design,
+        Index.from_design(design),
+        milestone,
+        horizon=1,
+        include=frozenset(),
+        exclude=frozenset(),
+    )
+
+
+def _behavior(
+    behavior_id: str,
+    *,
+    at: tuple[str, ...],
+    lifecycle: Lifecycle = Lifecycle.ACTIVE,
+    observations: tuple[Observation, ...] = (),
+) -> Behavior:
+    """One behavior with a generated ``must`` observation per ``at`` ref,
+    ``obs-N`` in the order authored — unless the test spells the observations
+    itself, which the timing tests do because a generated one carries no
+    authored timing to win with."""
+    return Behavior(
+        id=behavior_id,
+        title=behavior_id.removeprefix("behavior:"),
+        trigger=f"{behavior_id.removeprefix('behavior:')} happens.",
+        lifecycle=lifecycle,
+        observations=observations
+        or tuple(
+            Observation(
+                id=f"{behavior_id}#obs-{position}",
+                statement=f"observes {target}",
+                at=target,
+            )
+            for position, target in enumerate(at, start=1)
+        ),
+    )
+
+
+def _selection_store() -> Design:
+    """One behavior on each side of the must-not-break rule: an active guard
+    touching scope (in), an active behavior touching only elsewhere (out), a
+    superseded one touching scope (out — §5 says it stops being packet input),
+    and the must-satisfy behavior the milestone names (the work, never
+    repeated as a standing expectation)."""
+    core, elsewhere = "component:core", "component:elsewhere"
+    return Design(
+        system=System(id="system:selection", title="Selection"),
+        components=(
+            Component(id=core, title="Core"),
+            Component(id=elsewhere, title="Elsewhere"),
+        ),
+        behaviors=(
+            _behavior("behavior:guard", at=(core,)),
+            _behavior("behavior:far", at=(elsewhere,)),
+            _behavior("behavior:old", at=(core,), lifecycle=Lifecycle.SUPERSEDED),
+            _behavior("behavior:new-work", at=(core,)),
+        ),
+        milestones=(
+            Milestone(id="milestone:m", title="M", includes=("behavior:new-work",), scope=(core,)),
+        ),
+    )
+
+
+def test_satisfy_is_the_milestones_includes_filtered_to_behavior_refs() -> None:
+    assert _assembled(_selection_store(), "milestone:m").satisfy == ("behavior:new-work",)
+
+
+def test_must_not_break_is_active_behaviors_touching_scope_minus_satisfy() -> None:
+    packet = _assembled(_selection_store(), "milestone:m")
+
+    # guard touches scope and is active: in. far touches only elsewhere: out.
+    # old touches scope but is superseded: out. new-work is the satisfy set
+    # itself, not a standing expectation about work it is doing: out.
+    assert packet.must_not_break == ("behavior:guard",)
+
+
+def test_the_behavior_lists_enter_elements_at_full_fidelity_with_observations() -> None:
+    packet = _assembled(_selection_store(), "milestone:m")
+    by_ref = {element.ref: element for element in packet.elements}
+
+    # Observations included: the satisfy list is the work, and an expectation
+    # that may not be broken is only actionable verbatim.
+    assert by_ref["behavior:new-work"].fidelity is Fidelity.FULL
+    assert by_ref["behavior:guard"].fidelity is Fidelity.FULL
+    assert [obs["id"] for obs in by_ref["behavior:guard"].element["observations"]] == [
+        "behavior:guard#obs-1"
+    ]
+    # A superseded behavior stays what the ring made it — contract context,
+    # never behavior content — even though it touches scope like the guard.
+    assert by_ref["behavior:old"].fidelity is Fidelity.CONTRACT
+
+
+def _chain_store() -> Design:
+    """The addendum's own A→B→C: the milestone selects A, A composes B, B
+    composes C, and C touches nothing in scope — so the packet carries A and B
+    with observations and references C without expanding it."""
+    return Design(
+        system=System(id="system:chain", title="Chain"),
+        components=(
+            Component(id="component:core", title="Core"),
+            Component(id="component:away", title="Away"),
+        ),
+        behaviors=(
+            _behavior("behavior:a", at=("component:core", "behavior:b")),
+            _behavior("behavior:b", at=("behavior:c",)),
+            _behavior("behavior:c", at=("component:away",)),
+        ),
+        milestones=(
+            Milestone(
+                id="milestone:m", title="M", includes=("behavior:a",), scope=("component:core",)
+            ),
+        ),
+    )
+
+
+def test_composition_expands_exactly_one_hop_from_each_included_behavior() -> None:
+    packet = _assembled(_chain_store(), "milestone:m")
+    by_ref = {element.ref: element for element in packet.elements}
+
+    assert packet.satisfy == ("behavior:a",)
+    # B joins with its own observations although it touches nothing in scope —
+    # one hop from A is reason enough. C, two hops from the root, does not
+    # join, and no list claims it either.
+    assert packet.must_not_break == ()
+    assert by_ref["behavior:a"].fidelity is Fidelity.FULL
+    assert by_ref["behavior:b"].fidelity is Fidelity.FULL
+    assert "behavior:c" not in by_ref
+    # C is still referenced — B's observation asserts it occurs — which is how
+    # "references without expanding" survives serialization.
+    assert [obs["at"] for obs in by_ref["behavior:b"].element["observations"]] == ["behavior:c"]
+
+
+def _cycle_store() -> Design:
+    """Composition cycles — the mutual X↔Y and the self-composing Z — which
+    `ab check` reports and `ab packet` must survive: assembly walks possibly
+    unchecked input and cannot hang on it."""
+    return Design(
+        system=System(id="system:cycle", title="Cycle"),
+        components=(Component(id="component:core", title="Core"),),
+        behaviors=(
+            _behavior("behavior:x", at=("component:core", "behavior:y")),
+            _behavior("behavior:y", at=("behavior:x",)),
+            _behavior("behavior:z", at=("behavior:z",)),
+        ),
+        milestones=(
+            Milestone(
+                id="milestone:m",
+                title="M",
+                includes=("behavior:x", "behavior:z"),
+                scope=("component:core",),
+            ),
+        ),
+    )
+
+
+def test_composition_cycles_terminate_instead_of_hanging() -> None:
+    packet = _assembled(_cycle_store(), "milestone:m")
+
+    assert packet.satisfy == ("behavior:x", "behavior:z")
+    # Y joins once, one hop from X; X composing Y and Y composing X cannot
+    # re-enter the walk, and Z's self-composition joins nothing new.
+    assert packet.must_not_break == ()
+    assert {element.ref: element.fidelity for element in packet.elements} == {
+        "milestone:m": Fidelity.FULL,
+        "component:core": Fidelity.FULL,
+        "behavior:x": Fidelity.FULL,
+        "behavior:y": Fidelity.FULL,
+        "behavior:z": Fidelity.FULL,
+    }
+
+
+def _timing_store() -> Design:
+    """Every row of §1.2's table plus the authored-wins rule, one observation
+    each: a stream and a store left unsaid, an authored timing over the
+    `immediate` default, and a `must_not` with no when at all."""
+    return Design(
+        system=System(id="system:timing", title="Timing"),
+        components=(Component(id="component:core", title="Core"),),
+        resources=(
+            Resource(
+                id="resource:events",
+                title="Events",
+                resource_kind=ResourceKind.STREAM,
+                technology="Kafka",
+            ),
+            Resource(
+                id="resource:db",
+                title="Database",
+                resource_kind=ResourceKind.STORE,
+                technology="Postgres",
+            ),
+        ),
+        behaviors=(
+            Behavior(
+                id="behavior:timed",
+                title="Timed",
+                trigger="Something happens.",
+                observations=(
+                    Observation(
+                        id="behavior:timed#obs-1",
+                        statement="unsaid, over a stream",
+                        at="resource:events",
+                    ),
+                    Observation(
+                        id="behavior:timed#obs-2",
+                        statement="unsaid, over a store",
+                        at="resource:db",
+                    ),
+                    Observation(
+                        id="behavior:timed#obs-3",
+                        statement="said, and it wins",
+                        at="component:core",
+                        timing=Timing.EVENTUAL,
+                    ),
+                    Observation(
+                        id="behavior:timed#obs-4",
+                        statement="never, at no point",
+                        at="resource:db",
+                        outcome=Outcome.MUST_NOT,
+                    ),
+                ),
+            ),
+        ),
+        milestones=(
+            Milestone(
+                id="milestone:m", title="M", includes=("behavior:timed",), scope=("component:core",)
+            ),
+        ),
+    )
+
+
+def test_carried_observations_spell_their_effective_timing() -> None:
+    packet = _assembled(_timing_store(), "milestone:m")
+
+    behavior = next(element for element in packet.elements if element.ref == "behavior:timed")
+    observations = behavior.element["observations"]
+
+    assert [observation["effective_timing"] for observation in observations] == [
+        "eventual",  # §1.2: a stream defaults eventual, asserted by consuming it
+        "immediate",  # a store defaults immediate
+        "eventual",  # an authored timing wins over the immediate default
+        None,  # must_not means "at no point": no when to spell
+    ]
+    # The authored side stays what the file said — additive, never rewritten.
+    assert [observation["timing"] for observation in observations] == [None, None, "eventual", None]
+
+
+def test_no_note_ref_appears_anywhere_in_the_serialized_packet(tmp_path: Path) -> None:
+    """§6: an agent never sees a note. Notes are structurally outside
+    `Design`, so assembly cannot reach one — pinned against a store that
+    actually carries a note pointed straight at the scope."""
+    store = tmp_path / "store"
+    (store / "components").mkdir(parents=True)
+    (store / "milestones").mkdir()
+    (store / "notes").mkdir()
+    (store / "system.yaml").write_text("id: system:noted\ntitle: Noted\n", encoding="utf-8")
+    (store / "components" / "core.md").write_text(
+        "---\nid: component:core\ntitle: Core\n---\n", encoding="utf-8"
+    )
+    (store / "milestones" / "m.md").write_text(
+        "---\nid: milestone:m\ntitle: M\nscope:\n- component:core\n---\n", encoding="utf-8"
+    )
+    (store / "notes" / "about-core.md").write_text(
+        "---\nid: note:k1j2k3\nref: component:core\ncreated: 2026-08-16\n---\n"
+        "The packet must never carry this.\n",
+        encoding="utf-8",
+    )
+
+    packet = _assembled(resolve(load_store(store)), "milestone:m")
+
+    assert "note:" not in packet.model_dump_json()
+
+
+def test_the_same_design_and_milestone_assemble_identically() -> None:
+    """§8's premise — the artifact is deterministic from milestone plus design
+    rev — pinned at the source: two assemblies of one store agree byte for
+    byte, lists included."""
+    design = _selection_store()
+
+    assert (
+        _assembled(design, "milestone:m").model_dump_json()
+        == _assembled(design, "milestone:m").model_dump_json()
+    )
