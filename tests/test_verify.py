@@ -22,6 +22,14 @@ Then 41's seven rules, each as the pair ``verification.md`` asks of every
 rule: a sealed packet and a repo diff that trip it, and the same shape not
 tripping it — plus one end-to-end run against a packet sealed for real from
 ``clean/``, over a repo built to satisfy all seven at once.
+
+``docs/tasks/59-verify-observations.md`` adds the eighth, over the packet's
+behaviors rather than its diff: every ``must``/``must_not`` observation of the
+satisfy and must-not-break sets has something referencing it. The three
+outcomes the addendum's §9 table names are pinned per observation —
+``checked`` with evidence, ``no_check`` as the finding, ``advisory`` for a
+``should``, reported in the summary and never in the exit code — and every
+observation lands in the run store beside the criteria.
 """
 
 from __future__ import annotations
@@ -47,18 +55,24 @@ from absicht.gherkin import scenario_digest
 from absicht.git import current_rev
 from absicht.models import (
     SCHEMA_VERSION,
+    Behavior,
     Component,
     Criterion,
     Decision,
     DecisionStatus,
     Element,
     Fidelity,
+    Observation,
+    Outcome,
     Packet,
     PacketElement,
     PacketLock,
+    Resource,
+    ResourceKind,
     Seam,
     SeamStyle,
     State,
+    Timing,
 )
 from absicht.runstore import RunResult
 
@@ -305,7 +319,13 @@ def test_an_empty_report_is_an_empty_pass(sealed: tuple[Path, Path], tmp_path: P
     assert plain.exit_code == ExitCode.OK
     assert plain.stdout == ""
     assert written.read_text(encoding="utf-8") == ""
-    assert json.loads(as_json.stdout) == {"schema_version": SCHEMA_VERSION, "findings": []}
+    # The observation summary rides in every verify envelope, empty or not:
+    # an additive field, so the machine shape is stable run to run.
+    assert json.loads(as_json.stdout) == {
+        "schema_version": SCHEMA_VERSION,
+        "findings": [],
+        "summary": {"unchecked_should": 0, "advisories": []},
+    }
 
 
 def test_rule_and_exclude_rule_select_which_rules_run(
@@ -503,7 +523,7 @@ def _rule(ctx: verify.VerifyContext, rule_id: str) -> tuple[Finding, ...]:
     return verify.run_rules(ctx, include=frozenset({rule_id})).findings
 
 
-def test_the_seven_rules_are_registered_with_explanations() -> None:
+def test_the_eight_rules_are_registered_with_explanations() -> None:
     """The spec's ids, in the spec's order, each with an ``--explain`` text:
     ``finding()`` already refuses an unregistered id, this pins the surface."""
     assert list(verify.VERIFY_RULES) == [
@@ -514,6 +534,7 @@ def test_the_seven_rules_are_registered_with_explanations() -> None:
         "verify/done-when",
         "verify/scenarios-unmodified",
         "verify/step-assertions",
+        "verify/observations",
     ]
     assert set(verify.VERIFY_RULES) <= RULES.keys()
 
@@ -852,6 +873,317 @@ def test_a_step_file_with_assertions_is_not_a_finding(tmp_path: Path) -> None:
     findings = _rule(_context_for(tmp_path, packet, repos=(repo,)), "verify/step-assertions")
 
     assert findings == ()
+
+
+# ------------------------------------------------------ verify/observations
+#
+# The one rule that asks the addendum §9 question over the packet's behaviors:
+# does *something* check every `must` and `must_not` observation the packet
+# carries in its satisfy and must-not-break lists? The evidence mechanism is
+# `verify/done-when`'s — a repo file referencing the id — so the packets here
+# are hand-built like the other rules'. One behavior carries the addendum
+# §3.3's shape: a must, the double-write must_not, a should, a plain must.
+
+
+_SESSION = Behavior(
+    id="behavior:new-session",
+    title="New session",
+    trigger="A user starts a session.",
+    observations=(
+        Observation(
+            id="behavior:new-session#obs-1",
+            statement="The session is cached",
+            at="resource:cache",
+            outcome=Outcome.MUST,
+            timing=Timing.IMMEDIATE,
+        ),
+        Observation(
+            id="behavior:new-session#obs-2",
+            statement="No audit entry appears",
+            at="resource:audit-log",
+            outcome=Outcome.MUST_NOT,
+        ),
+        Observation(
+            id="behavior:new-session#obs-3",
+            statement="The cache warms quickly",
+            at="resource:cache",
+            outcome=Outcome.SHOULD,
+        ),
+        Observation(
+            id="behavior:new-session#obs-4",
+            statement="The session appears in the list",
+            at="component:sessions",
+            outcome=Outcome.MUST,
+        ),
+    ),
+)
+
+_SATISFY = Packet(
+    milestone="milestone:m", elements=(_full(_SESSION),), satisfy=("behavior:new-session",)
+)
+_GUARDED = Packet(
+    milestone="milestone:m",
+    elements=(_full(_SESSION),),
+    must_not_break=("behavior:new-session",),
+)
+
+
+def test_an_evidenced_satisfy_observation_and_two_unguarded_ones(tmp_path: Path) -> None:
+    """Three required observations, evidence for one: one ``checked``, two
+    ``no_check`` errors naming the observation ids — the addendum's double-write
+    example included, an absence nobody checks is as unguarded as a presence."""
+    repo = _repo(
+        tmp_path,
+        "code",
+        {
+            "tests/test_session.py": "def test_cached():\n    assert True  # behavior:new-session#obs-1\n"
+        },
+    )
+
+    findings = _rule(_context_for(tmp_path, _SATISFY, repos=(repo,)), "verify/observations")
+
+    assert [f.message for f in findings] == [
+        "nothing in the repos references behavior:new-session#obs-2 (must_not): "
+        "no check guards this slice's new work",
+        "nothing in the repos references behavior:new-session#obs-4 (must, immediate): "
+        "no check guards this slice's new work",
+    ]
+    assert {f.severity for f in findings} == {Severity.ERROR}
+    assert {f.ref for f in findings} == {"behavior:new-session"}
+
+
+def test_every_satisfy_observation_evidenced_is_quiet(tmp_path: Path) -> None:
+    evidence = {f"tests/obs-{n}.py": f"# behavior:new-session#obs-{n}\n" for n in (1, 2, 3, 4)}
+    repo = _repo(tmp_path, "code", evidence)
+
+    findings = _rule(_context_for(tmp_path, _SATISFY, repos=(repo,)), "verify/observations")
+
+    assert findings == ()
+
+
+def test_a_composed_behavior_is_context_not_a_rule_input(tmp_path: Path) -> None:
+    """§4.2's one-hop rule: the behavior an included one composes rides in the
+    packet so the agent sees the chain, but only the satisfy and must-not-break
+    lists are verified — a composed behavior's own guard is the packet that
+    includes it as work."""
+    composed = Behavior(
+        id="behavior:warm-cache",
+        title="Warm the cache",
+        trigger="A cache entry is read.",
+        observations=(
+            Observation(
+                id="behavior:warm-cache#obs-1",
+                statement="The cache is warm",
+                at="resource:cache",
+                outcome=Outcome.MUST,
+            ),
+        ),
+    )
+    packet = Packet(
+        milestone="milestone:m",
+        elements=(_full(_SESSION), _full(composed)),
+        satisfy=("behavior:new-session",),
+    )
+    repo = _repo(tmp_path, "code", {"app.py": "one\n"})
+
+    findings = _rule(_context_for(tmp_path, packet, repos=(repo,)), "verify/observations")
+
+    assert {f.ref for f in findings} == {"behavior:new-session"}
+    assert "behavior:warm-cache" not in "".join(f.message for f in findings)
+
+
+def test_a_must_not_break_observation_unguarded_warns_until_strict(tmp_path: Path) -> None:
+    """A standing expectation this slice must not break, with nothing checking
+    it: drift to surface, not a gate to fail the slice on — a warning, promoted
+    by ``--strict`` like every warning."""
+    repo = _repo(
+        tmp_path,
+        "code",
+        {"tests/test_session.py": "# behavior:new-session#obs-1\n# behavior:new-session#obs-4\n"},
+    )
+    lock = _seal_pair(tmp_path, _GUARDED, scenarios={})
+
+    lax = _verify(lock, repo, "--rule", "verify/observations")
+    strict = _verify(lock, repo, "--rule", "verify/observations", "--strict")
+
+    assert lax.exit_code == ExitCode.OK
+    assert lax.stdout.splitlines() == [
+        "warn verify/observations: nothing in the repos references "
+        "behavior:new-session#obs-2 (must_not): "
+        "no check guards a standing expectation this slice must not break"
+    ]
+    assert strict.exit_code == ExitCode.FINDINGS
+
+
+def test_a_should_observation_is_advisory_and_never_fails(tmp_path: Path) -> None:
+    """§3.1: a ``should`` is reported as advisory — checked-ness noted inside
+    the detail — and the unchecked count is surfaced in text and ``--json``,
+    none of it in the exit code."""
+    repo = _repo(
+        tmp_path,
+        "code",
+        {
+            "tests/test_session.py": (
+                "# behavior:new-session#obs-1\n# behavior:new-session#obs-2\n"
+                "# behavior:new-session#obs-4\n"
+            )
+        },
+    )
+    lock = _seal_pair(tmp_path, _SATISFY, scenarios={})
+
+    text = _verify(lock, repo, "--rule", "verify/observations")
+    as_json = _verify(lock, repo, "--rule", "verify/observations", "--format", "json")
+
+    assert text.exit_code == ExitCode.OK
+    assert text.stdout.splitlines() == [
+        "advisory behavior:new-session#obs-3 (should, immediate): nothing references it",
+        "1 should observation unchecked — advisory, never failed",
+    ]
+    assert as_json.exit_code == ExitCode.OK
+    assert json.loads(as_json.stdout)["summary"] == {
+        "unchecked_should": 1,
+        "advisories": [
+            {
+                "observation": "behavior:new-session#obs-3",
+                "evidence_ref": None,
+                "timing": "immediate",
+            }
+        ],
+    }
+
+
+def test_a_checked_should_is_reported_without_a_count(tmp_path: Path) -> None:
+    """Checked-ness rides inside the advisory detail, so a checked ``should``
+    says where it is checked and does not pump the unchecked count."""
+    repo = _repo(tmp_path, "code", {"tests/test_session.py": "# behavior:new-session#obs-3\n"})
+    lock = _seal_pair(tmp_path, _SATISFY, scenarios={})
+
+    result = _verify(lock, repo, "--rule", "verify/observations")
+
+    assert result.exit_code == ExitCode.FINDINGS  # obs-1, obs-2, obs-4 are unguarded
+    assert result.stdout.splitlines()[-1] == (
+        "advisory behavior:new-session#obs-3 (should, immediate): checked by tests/test_session.py"
+    )
+    assert "unchecked" not in result.stdout
+
+
+def test_effective_timing_comes_sealed_then_from_the_carried_resources(tmp_path: Path) -> None:
+    """The timing reported with each result is the *effective* one: the value
+    sealed into the packet wins (a real seal derives it through 51's helper
+    against the whole design), and a hand-built packet falls back to the same
+    §1.2 table over the resources the packet happens to carry."""
+    stream = Resource(
+        id="resource:events",
+        title="Events",
+        resource_kind=ResourceKind.STREAM,
+        technology="Kafka",
+    )
+    behavior = Behavior(
+        id="behavior:new-session",
+        title="New session",
+        trigger="A user starts a session.",
+        observations=(
+            Observation(
+                id="behavior:new-session#obs-1",
+                statement="An event is emitted",
+                at="resource:events",
+                outcome=Outcome.MUST,
+            ),
+            Observation(
+                id="behavior:new-session#obs-2",
+                statement="An uncached target stays immediate",
+                at="resource:elsewhere",
+                outcome=Outcome.MUST,
+            ),
+            Observation(
+                id="behavior:new-session#obs-3",
+                statement="A sealed value beats the authored one",
+                at="resource:events",
+                outcome=Outcome.MUST,
+                timing=Timing.IMMEDIATE,
+            ),
+            Observation(
+                id="behavior:new-session#obs-4",
+                statement="No entry appears",
+                at="resource:audit-log",
+                outcome=Outcome.MUST_NOT,
+            ),
+        ),
+    )
+    carried = behavior.model_dump(mode="json")
+    carried["observations"][2]["effective_timing"] = "eventual"  # what a real seal writes
+    packet = Packet(
+        milestone="milestone:m",
+        elements=(
+            PacketElement(ref="behavior:new-session", fidelity=Fidelity.FULL, element=carried),
+            _full(stream),
+        ),
+        satisfy=("behavior:new-session",),
+    )
+    repo = _repo(tmp_path, "code", {"app.py": "one\n"})
+
+    results = verify.observation_results(_context_for(tmp_path, packet, repos=(repo,)))
+
+    assert [(r.observation, r.timing) for r in results] == [
+        ("behavior:new-session#obs-1", Timing.EVENTUAL),
+        ("behavior:new-session#obs-2", Timing.IMMEDIATE),
+        ("behavior:new-session#obs-3", Timing.EVENTUAL),
+        ("behavior:new-session#obs-4", None),
+    ]
+
+
+def test_the_run_records_one_row_per_observation_and_criterion(tmp_path: Path) -> None:
+    """§8's second tuple over the observations too: one row per observation
+    beside the done_when criteria's, ``advisory`` for a ``should`` with its
+    evidence when one exists."""
+    packet = Packet(
+        milestone="milestone:m",
+        elements=(_full(_SESSION),),
+        satisfy=("behavior:new-session",),
+        criteria=(_CRITERION,),
+    )
+    repo = _repo(
+        tmp_path,
+        "code",
+        {
+            "tests/test_session.py": "def test_cached():\n    assert True  # behavior:new-session#obs-1\n"
+        },
+    )
+    lock_path = _seal_pair(tmp_path, packet, scenarios={})
+    brief, lock = verify.load_sealed_packet(lock_path)
+    store = tmp_path / "store"
+    store.mkdir()
+
+    result = runner.invoke(
+        app,
+        [
+            "--store",
+            str(store),
+            "verify",
+            "--packet",
+            str(lock_path),
+            "--repo",
+            str(repo),
+            "--diff-base",
+            "HEAD",
+            "--rule",
+            "verify/observations",
+        ],
+    )
+
+    assert result.exit_code == ExitCode.FINDINGS  # obs-2, obs-4 and the criterion are unguarded
+    (run,) = runstore.runs_for(store, runstore.packet_id(brief.milestone, lock.design_rev))
+    assert run.results == (
+        RunResult(criterion="story:thing#ac-1", result="no_check", evidence_ref=None),
+        RunResult(
+            criterion="behavior:new-session#obs-1",
+            result="checked",
+            evidence_ref="tests/test_session.py",
+        ),
+        RunResult(criterion="behavior:new-session#obs-2", result="no_check", evidence_ref=None),
+        RunResult(criterion="behavior:new-session#obs-3", result="advisory", evidence_ref=None),
+        RunResult(criterion="behavior:new-session#obs-4", result="no_check", evidence_ref=None),
+    )
 
 
 # ------------------------------------------------------------- end to end
