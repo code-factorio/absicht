@@ -6,7 +6,9 @@ whether it is well-formed. This module is the frame around that question:
 ``docs/tasks/40-verify-core.md``'s scaffolding up front, then
 ``docs/tasks/41-verify-rules.md``'s seven rule bodies hanging off
 ``VERIFY_RULES`` and ``VerifyContext``, with the judgement calls the rule
-spec leaves open written down beside them.
+spec leaves open written down beside them, and
+``docs/tasks/59-verify-observations.md``'s observation coverage over the
+packet's behaviors — the addendum §9 question, asked the same offline way.
 
 Two contracts worth naming out loud:
 
@@ -29,6 +31,7 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
+from typing import cast
 
 from absicht.findings import RULES, Finding, Report, Severity, finding
 from absicht.gherkin import scenario_digest
@@ -38,10 +41,15 @@ from absicht.models import (
     Decision,
     Element,
     Fidelity,
+    Observation,
+    Outcome,
     Packet,
     PacketLock,
+    Ref,
+    Resource,
     Seam,
     State,
+    Timing,
 )
 from absicht.runstore import RunResult
 
@@ -61,8 +69,9 @@ VERIFY_RULES: dict[str, VerifyRule] = {}
 
 A plain dict, like ``absicht.findings.RULES``: a handful of rules is a lookup,
 not a plugin system. Populated at the bottom of this module with the seven
-bodies of ``docs/tasks/41-verify-rules.md``, in that spec's own order; each
-rule's ``--explain`` text registers in ``findings.RULES`` like every other
+bodies of ``docs/tasks/41-verify-rules.md``, in that spec's own order, plus
+``docs/tasks/59-verify-observations.md``'s observations rule; each rule's
+``--explain`` text registers in ``findings.RULES`` like every other
 rule-producing module's."""
 
 
@@ -197,15 +206,18 @@ def run_rules(
 
 
 def criterion_results(ctx: VerifyContext) -> tuple[RunResult, ...]:
-    """The packet's criteria as one run-store row each, for ``absicht.runstore``.
+    """The packet's criteria and observations as one run-store row each, for
+    ``absicht.runstore``.
 
     ``checked`` with the first file that references the id as evidence,
     ``no_check`` when nothing does — ``verify/done-when``'s own evidence walk,
     read as results rather than findings, so the record and the report cannot
-    disagree about what a run verified. Computed from the context alone, not
-    from the findings: a run with ``--rule`` narrowed still records every
-    criterion's result. Observations join this table in
-    docs/tasks/59-verify-observations.md, on the same evidence mechanism.
+    disagree about what a run verified. The observations of the packet's
+    satisfy and must-not-break behaviors join after the criteria's rows
+    (docs/tasks/59-verify-observations.md), on the same evidence mechanism.
+    Computed from the context alone, not from the findings: a run with
+    ``--rule`` narrowed still records every criterion's and observation's
+    result.
     """
     sources = sorted(_step_sources(ctx).items())
     results: list[RunResult] = []
@@ -221,7 +233,201 @@ def criterion_results(ctx: VerifyContext) -> tuple[RunResult, ...]:
                 evidence_ref=evidence,
             )
         )
+    results.extend(result.row() for result in observation_results(ctx))
     return tuple(results)
+
+
+# --- the observations (docs/tasks/59-verify-observations.md) -------------------
+#
+# The addendum §9 question over the packet's behaviors: for every observation
+# the packet carried, does *something* check it? Coverage of expectations, not
+# execution of tests — absicht never runs a check and never owns an assertion,
+# and this is the line that keeps it from becoming a BDD tool.
+
+
+@dataclass(frozen=True, slots=True)
+class ObservationResult:
+    """One observation of the packet's behavior sets, verified — §9's row.
+
+    The one shape the observations rule, the run rows and the summary all
+    read, so the report, the history and the count cannot disagree about what
+    a run verified. ``result`` is the addendum's vocabulary as plain text,
+    like the run store's column: ``checked``/``no_check`` for a required or
+    forbidden observation, ``advisory`` for a ``should`` whether or not
+    something checks it — the checked-ness rides in ``evidence_ref``.
+    """
+
+    observation: str
+    behavior: Ref
+    # True when the behavior is in the packet's satisfy list (the new work);
+    # False when it is a must-not-break standing expectation.
+    satisfy: bool
+    outcome: Outcome
+    result: str
+    evidence_ref: str | None
+    # The effective timing, never the authored-only one; None exactly for
+    # `must_not`, which carries no when at all.
+    timing: Timing | None
+
+    def row(self) -> RunResult:
+        """The run-store row: §8's tuple over one observation."""
+        return RunResult(
+            criterion=self.observation, result=self.result, evidence_ref=self.evidence_ref
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class ObservationSummary:
+    """The advisory half of the observation results — reported, never failed.
+
+    A ``should`` never becomes a finding; it lands here with its checked-ness,
+    and the unchecked count is the visibility §3.1 asks for rather than an
+    error the exit code could carry.
+    """
+
+    advisories: tuple[ObservationResult, ...]
+
+    @property
+    def unchecked_should(self) -> int:
+        """How many ``should`` observations nothing references."""
+        return sum(1 for advisory in self.advisories if advisory.evidence_ref is None)
+
+
+def observation_results(ctx: VerifyContext) -> tuple[ObservationResult, ...]:
+    """Every observation of the packet's satisfy and must-not-break behaviors,
+    one result each, satisfy set first.
+
+    An observation is ``checked`` when a scannable repo file references its
+    id — ``verify/done-when``'s evidence mechanism, reached from the
+    observation anchor, which is exactly what anchored ids are for — and the
+    *quality* of that evidence stays out of scope, because absicht does not
+    run checks (§9). Composed behaviors ride in the packet as context and are
+    deliberately absent here: only the two lists the packet judges are
+    verified, the composed behavior's own guard being the packet that
+    includes it as work.
+    """
+    sources = sorted(_step_sources(ctx).items())
+    results: list[ObservationResult] = []
+    for satisfy, behaviors in ((True, ctx.packet.satisfy), (False, ctx.packet.must_not_break)):
+        for behavior in behaviors:
+            for observation, timing in _carried_observations(ctx, behavior):
+                evidence = next(
+                    (path.as_posix() for (_repo, path), hits in sources if observation.id in hits),
+                    None,
+                )
+                results.append(
+                    ObservationResult(
+                        observation=observation.id,
+                        behavior=behavior,
+                        satisfy=satisfy,
+                        outcome=observation.outcome,
+                        result=(
+                            "advisory"
+                            if observation.outcome is Outcome.SHOULD
+                            else "no_check"
+                            if evidence is None
+                            else "checked"
+                        ),
+                        evidence_ref=evidence,
+                        timing=timing,
+                    )
+                )
+    return tuple(results)
+
+
+def _carried_observations(
+    ctx: VerifyContext, ref: Ref
+) -> tuple[tuple[Observation, Timing | None], ...]:
+    """The observations of the carried behavior ``ref``, each with its
+    effective timing.
+
+    A behavior cannot be read back through ``Behavior.model_validate`` the way
+    the other kinds are: ``ab packet --seal`` seals each observation's
+    *effective* timing beside the authored one — so a packet consumer never
+    computes a default — and the extra key is exactly what the strict record
+    refuses. The sealed value is popped first and the rest validated through
+    the model, the same type-safe read ``_carried`` makes. A behavior the
+    packet names but does not carry (hand-narrowed, or excluded at assembly)
+    has nothing to verify — that gap is ``ab check``'s finding, not a reason
+    to refuse verification.
+    """
+    carried = next((entry for entry in ctx.packet.elements if entry.ref == ref), None)
+    if carried is None:
+        return ()
+    kinds = {resource.id: resource.resource_kind for resource in _carried(ctx, Resource)}
+    entries = cast("list[dict[str, object]]", carried.element.get("observations", ()))
+    observations: list[tuple[Observation, Timing | None]] = []
+    for entry in entries:
+        raw = dict(entry)
+        sealed = raw.pop("effective_timing", None)
+        observation = Observation.model_validate(raw)
+        if sealed is not None:
+            # What a real seal wrote, derived through 51's helper against the
+            # whole design — a richer view than this offline walk can rebuild.
+            timing: Timing | None = Timing(str(sealed))
+        elif observation.outcome is Outcome.MUST_NOT:
+            timing = None  # "at no point" carries no when
+        else:
+            # §1.2's default over the resources the packet happens to carry:
+            # a stream is eventual, everything else immediate.
+            timing = observation.effective_timing(kinds.get(observation.at))
+        observations.append((observation, timing))
+    return tuple(observations)
+
+
+def observation_summary(ctx: VerifyContext) -> ObservationSummary:
+    """The advisory results, pulled out of the walk: what the report carries
+    so a ``should`` is visible without ever failing anything."""
+    return ObservationSummary(
+        advisories=tuple(
+            result for result in observation_results(ctx) if result.outcome is Outcome.SHOULD
+        )
+    )
+
+
+def _qualifies(outcome: Outcome, timing: Timing | None) -> str:
+    """The parenthesised tail of a result line: the outcome, plus the
+    effective timing when there is one."""
+    return f"{outcome.value}, {timing.value}" if timing is not None else outcome.value
+
+
+def summary_lines(summary: ObservationSummary) -> tuple[str, ...]:
+    """The summary as report text: one line per advisory — checked-ness
+    named inside the detail — and the unchecked count, only when there is
+    one to name. A summary of nothing says nothing, so a passing run stays
+    silent the way an empty report does."""
+    lines = [
+        f"advisory {advisory.observation} ({_qualifies(advisory.outcome, advisory.timing)}): "
+        + (
+            f"checked by {advisory.evidence_ref}"
+            if advisory.evidence_ref is not None
+            else "nothing references it"
+        )
+        for advisory in summary.advisories
+    ]
+    if count := summary.unchecked_should:
+        lines.append(
+            f"{count} should observation{'s' if count != 1 else ''} unchecked"
+            " — advisory, never failed"
+        )
+    return tuple(lines)
+
+
+def summary_json(summary: ObservationSummary) -> dict[str, object]:
+    """The summary half of the ``--json`` envelope: the advisory results with
+    their evidence, and the unchecked count. Additive fields, stable shape —
+    the envelope's own rule."""
+    return {
+        "unchecked_should": summary.unchecked_should,
+        "advisories": [
+            {
+                "observation": advisory.observation,
+                "evidence_ref": advisory.evidence_ref,
+                "timing": advisory.timing.value if advisory.timing is not None else None,
+            }
+            for advisory in summary.advisories
+        ],
+    }
 
 
 # --- the rules (docs/tasks/41-verify-rules.md) ---------------------------------
@@ -312,6 +518,18 @@ RULES.update(
             "deliberately simple, and an unfamiliar framework's spelling should "
             "nudge rather than fail CI; --strict promotes it."
         ),
+        "verify/observations": (
+            "A must or must_not observation of the packet's satisfy or "
+            "must-not-break behaviors that no file in any --repo references: "
+            "nothing verifies it, so the observation is unguarded. The evidence "
+            "is the same text search verify/done-when makes — a repo file "
+            "naming the observation id — and its quality is out of scope, "
+            "because absicht does not run checks. Unguarded new work is an "
+            "error; an unguarded standing expectation is drift, warned about "
+            "until --strict promotes it. A should is never failed: it is "
+            "reported as advisory in the summary, the unchecked count surfaced "
+            "as visibility."
+        ),
     }
 )
 
@@ -319,10 +537,13 @@ _KIND_PREFIX: dict[type[Element], str] = {
     Component: "component:",
     Seam: "seam:",
     Decision: "decision:",
+    Resource: "resource:",
 }
 """The ref prefix each carried kind is read back through. A PacketElement's
 ``element`` is a model dump; validating it back through the model is the
-type-safe read, rather than reaching into the dict and casting by hand."""
+type-safe read, rather than reaching into the dict and casting by hand.
+``Behavior`` is deliberately absent: its sealed observations carry a key the
+strict record refuses, so ``_carried_observations`` reads it instead."""
 
 
 def _carried[E: Element](
@@ -512,9 +733,11 @@ def _contract_tests_findings(ctx: VerifyContext) -> tuple[Finding, ...]:
 
 
 def _step_sources(ctx: VerifyContext) -> dict[tuple[Path, Path], frozenset[str]]:
-    """Every repo file that references at least one criterion id, as
-    ``(repo, repo-relative file) -> the ids it references`` — the working
-    definition of a step definition, shared by the two criteria rules.
+    """Every repo file that references at least one criterion or observation
+    id, as ``(repo, repo-relative file) -> the ids it references`` — the
+    working definition of a step definition, shared by the two criteria rules
+    and the observation walk: the observation id anchors evidence exactly as
+    a criterion id does.
 
     The generated ``.feature`` files are skipped: a scenario names its own
     criterion in the ``Scenario:`` header, and counting that would make
@@ -523,6 +746,11 @@ def _step_sources(ctx: VerifyContext) -> dict[tuple[Path, Path], frozenset[str]]
     file verify cannot read is skipped rather than fatal: unreadable does not
     make it a step definition."""
     needles = tuple((criterion.id, criterion.id.encode()) for criterion in ctx.packet.criteria)
+    needles += tuple(
+        (observation.id, observation.id.encode())
+        for behavior in (*ctx.packet.satisfy, *ctx.packet.must_not_break)
+        for observation, _timing in _carried_observations(ctx, behavior)
+    )
     sources: dict[tuple[Path, Path], frozenset[str]] = {}
     for repo in ctx.repos:
         for path in sorted(repo.glob("**/*")):
@@ -618,6 +846,37 @@ def _step_assertions_findings(ctx: VerifyContext) -> tuple[Finding, ...]:
     return tuple(findings)
 
 
+def _observations_findings(ctx: VerifyContext) -> tuple[Finding, ...]:
+    """Every required or forbidden observation nothing in the repos checks.
+
+    The severity split is the spec's own line: unguarded work this slice must
+    newly satisfy failed the packet's whole premise, while an unguarded
+    standing expectation is drift to surface — a warning, promoted by
+    ``--strict`` like every warning. A ``should`` is the summary's business,
+    never a finding, so it cannot touch the exit code."""
+    findings: list[Finding] = []
+    for result in observation_results(ctx):
+        if result.outcome is Outcome.SHOULD or result.result != "no_check":
+            continue  # advisory results are the summary's; a check is quiet
+        findings.append(
+            finding(
+                "verify/observations",
+                severity=Severity.ERROR if result.satisfy else Severity.WARN,
+                message=(
+                    f"nothing in the repos references {result.observation} "
+                    f"({_qualifies(result.outcome, result.timing)}): no check guards "
+                    + (
+                        "this slice's new work"
+                        if result.satisfy
+                        else "a standing expectation this slice must not break"
+                    )
+                ),
+                ref=result.behavior,
+            )
+        )
+    return tuple(findings)
+
+
 VERIFY_RULES.update(
     {
         "verify/scope": _scope_findings,
@@ -627,5 +886,6 @@ VERIFY_RULES.update(
         "verify/done-when": _done_when_findings,
         "verify/scenarios-unmodified": _scenarios_unmodified_findings,
         "verify/step-assertions": _step_assertions_findings,
+        "verify/observations": _observations_findings,
     }
 )

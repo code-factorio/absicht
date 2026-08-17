@@ -992,6 +992,19 @@ def test_a_composed_behavior_is_context_not_a_rule_input(tmp_path: Path) -> None
     assert "behavior:warm-cache" not in "".join(f.message for f in findings)
 
 
+def test_a_satisfy_ref_the_packet_does_not_carry_is_skipped(tmp_path: Path) -> None:
+    """A hand-narrowed or excluded packet can name a satisfy behavior it does
+    not carry: there are no observations to verify, and the gap is ``ab
+    check``'s dangling-ref finding — not a reason for verification to crash
+    or to invent results."""
+    packet = Packet(milestone="milestone:m", satisfy=("behavior:elsewhere",))
+    repo = _repo(tmp_path, "code", {"app.py": "one\n"})
+
+    results = verify.observation_results(_context_for(tmp_path, packet, repos=(repo,)))
+
+    assert results == ()
+
+
 def test_a_must_not_break_observation_unguarded_warns_until_strict(tmp_path: Path) -> None:
     """A standing expectation this slice must not break, with nothing checking
     it: drift to surface, not a gate to fail the slice on — a warning, promoted

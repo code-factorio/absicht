@@ -47,13 +47,17 @@ from absicht.runstore import RunStoreError, packet_id, record_run
 from absicht.status import StatusUsageError
 from absicht.status import status as status_report
 from absicht.verify import (
+    ObservationSummary,
     VerifyContext,
     VerifyUsageError,
     context_for,
     criterion_results,
     discover_sealed_packet,
     load_sealed_packet,
+    observation_summary,
     run_rules,
+    summary_json,
+    summary_lines,
 )
 
 PANEL = "Step 4 — verify what came back"
@@ -124,9 +128,11 @@ def verify(
         typer.echo(str(exc), err=True)
         raise typer.Exit(ExitCode.USAGE) from exc
     _record_run(opts, brief, lock, context)
+    summary = observation_summary(context)
     body = _report_body(
         result,
         effective_format(ctx, output_format, opts.json_output, json_member=ReportFormat.JSON),
+        summary,
     )
     if body:
         typer.echo(body)
@@ -173,16 +179,19 @@ def _record_run(
         raise typer.Exit(ExitCode.USAGE) from exc
 
 
-def _report_body(result: Report, output_format: ReportFormat) -> str:
+def _report_body(result: Report, output_format: ReportFormat, summary: ObservationSummary) -> str:
     """The report as one string in the asked-for shape — what stdout shows and
     `--report` writes, so the two cannot drift. An empty text report is the
     empty string: silence is the pass signal a human greps for, the spelling
-    `ab check` already uses."""
+    `ab check` already uses. The observation summary rides along in text and
+    json — advisory results are visibility, never findings, so it cannot touch
+    the exit code — and has no SARIF spelling: a note with nowhere to land is
+    not an annotation."""
     if output_format is ReportFormat.JSON:
-        return json.dumps(result.render_json())
+        return json.dumps({**result.render_json(), "summary": summary_json(summary)})
     if output_format is ReportFormat.SARIF:
         return json.dumps(result.render_sarif())
-    return result.render_text()
+    return "\n".join(line for line in (result.render_text(), *summary_lines(summary)) if line)
 
 
 @app.command(rich_help_panel=PANEL)
