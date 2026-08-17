@@ -631,12 +631,19 @@ class Trace:
     (the schema invites reciprocal pairs like ``provides``/``provider``), not
     a finding; which relations may loop at all is ``ab check``'s
     ``integrity/cycle`` rule's judgement.
+
+    ``truncated`` says the path limit stopped the walk before the graph was
+    exhausted: on a dense store the complete set of simple paths is
+    exponential (absicht's own store reaches millions from one requirement),
+    so the walk carries a budget and says when it ran out rather than
+    answering with a machine-killing list that reads as complete.
     """
 
     start: Ref
     target: Ref | None
     paths: tuple[tuple[Step, ...], ...]
     cycle_hit: bool
+    truncated: bool = False
 
     def render_text(self) -> str:
         """One path per line, hops read left to right along the path:
@@ -647,13 +654,17 @@ class Trace:
             lines.append(
                 "note: a cycle was hit; paths stop at the first repeat rather than looping"
             )
+        if self.truncated:
+            lines.append(
+                "note: the path limit was reached; the walk stopped early, not exhaustively"
+            )
         return "\n".join(lines)
 
     def render_json(self) -> dict[str, object]:
         """The ``--json``/``--format json`` envelope of ``00-conventions.md``:
         each path a sequence of steps, every step naming its relation,
-        direction and arrival — plus the cycle flag, so a consumer knows the
-        walk was bounded."""
+        direction and arrival — plus the cycle and truncation flags, so a
+        consumer knows the walk was bounded."""
         return {
             "schema_version": SCHEMA_VERSION,
             "from": self.start,
@@ -670,6 +681,7 @@ class Trace:
                 for path in self.paths
             ],
             "cycle_hit": self.cycle_hit,
+            "truncated": self.truncated,
         }
 
     def render_mermaid(self) -> str:
@@ -695,8 +707,32 @@ class Trace:
         return line
 
 
+TRACE_PATH_LIMIT = 1000
+"""The walk's budget of materialized paths, and the fix for the failure mode
+a complete simple-path enumeration has on a dense store: the count is
+exponential (absicht's own store holds millions from a single requirement),
+so the unbounded walk is a machine-killing answer that reads as complete. The
+limit is spent in deterministic walk order — the capped answer is a prefix
+of the uncapped one — and ``Trace.truncated`` says when it ran out. ``None``
+keeps the uncapped walk for callers that know their graph is small; no CLI
+flag exposes it, because a bigger budget is a reconsidered decision, not a
+tune-up."""
+
+_TRACE_PAGE_PATH_LIMIT = 50
+"""The traceability page's own share of that budget, per requirement: the
+page is an overview a person reads — fifty linked paths is already past what
+anyone reads — and a page-sized cap keeps ``trace.html`` page-sized on the
+dense stores that made the walk's default limit necessary at all."""
+
+
 def trace_paths(
-    design: Design, ref: str, *, to: str | None = None, up: bool = False, down: bool = False
+    design: Design,
+    ref: str,
+    *,
+    to: str | None = None,
+    up: bool = False,
+    down: bool = False,
+    limit: int | None = TRACE_PATH_LIMIT,
 ) -> Trace:
     """Every simple path from ``ref`` outward and inward — or, with ``to``,
     between ``ref`` and ``to`` — in deterministic walk order.
@@ -712,6 +748,10 @@ def trace_paths(
     a backward pass first marks every element that can still reach the
     target under the same direction filter, and the walk only descends into
     marked ones, so wide dead ends cost nothing.
+
+    ``limit`` caps how many paths materialize before the walk stops and says
+    so — the budget that keeps a dense store's exponential answer survivable;
+    ``None`` walks uncapped.
 
     Raises ``UnknownRefError`` for a ``ref`` or ``to`` no element has: a
     broken invocation, not an empty answer — ``ab trace`` maps it to
@@ -749,9 +789,12 @@ def trace_paths(
     paths: list[tuple[Step, ...]] = []
     visited = {ref}
     cycle_hit = False
+    truncated = False
 
     def walk(node: Ref, path: tuple[Step, ...]) -> None:
-        nonlocal cycle_hit
+        nonlocal cycle_hit, truncated
+        if truncated:
+            return  # the budget is spent; unwind without walking further
         for step in steps(node):
             if reaches is not None and step.ref not in reaches:
                 continue  # no route to the target from here; not a decline
@@ -761,17 +804,21 @@ def trace_paths(
                 cycle_hit = True
                 continue
             extended = (*path, step)
-            if to is None:
+            if to is None or step.ref == to:
+                if limit is not None and len(paths) >= limit:
+                    # A path exists beyond the budget: the answer is cut
+                    # short, and saying so is the point of `truncated`.
+                    truncated = True
+                    return
                 paths.append(extended)
-            elif step.ref == to:
-                paths.append(extended)
-                continue  # a path ends at the target; nothing lies beyond it
+                if step.ref == to:
+                    continue  # a path ends at the target; nothing lies beyond it
             visited.add(step.ref)
             walk(step.ref, extended)
             visited.remove(step.ref)
 
     walk(ref, ())
-    return Trace(start=ref, target=to, paths=tuple(paths), cycle_hit=cycle_hit)
+    return Trace(start=ref, target=to, paths=tuple(paths), cycle_hit=cycle_hit, truncated=truncated)
 
 
 def _reaches_target(
@@ -1340,16 +1387,27 @@ class _Site:
     def _trace_page(self) -> str:
         """Traceability as ``ab trace`` spells it, one section per requirement
         — the kind the spec's own example chain starts from. Stories and NFRs
-        trace too; a section per kind is a step this task does not need."""
+        trace too; a section per kind is a step this task does not need.
+
+        The page asks for a tighter path budget than the walk's own default:
+        it is an overview a person reads, not an export, and fifty linked
+        paths per requirement is already past what anyone reads — while the
+        truncated flag is spelled beside them, so the cut is never mistaken
+        for completeness."""
         body = [self._nav(0), "<h1>Traceability</h1>"]
         requirements = sorted(ref for ref in self.scope if ref.startswith("requirement:"))
         for ref in requirements:
-            traced = trace_paths(self.design, ref)
+            traced = trace_paths(self.design, ref, limit=_TRACE_PAGE_PATH_LIMIT)
             body.append(f"<h2>{self._ref(ref, 0)} — {escape(self.index.by_id[ref].title)}</h2>")
             body += [f"<p>{self._path_line(ref, path)}</p>" for path in traced.paths]
             if traced.cycle_hit:
                 body.append(
                     "<p>a cycle was hit; paths stop at the first repeat rather than looping</p>"
+                )
+            if traced.truncated:
+                body.append(
+                    "<p>the path limit was reached; the paths above are the first ones,"
+                    " not all of them</p>"
                 )
         if not requirements:
             body.append("<p>no requirements in scope</p>")
