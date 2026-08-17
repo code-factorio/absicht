@@ -593,9 +593,11 @@ def _behavior_packet() -> Packet:
     """One packet carrying both behavior lists with everything
     docs/tasks/57-packet-behaviors.md demands of the document: a satisfy
     behavior composing another behavior one hop out, which references a third
-    without expanding it, and a must-not-break observation with no timing to
-    spell. Built by hand like `_packet_document`, for the same reason: what is
-    under test is the rendering of the model, not the selection that fills it."""
+    without expanding it, a second satisfy behavior (two blocks, so a renderer
+    cannot clobber one with the other), a must-not-break observation with no
+    timing to spell, and a listed ref the packet carries nowhere. Built by
+    hand like `_packet_document`, for the same reason: what is under test is
+    the rendering of the model, not the selection that fills it."""
 
     def observation(
         observation_id: str, statement: str, at: str, outcome: str, effective: str | None
@@ -665,6 +667,19 @@ def _behavior_packet() -> Packet:
                 ],
             ),
             behavior(
+                "behavior:flat",
+                "Flat holds",
+                [
+                    observation(
+                        "behavior:flat#obs-1",
+                        "Flat observes the core",
+                        "component:core",
+                        "must",
+                        "immediate",
+                    )
+                ],
+            ),
+            behavior(
                 "behavior:guard",
                 "The guard holds",
                 [
@@ -674,7 +689,7 @@ def _behavior_packet() -> Packet:
                 ],
             ),
         ),
-        satisfy=("behavior:a",),
+        satisfy=("behavior:ghost", "behavior:a", "behavior:flat"),
         must_not_break=("behavior:guard",),
     )
 
@@ -687,9 +702,16 @@ def test_packet_markdown_separates_the_two_behavior_lists() -> None:
     # Two clearly separated sections, the work before the guardrails.
     assert satisfy_at < not_break_at
     satisfy_section = document[satisfy_at:not_break_at]
+    # A listed ref the packet carries nowhere still says it was named, and the
+    # walk continues past it: every block after it renders too.
+    assert "- `behavior:ghost`" in satisfy_section
+    assert "### A happens" in satisfy_section
+    assert "### Flat holds" in satisfy_section
+    # Blocks are separated by one blank line, and the second cannot clobber
+    # the first: A's nested hop ends, a blank line, then Flat's own block.
+    assert "(must, eventual, at behavior:c)\n\n### Flat holds" in satisfy_section
     # The satisfy block with its observations, the effective timing spelled so
     # the agent never computes a default.
-    assert "### A happens" in satisfy_section
     assert "`behavior:a`" in satisfy_section
     assert (
         "- `behavior:a#obs-1` — A observes the core (must, immediate, at component:core)"
@@ -716,11 +738,15 @@ def test_packet_markdown_separates_the_two_behavior_lists() -> None:
 def test_packet_markdown_expands_composition_one_hop_and_no_further() -> None:
     document = packet_markdown(_behavior_packet())
 
-    # B joins under the behavior that composes it, observations included.
-    assert "#### Composes: `behavior:b` — B happens" in document
+    # B joins under the behavior that composes it, observations included, one
+    # blank line after the observation that pulled it in.
+    assert "(must, eventual, at behavior:b)\n\n#### Composes: `behavior:b` — B happens" in document
     assert "- `behavior:b#obs-1` — B makes C occur (must, eventual, at behavior:c)" in document
-    # C stays what that observation references — expanded nowhere.
+    # C stays what that observation references — expanded nowhere — and only a
+    # behavior ref ever nests: an observation at a carried component is not a
+    # composition edge.
     assert "Composes: `behavior:c`" not in document
+    assert "Composes: `component:core`" not in document
 
 
 # --- the site --------------------------------------------------------------------

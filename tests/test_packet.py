@@ -607,6 +607,37 @@ def test_composition_expands_exactly_one_hop_from_each_included_behavior() -> No
     assert [obs["at"] for obs in by_ref["behavior:b"].element["observations"]] == ["behavior:c"]
 
 
+def test_a_dangling_behavior_include_joins_nothing_and_stops_nothing() -> None:
+    """`includes` naming a behavior nothing defines is `ab check`'s
+    dangling-ref finding, not a reason to refuse the packet: the list still
+    says the milestone named it, no element appears for it, and the behaviors
+    listed after it still expand."""
+    design = Design(
+        system=System(id="system:dangling", title="Dangling"),
+        components=(Component(id="component:core", title="Core"),),
+        behaviors=(
+            _behavior("behavior:a", at=("component:core", "behavior:b")),
+            _behavior("behavior:b", at=("behavior:c",)),
+        ),
+        milestones=(
+            Milestone(
+                id="milestone:m",
+                title="M",
+                includes=("behavior:ghost", "behavior:a"),
+                scope=("component:core",),
+            ),
+        ),
+    )
+
+    packet = _assembled(design, "milestone:m")
+
+    assert packet.satisfy == ("behavior:ghost", "behavior:a")
+    carried = {element.ref for element in packet.elements}
+    assert "behavior:ghost" not in carried
+    # The one-hop walk survived the ref that resolved to nothing.
+    assert "behavior:b" in carried
+
+
 def _cycle_store() -> Design:
     """Composition cycles — the mutual X↔Y and the self-composing Z — which
     `ab check` reports and `ab packet` must survive: assembly walks possibly
