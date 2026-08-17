@@ -995,7 +995,9 @@ def test_a_composed_behavior_is_context_not_a_rule_input(tmp_path: Path) -> None
 def test_a_must_not_break_observation_unguarded_warns_until_strict(tmp_path: Path) -> None:
     """A standing expectation this slice must not break, with nothing checking
     it: drift to surface, not a gate to fail the slice on — a warning, promoted
-    by ``--strict`` like every warning."""
+    by ``--strict`` like every warning. The ``should`` rides in the summary
+    the same way it does over the satisfy set: §9 asks per observation, not
+    per list."""
     repo = _repo(
         tmp_path,
         "code",
@@ -1010,7 +1012,9 @@ def test_a_must_not_break_observation_unguarded_warns_until_strict(tmp_path: Pat
     assert lax.stdout.splitlines() == [
         "warn verify/observations: nothing in the repos references "
         "behavior:new-session#obs-2 (must_not): "
-        "no check guards a standing expectation this slice must not break"
+        "no check guards a standing expectation this slice must not break",
+        "advisory behavior:new-session#obs-3 (should, immediate): nothing references it",
+        "1 should observation unchecked — advisory, never failed",
     ]
     assert strict.exit_code == ExitCode.FINDINGS
 
