@@ -432,6 +432,27 @@ def test_claims_are_looked_for_outside_the_store(tmp_path: Path) -> None:
     ]
 
 
+def test_the_store_skip_holds_for_a_relative_store_path_too(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The default invocation spells ``--store`` relatively (``.absicht``, or a
+    bare directory name), and the claim scan walks files git spells absolutely:
+    a skip compared across those two spellings never fires, so the store claims
+    its own criteria and ``done_when`` reads vacuously met — absicht's own store
+    reported every criterion met the first time ``ab status`` ran against it.
+    The skip has to hold for the relative spelling, not just the absolute one
+    the tests happened to use."""
+    repo = tmp_path / "repo"
+    shutil.copytree(CLEAN, repo / "store")
+    _git(repo, "init", "-q")
+    monkeypatch.chdir(repo)
+
+    result = runner.invoke(app, ["--store", "store", "status"])
+
+    assert result.exit_code == ExitCode.OK
+    assert "done_when unmet: milestone:m1 story:cancel-order#ac-1" in result.stdout
+
+
 def test_a_criterion_claimed_in_an_implementing_repo_is_met(
     reference: tuple[Path, Path, dict[str, str]],
 ) -> None:
