@@ -402,11 +402,16 @@ def _claimed_ids(
     """Which criteria some file in `roots` references — the working
     definition of a claim, searched as bytes so a binary or oddly-encoded
     file is a non-match rather than a crash."""
+    # `skip` arrives as the caller spelled the store — `.absicht` by default —
+    # while the walk's paths share `repo_root`'s absolute spelling. Resolved
+    # once here, the two spellings compare; left alone, `is_relative_to` would
+    # be False for every file and the store would claim its own criteria.
+    resolved_skip = skip.resolve() if skip is not None else None
     needles = tuple((criterion, criterion.encode()) for criterion in criteria)
     claimed: set[str] = set()
     for root in roots:
         for path in sorted(root.glob("**/*")):
-            if not _scannable(path, skip):
+            if not _scannable(path, resolved_skip):
                 continue
             try:
                 content = path.read_bytes()
