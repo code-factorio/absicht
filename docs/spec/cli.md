@@ -153,7 +153,10 @@ byte-identical output. Everything downstream reads this and nothing else.
 One element, resolved: its own fields, what points at it, what it points at.
 A behavior's observations render one line each — statement, `at`, `outcome`
 and the effective timing (the addendum's §1.2 default when the author said
-nothing; none for `must_not`).
+nothing; none for `must_not`). A behavior also carries its derived facts —
+`scope` (§4.1), `composes` / `composed_by` (§4.2) and `superseded_by` (§5) —
+computed from the store, never stored in it, additive in `--json`; and a
+superseded behavior is marked `[superseded]` wherever it appears.
 
 - `--format {text,json,md}`
 - `--depth N` how far to follow refs. Default `1`
@@ -169,6 +172,9 @@ nothing; none for `must_not`).
 - `--orphaned` nothing refers to it
 - `--lifecycle {active,superseded}` behaviors only — the axis `state` is not
   (addendum §5); a usage error on a kind that has none
+- `--scope {local,system}` behaviors only — the derived §4.1 classification,
+  which is also the extra column a behavior's row carries; a usage error on
+  a kind that has none
 - `--format {text,json,ids}` `ids` for piping
 
 An unowned element in state `unknown` groups under the owner of the single

@@ -252,3 +252,69 @@ def test_json_carries_the_effective_timing_beside_the_authored_one() -> None:
     assert observations["behavior:order-placed-v2#obs-3"]["effective_timing"] is None
     assert observations["behavior:order-placed-v2#obs-5"]["timing"] is None
     assert observations["behavior:order-placed-v2#obs-5"]["effective_timing"] == "immediate"
+
+
+# --- derived scope, composition, supersession (model addendum §4, §5) ------------
+
+
+def test_a_behavior_names_its_derived_scope_composition_and_supersession() -> None:
+    """`show`'s behavior view carries the three computed facts the addendum
+    insists are never stored — §4.1's scope, §4.2's composes/composed_by, §5's
+    superseded_by — in a `derived:` block of its own: they are answers about
+    the behavior, not fields the file authors."""
+    result = _show("behavior:order-placed")
+
+    assert result.exit_code == ExitCode.OK
+    assert "scope: system" in result.stdout
+    assert "superseded_by: behavior:order-placed-v2" in result.stdout
+    # order-placed-v2's obs-4 observes it: the composition reverse edge.
+    assert "composed_by: behavior:order-placed-v2" in result.stdout
+
+
+def test_derived_lines_without_content_are_omitted() -> None:
+    """`catalog-browsable` composes nothing, is composed by nothing and
+    supersedes nothing: the block says its scope and stays silent about the
+    sides that are empty, the same omit-don't-prove-empty discipline the
+    `points at:` and `referenced by:` sections hold."""
+    result = _show("behavior:catalog-browsable")
+
+    assert result.exit_code == ExitCode.OK
+    assert "scope: local" in result.stdout
+    assert "composes:" not in result.stdout
+    assert "composed_by:" not in result.stdout
+    assert "superseded_by:" not in result.stdout
+
+
+def test_json_carries_the_derived_facts_additive_to_the_element() -> None:
+    """The envelope stays additive: the four derived fields ride beside
+    `element` — never inside it, where they would read as authored — and a
+    non-behavior's envelope carries none of them."""
+    behavior = json.loads(_show("behavior:order-placed", "--format", "json").stdout)
+    component = json.loads(_show("component:orders", "--format", "json").stdout)
+
+    assert behavior["scope"] == "system"
+    assert behavior["superseded_by"] == ["behavior:order-placed-v2"]
+    assert behavior["composed_by"] == ["behavior:order-placed-v2"]
+    assert behavior["composes"] == []
+    assert "scope" not in behavior["element"]
+    assert not any(
+        key in component for key in ("scope", "composes", "composed_by", "superseded_by")
+    )
+
+
+def test_a_superseded_behavior_is_marked_wherever_it_appears() -> None:
+    """§5: a superseded behavior is not deleted, but it must not read as
+    current — marked on its own header, on the neighbour lines of the views it
+    appears in (here: the replacement that composes it, and the resource it
+    watches), and in the markdown shape the site's pages reuse. Its `ab list`
+    row is pinned in test_list_cli.py."""
+    focus = _show("behavior:order-placed")
+    composer = _show("behavior:order-placed-v2")
+    watched = _show("resource:order-cache")
+    page = _show("behavior:order-placed-v2", "--format", "md")
+
+    assert "behavior:order-placed [superseded] — Order placed" in focus.stdout
+    assert "behavior:order-placed (at) [superseded]" in composer.stdout
+    assert "behavior:order-placed (at) [superseded]" in watched.stdout
+    assert "`behavior:order-placed` — at [superseded]" in page.stdout
+    assert "[superseded]" not in _show("behavior:catalog-browsable").stdout

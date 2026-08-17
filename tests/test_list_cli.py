@@ -19,7 +19,9 @@ What these tests pin, per ``docs/tasks/22-list.md``:
 
 Since the model addendum: ``resource`` and ``behavior`` list like every other
 kind; ``--lifecycle`` filters the behavior's second axis (§5 — a behavior can
-be perfectly `specified` and no longer true); and §7's owner inheritance
+be perfectly `specified` and no longer true); §4.1's derived scope joins the
+behavior row as a column and as a ``--scope`` filter, and a superseded
+behavior's row carries §5's visible mark; and §7's owner inheritance
 joins `--owner`/`--unowned`, so an unowned `unknown` answers to the single
 element referencing it that carries an owner — one level, never stored.
 """
@@ -229,6 +231,63 @@ def test_lifecycle_on_a_kind_without_the_axis_is_usage() -> None:
     assert result.exit_code == ExitCode.USAGE
     assert "--lifecycle" in result.stderr
     assert result.stdout == ""
+
+
+# --- derived scope (model addendum §4.1) -----------------------------------------
+
+
+def test_the_behavior_rows_gain_the_derived_scope_column() -> None:
+    """`scope` is computed, never authored (§4.1), so it joins the behavior
+    row between state and title — the classification a reader triages by —
+    and the superseded behavior's row carries §5's visible mark. Every other
+    kind's row stays three columns wide."""
+    behaviors = _list(CLEAN, "behavior").stdout.splitlines()
+    components = _list(CLEAN, "component").stdout.splitlines()
+
+    assert behaviors == [
+        "behavior:catalog-browsable  specified  local  The catalog answers a browse",
+        "behavior:order-placed       specified  system  Order placed [superseded]",
+        "behavior:order-placed-v2    specified  system  Order placed through checkout",
+    ]
+    assert components == [
+        "component:cancellation  constrained  Cancellation",
+        "component:catalog       specified  Catalog",
+        "component:orders        specified  Orders",
+    ]
+
+
+def test_scope_filters_the_derived_classification() -> None:
+    """`--scope` selects on the same §4.1 classification the column shows:
+    `catalog-browsable` is the clean fixture's only local behavior."""
+    assert _ids(CLEAN, "behavior", "--scope", "local") == ["behavior:catalog-browsable"]
+    assert _ids(CLEAN, "behavior", "--scope", "system") == [
+        "behavior:order-placed",
+        "behavior:order-placed-v2",
+    ]
+
+
+def test_scope_on_a_kind_without_the_classification_is_usage() -> None:
+    """Only behaviors have a scope to filter on. Silently ignoring the flag
+    would answer `ab list component --scope local` with every component — the
+    same lie `--lifecycle` on a component would tell."""
+    result = _list(CLEAN, "component", "--scope", "local")
+
+    assert result.exit_code == ExitCode.USAGE
+    assert "--scope" in result.stderr
+    assert result.stdout == ""
+
+
+def test_json_carries_the_derived_scope_beside_the_element() -> None:
+    """§4.1's answer rides in `--json` additively (50-addendum-conventions:
+    derived values appear in `--json`), beside the element's own fields — and
+    only for the kind that has one."""
+    document = json.loads(_list(CLEAN, "behavior", "--format", "json").stdout)
+    plain = json.loads(_list(CLEAN, "resource", "--format", "json").stdout)
+
+    by_id = {element["id"]: element for element in document["elements"]}
+    assert by_id["behavior:catalog-browsable"]["scope"] == "local"
+    assert by_id["behavior:order-placed"]["scope"] == "system"
+    assert "scope" not in plain["elements"][0]
 
 
 # --- §7 owner inheritance --------------------------------------------------------
