@@ -49,7 +49,12 @@ DEFAULT_DIFF_BASE = "origin/HEAD"
 
 
 class Kind(StrEnum):
-    """The element kinds a store holds."""
+    """The element kinds a store holds.
+
+    `note` is deliberately absent: notes are not elements, so there is no
+    `ab new note` and no `ab list note` — `ab note` is its own command group
+    (docs/tasks/50-addendum-conventions.md).
+    """
 
     COMPONENT = "component"
     SEAM = "seam"
@@ -62,6 +67,8 @@ class Kind(StrEnum):
     QUESTION = "question"
     MILESTONE = "milestone"
     EXTERNAL = "external"
+    RESOURCE = "resource"
+    BEHAVIOR = "behavior"
 
 
 class Overlay(StrEnum):

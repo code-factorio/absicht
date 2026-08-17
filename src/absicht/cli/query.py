@@ -52,9 +52,11 @@ from absicht.layout import (
 from absicht.load import StoreResolutionError, resolve_store
 from absicht.models import (
     SCHEMA_VERSION,
+    Behavior,
     Confidence,
     Design,
     Element,
+    Lifecycle,
     Milestone,
     Question,
     Ref,
@@ -67,11 +69,12 @@ from absicht.render import (
     UnknownRefError,
     generate_site,
     neighbourhood,
+    owner_text,
     reasons_text,
     trace_paths,
     worklist,
 )
-from absicht.resolve import Index
+from absicht.resolve import Index, inherited_owners
 
 PANEL = "Step 2 — build, query, look at it"
 """Where these commands appear in `ab --help`."""
@@ -209,6 +212,8 @@ _KIND_FIELDS: dict[Kind, str] = {
     Kind.QUESTION: "questions",
     Kind.MILESTONE: "milestones",
     Kind.EXTERNAL: "externals",
+    Kind.RESOURCE: "resources",
+    Kind.BEHAVIOR: "behaviors",
 }
 """The `Design` field each kind's elements live in: the kind's value plus an
 `s`, except `data` (already collective) and `nfr` (`Design` spells it
@@ -247,6 +252,12 @@ def list_elements(
         typer.Option("--milestone", metavar="REF", help="Members of a milestone's scope."),
     ] = None,
     orphaned: Annotated[bool, typer.Option("--orphaned", help="Nothing refers to it.")] = False,
+    lifecycle: Annotated[
+        Lifecycle | None,
+        typer.Option(
+            "--lifecycle", help="Behaviors only: still how the system works, or replaced."
+        ),
+    ] = None,
     output_format: Annotated[
         ListFormat,
         typer.Option("--format", help="ids for piping."),
@@ -257,12 +268,20 @@ def list_elements(
     if owner is not None and unowned:
         typer.echo("--owner and --unowned are mutually exclusive", err=True)
         raise typer.Exit(ExitCode.USAGE)
+    if lifecycle is not None and kind is not Kind.BEHAVIOR:
+        typer.echo(f"--lifecycle filters behaviors' second axis; a {kind.value} has none", err=True)
+        raise typer.Exit(ExitCode.USAGE)
     opts = options(ctx)
     _, design = _design(opts)
     scope = _milestone_scope(design, milestone)
     states = frozenset(state) if state else None
     tags = frozenset(tag) if tag else None
-    orphans = frozenset(Index.from_design(design).orphaned(kind.value)) if orphaned else None
+    index = Index.from_design(design)
+    orphans = frozenset(index.orphaned(kind.value)) if orphaned else None
+    # §7's inheritance joins the owner filters: an unowned `unknown` with
+    # exactly one referencing owner answers to that owner, so it groups under
+    # `--owner` and leaves `--unowned`. One map, the same one `ab gaps` reads.
+    inherited = inherited_owners(index)
     elements: tuple[Element, ...] = getattr(design, _KIND_FIELDS[kind])
     # Every filter is a predicate AND over one kind, applied in id order — the
     # stable, deterministic answer the spec's no-sort-flag scope asks for.
@@ -271,11 +290,14 @@ def list_elements(
         for element in sorted(elements, key=lambda element: element.id)
         if (states is None or element.state in states)
         and (confidence is None or element.confidence is confidence)
-        and (owner is None or element.owner == owner)
-        and (not unowned or element.owner is None)
+        and (owner is None or element.owner == owner or inherited.get(element.id) == owner)
+        and (not unowned or (element.owner is None and element.id not in inherited))
         and (tags is None or not tags.isdisjoint(element.tags))
         and (scope is None or element.id in scope)
         and (orphans is None or element.id in orphans)
+        and (
+            lifecycle is None or (isinstance(element, Behavior) and element.lifecycle is lifecycle)
+        )
     ]
     output = effective_format(ctx, output_format, opts.json_output, json_member=ListFormat.JSON)
     if output is ListFormat.JSON:
@@ -325,6 +347,9 @@ def _gap_json(gap: Gap) -> dict[str, object]:
         "reasons": list(gap.reasons),
         "due_on": gap.due_on.isoformat() if gap.due_on is not None else None,
         "expires_on": gap.expires_on.isoformat() if gap.expires_on is not None else None,
+        # §7's derived owner, additive per the envelope rules: null unless the
+        # entry is an unowned `unknown` with exactly one referencing owner.
+        "owner_inherited": gap.owner_inherited,
         "element": gap.element.model_dump(mode="json"),
     }
 
@@ -347,7 +372,9 @@ def gaps(
     """Everything unfinished, as a worklist.
 
     `unknown`, `observed` and `delegated` elements, open questions, unowned
-    elements, and expired external assumptions.
+    elements, expired external assumptions, and behaviors with no
+    observations. An unowned `unknown` with exactly one referencing owner
+    reports that owner, marked inherited.
     """
     opts = options(ctx)
     _, design = _design(opts)
@@ -359,11 +386,14 @@ def gaps(
             raise typer.Exit(ExitCode.USAGE)
     # Every filter is a predicate AND over the unioned worklist, applied in
     # the id order `worklist` produces — the same stable answer `list` gives.
+    # `--owner` matches §7's inherited owner too, like `list`'s: an unowned
+    # `unknown` that answers to its single referencing owner is platform's
+    # gap as much as qa's owned one is qa's.
     selected = [
         gap
         for gap in worklist(design, today=date.today())
         if (kind is None or gap.element.id.startswith(f"{kind.value}:"))
-        and (owner is None or gap.element.owner == owner)
+        and (owner is None or gap.element.owner == owner or gap.owner_inherited == owner)
         and (not overdue or QUESTION_OVERDUE in gap.reasons)
         and (target is None or _blocks(gap.element, target))
     ]
@@ -376,13 +406,17 @@ def gaps(
         )
     elif selected:
         # Empty stays silent, like `list`: no blank line where a row would be.
+        # A row with an inherited owner names it between the reasons and the
+        # title — the one annotation only some rows carry.
         width = max(len(gap.element.id) for gap in selected)
-        typer.echo(
-            "\n".join(
-                f"{gap.element.id.ljust(width)}  {reasons_text(gap)}  {gap.element.title}"
-                for gap in selected
-            )
-        )
+        rows = []
+        for gap in selected:
+            columns = [gap.element.id.ljust(width), reasons_text(gap)]
+            if annotation := owner_text(gap):
+                columns.append(annotation)
+            columns.append(gap.element.title)
+            rows.append("  ".join(columns))
+        typer.echo("\n".join(rows))
 
 
 @app.command(rich_help_panel=PANEL)

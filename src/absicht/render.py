@@ -32,22 +32,27 @@ from functools import partial
 from html import escape
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from absicht.check import expired_externals
 from absicht.models import (
     SCHEMA_VERSION,
+    Behavior,
     Criterion,
     Design,
     Element,
     Fidelity,
+    Observation,
+    Outcome,
     Packet,
     PacketElement,
     Question,
     Ref,
+    Resource,
     State,
+    Timing,
 )
-from absicht.resolve import Index, Reference, subtree
+from absicht.resolve import Index, Reference, inherited_owners, subtree
 
 log = logging.getLogger(__name__)
 
@@ -83,16 +88,37 @@ class Hop(Link):
 
 
 @dataclass(frozen=True, slots=True)
+class ObservationView:
+    """One behavior observation with the timing that governs it.
+
+    The effective timing is computed — §1.2's table over what ``at``
+    resolved to, an authored value winning — never read from the authored
+    field alone, because packet and verify need the same answer and none of
+    them should re-derive the table. It is ``None`` exactly for ``must_not``,
+    which carries no timing at all: "at no point" has no when.
+    """
+
+    observation: Observation
+    effective_timing: Timing | None
+
+
+@dataclass(frozen=True, slots=True)
 class Neighbourhood:
     """The answer to ``ab show``: one element with both sides of its graph."""
 
     element: Element
     outgoing: tuple[Hop, ...]
     incoming: tuple[Link, ...]
+    observations: tuple[ObservationView, ...] = ()
+    """A behavior's observations with their effective timings; empty for
+    every other kind, which is what keeps the field one concern."""
 
     def render_text(self, *, include_body: bool) -> str:
         lines = [f"{self.element.id} — {self.element.title}"]
         lines += [f"  {name}: {_value_text(value)}" for name, value in self._fields()]
+        lines += _section(
+            "observations:", (f"  {_observation_line(view)}" for view in self.observations)
+        )
         lines += _section(
             "points at:",
             (
@@ -112,6 +138,14 @@ class Neighbourhood:
         lines = [f"# {self.element.title}", "", f"`{self.element.id}`"]
         lines += [f"- {name}: {_value_text(value)}" for name, value in self._fields()]
         lines += _section(
+            "## Observations",
+            (
+                f"- `{view.observation.id}` — {view.observation.statement}"
+                f" ({_observation_qualifiers(view)})"
+                for view in self.observations
+            ),
+        )
+        lines += _section(
             "## Points at",
             (
                 f"{'  ' * level}- `{hop.other.id}` — {hop.field}"
@@ -126,11 +160,23 @@ class Neighbourhood:
         return "\n".join(lines)
 
     def render_json(self, *, include_body: bool) -> dict[str, object]:
-        """The ``--json``/``--format json`` envelope of ``00-conventions.md``."""
+        """The ``--json``/``--format json`` envelope of ``00-conventions.md``.
+
+        The effective timing rides *beside* the authored one, additively per
+        the envelope rules: ``timing`` stays exactly what the file said (null
+        when unsaid), ``effective_timing`` is the derived answer a consumer
+        acts on.
+        """
         exclude = None if include_body else {"body"}
+        dump = self.element.model_dump(mode="json", exclude=exclude)
+        entries = cast("list[dict[str, object]]", dump.get("observations", []))
+        for entry, view in zip(entries, self.observations, strict=True):
+            entry["effective_timing"] = (
+                view.effective_timing.value if view.effective_timing is not None else None
+            )
         return {
             "schema_version": SCHEMA_VERSION,
-            "element": self.element.model_dump(mode="json", exclude=exclude),
+            "element": dump,
             "points_at": [_hop_json(hop) for hop in self.outgoing],
             "referenced_by": [
                 {"field": link.field, "source": _fields_of(link.other)} for link in self.incoming
@@ -140,11 +186,14 @@ class Neighbourhood:
     def _fields(self) -> tuple[tuple[str, Any], ...]:
         """The element's own fields for the prose renderers: declaration
         order, minus the header's four — `id` and `title` are the heading,
-        `source` is provenance, `body` prints as its own block."""
+        `source` is provenance, `body` prints as its own block — and
+        `observations`, which render as their own section: the one field a
+        compact one-line value would bury five statements inside."""
         return tuple(
             (name, value)
             for name, value in self.element.model_dump(mode="json").items()
-            if name not in ("id", "title", "source", "body") and value not in ("", None, [])
+            if name not in ("id", "title", "source", "body", "observations")
+            and value not in ("", None, [])
         )
 
 
@@ -186,7 +235,47 @@ def _neighbourhood(index: Index, ref: str, *, depth: int) -> Neighbourhood:
             Link(field=edge.field, other=index.by_id[edge.source])
             for edge in index.referenced_by.get(ref, ())
         ),
+        observations=_observation_views(element, index),
     )
+
+
+def _observation_views(element: Element, index: Index) -> tuple[ObservationView, ...]:
+    """A behavior's observations with the timing that governs each — what
+    `at` resolved to decides the default when the author said nothing, the
+    same §1.2 table `Observation.effective_timing` spells. A dangling `at`
+    resolves to no resource kind and so defaults `immediate`, the same
+    "resolves to no neighbour" policy the outgoing side holds."""
+    if not isinstance(element, Behavior):
+        return ()
+    views: list[ObservationView] = []
+    for observation in element.observations:
+        target = index.by_id.get(observation.at)
+        resource_kind = target.resource_kind if isinstance(target, Resource) else None
+        effective = (
+            None
+            if observation.outcome is Outcome.MUST_NOT
+            else observation.effective_timing(resource_kind)
+        )
+        views.append(ObservationView(observation, effective))
+    return tuple(views)
+
+
+def _observation_qualifiers(view: ObservationView) -> str:
+    """The stretch every observation rendering shares: outcome, effective
+    timing (never for `must_not`), what it points at — the order a reader
+    triages in. One spelling, so the text, markdown and site renderings of
+    the view cannot drift apart."""
+    qualifiers = [view.observation.outcome.value]
+    if view.effective_timing is not None:
+        qualifiers.append(view.effective_timing.value)
+    qualifiers.append(f"at {view.observation.at}")
+    return ", ".join(qualifiers)
+
+
+def _observation_line(view: ObservationView) -> str:
+    """One observation as the text format's line: the qualifiers, then the
+    statement it makes."""
+    return f"{view.observation.id}  {_observation_qualifiers(view)} — {view.observation.statement}"
 
 
 def _hop(index: Index, edge: Reference, *, remaining: int) -> Hop:
@@ -267,6 +356,7 @@ UNOWNED = "unowned"
 QUESTION_OPEN = "question-open"
 QUESTION_OVERDUE = "question-overdue"
 EXTERNAL_EXPIRED = "external-expired"
+NO_OBSERVATIONS = "no-observations"
 
 
 @dataclass(frozen=True, slots=True)
@@ -278,21 +368,28 @@ class Gap:
     a deadline) and `expires_on` only for expired externals (the one reason
     about a lapsed date), so a consumer can prioritize without re-reading the
     element; both stay `None` elsewhere rather than copying a date over.
+    `owner_inherited` carries §7's inheritance — the owner of the single
+    element referencing this unowned `unknown`, derived here and never
+    stored, which is also why such an entry stops carrying `unowned`.
     """
 
     element: Element
     reasons: tuple[str, ...]
     due_on: date | None = None
     expires_on: date | None = None
+    owner_inherited: str | None = None
 
 
 def worklist(design: Design, *, today: date) -> tuple[Gap, ...]:
     """Everything unfinished in one worklist, one entry per element, in id order.
 
-    Four sources, unioned: an unfinished state, an unresolved `Question` (the
-    whole kind is a gap by construction — "an `unknown` with an owner and a
-    way out", and one a decision has `resolved_by` is closed), no owner, and
-    an expired external assumption (`absicht.check`'s one spelling of
+    Five sources, unioned: an unfinished state, no owner, a behavior with no
+    observations (the query-side twin of `policy/behavior-needs-observations`,
+    the way unowned elements appear both places — whatever the behavior's
+    state, an expectation with nothing observable is not one), an unresolved
+    `Question` (the whole kind is a gap by construction — "an `unknown` with
+    an owner and a way out", and one a decision has `resolved_by` is closed),
+    and an expired external assumption (`absicht.check`'s one spelling of
     "expired", reused). An element can arrive through several sources at once;
     the entry then carries every reason, in the order the sources are listed
     here — deterministic, like the id order the entries come in.
@@ -302,18 +399,25 @@ def worklist(design: Design, *, today: date) -> tuple[Gap, ...]:
     fixtures never do) would land on the worklist whole and drown it, and the
     spec's own `clean/` expectation — empty, meant to be complete — pins the
     same reading. Who owns a finished element is `ab list --owner`'s question.
+    Within it, §7's inheritance applies: an unowned `unknown` that inherits
+    the owner of the single element referencing it (`inherited_owners`) is
+    accounted for — annotated on the entry, not called unowned.
     """
+    index = Index.from_design(design)
+    inherited = inherited_owners(index)
     expired_on = {
         external.id: external.expires_on for external in expired_externals(design, today=today)
     }
     gaps: list[Gap] = []
-    for element in sorted(Index.from_design(design).by_id.values(), key=lambda e: e.id):
+    for element in sorted(index.by_id.values(), key=lambda e: e.id):
         reasons: list[str] = []
         unfinished = element.state in UNFINISHED_STATES
         if unfinished:
             reasons.append(f"state={element.state.value}")
-            if element.owner is None:
+            if element.owner is None and element.id not in inherited:
                 reasons.append(UNOWNED)
+        if isinstance(element, Behavior) and not element.observations:
+            reasons.append(NO_OBSERVATIONS)
         due_on: date | None = None
         if isinstance(element, Question) and element.resolved_by is None:
             overdue = element.due_on is not None and element.due_on < today
@@ -328,6 +432,7 @@ def worklist(design: Design, *, today: date) -> tuple[Gap, ...]:
                     reasons=tuple(reasons),
                     due_on=due_on,
                     expires_on=expired_on.get(element.id),
+                    owner_inherited=inherited.get(element.id),
                 )
             )
     return tuple(gaps)
@@ -347,6 +452,19 @@ def reasons_text(gap: Gap) -> str:
         else:
             parts.append(reason)
     return ", ".join(parts)
+
+
+def owner_text(gap: Gap) -> str:
+    """The §7 inheritance annotation, empty when the gap does not carry one —
+    so the text line and the site's gaps page grow nothing in the common
+    case. One spelling for both, so the marked form cannot drift apart."""
+    return f"owner: {gap.owner_inherited} (inherited)" if gap.owner_inherited is not None else ""
+
+
+def _attribution(gap: Gap) -> str:
+    """A gap's annotation stretch: its reasons, then the inherited owner when
+    there is one — the order the worklist line reads in."""
+    return " — ".join(part for part in (reasons_text(gap), owner_text(gap)) if part)
 
 
 # --- the mermaid emitter ---------------------------------------------------------
@@ -797,6 +915,15 @@ class _Site:
                 f"<li>{escape(name)}: {escape(_value_text(value))}</li>" for name, value in fields
             ]
             body.append("</ul>")
+        if view.observations:
+            # The same line the text format prints, the page's own spelling of
+            # the show view it reuses.
+            body += ["<h2>Observations</h2>", "<ul>"]
+            body += [
+                f"<li><code>{escape(_observation_line(observation))}</code></li>"
+                for observation in view.observations
+            ]
+            body.append("</ul>")
         if points := self._hop_list(view.outgoing, levels=2):
             body += ["<h2>Points at</h2>", points]
         if incoming := view.incoming:
@@ -832,7 +959,7 @@ class _Site:
         else:
             body.append("<ul>")
             body += [
-                f"<li>{self._ref(gap.element.id, 0)} — {escape(reasons_text(gap))}"
+                f"<li>{self._ref(gap.element.id, 0)} — {escape(_attribution(gap))}"
                 f" — {escape(gap.element.title)}</li>"
                 for gap in gaps
             ]

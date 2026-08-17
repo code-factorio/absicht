@@ -151,6 +151,9 @@ byte-identical output. Everything downstream reads this and nothing else.
 ### `ab show REF`
 
 One element, resolved: its own fields, what points at it, what it points at.
+A behavior's observations render one line each — statement, `at`, `outcome`
+and the effective timing (the addendum's §1.2 default when the author said
+nothing; none for `must_not`).
 
 - `--format {text,json,md}`
 - `--depth N` how far to follow refs. Default `1`
@@ -164,12 +167,21 @@ One element, resolved: its own fields, what points at it, what it points at.
 - `--tag TAG` repeatable
 - `--milestone REF` members of a milestone's scope
 - `--orphaned` nothing refers to it
+- `--lifecycle {active,superseded}` behaviors only — the axis `state` is not
+  (addendum §5); a usage error on a kind that has none
 - `--format {text,json,ids}` `ids` for piping
+
+An unowned element in state `unknown` groups under the owner of the single
+element referencing it (addendum §7) — one level of inheritance, never
+stored, so `--owner` and `--unowned` answer for inherited owners too.
 
 ### `ab gaps`
 
 Everything unfinished, as a worklist: `unknown`, `observed`, `delegated`, open
-questions, unowned elements, expired external assumptions.
+questions, unowned elements, expired external assumptions, and behaviors with
+no observations. An unowned `unknown` with exactly one referencing owner
+reports that owner on its line, marked `(inherited)` — and as
+`owner_inherited` in `--json` — instead of counting as unowned.
 
 - `--kind KIND` `--owner WHO` `--overdue`
 - `--blocking REF` only gaps that block this element or milestone

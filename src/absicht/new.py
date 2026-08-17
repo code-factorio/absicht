@@ -11,11 +11,17 @@ id check goes through ``load`` + ``resolve`` (``Index.by_id``), the file check
 through the filesystem. A renamed file still holding the old id fails the
 first, an unparsable file no index ever saw fails the second.
 
-Three models have a required field no default exists for (``Seam.style``,
-``NonFunctional.attribute``, ``External.external_kind``). Rather than refuse
-to scaffold those kinds, ``ab new`` picks the enum's first declared member and
-says so in a comment in the body — a placeholder a human replaces, never a
-value that would pass ``check`` unreviewed.
+Models with required fields no default exists for (``Seam.style``,
+``NonFunctional.attribute``, ``External.external_kind``, and the addendum's
+``Resource.resource_kind``/``Resource.technology`` and ``Behavior.trigger``)
+are scaffolded rather than refused: ``ab new`` fills each with a placeholder
+— the enum's first declared member where an enum is involved, an obviously
+replaceable string where the field is free text — and says so in a comment
+in the body, never a value that would pass ``check`` unreviewed. The behavior
+template additionally carries the addendum's worked observation example,
+commented out in the body: the file is where an author first meets the
+format, and observation ids are authored inline, never generated here (the
+same boundary criteria have since docs/tasks/00-conventions.md).
 
 ``--edit`` shells out to ``$EDITOR`` on the written file. A command that says
 it will open an editor and does not is worse than one that says why it
@@ -35,6 +41,7 @@ from pydantic import ValidationError
 from absicht.codec import dump_element
 from absicht.load import StoreResolutionError, load_store, resolve_store
 from absicht.models import (
+    Behavior,
     Component,
     DataEntity,
     Decision,
@@ -47,6 +54,8 @@ from absicht.models import (
     Question,
     Rejection,
     Requirement,
+    Resource,
+    ResourceKind,
     Seam,
     SeamStyle,
     State,
@@ -62,10 +71,11 @@ class NewError(Exception):
 # The kind a caller names — a `Kind` value from the CLI surface, spelled as a
 # plain string here because `absicht.cli` sits above this layer in the import
 # stack — mapped to the model it scaffolds and the directory `absicht.load`
-# reads it back from: the layout pinned in docs/tasks/00-conventions.md, one
-# directory per kind. `load` spells the same pairs inline in `load_store`;
-# the round-trip test over every `Kind` keeps the two in step, because an
-# element written to a directory `load` does not read is one nobody loaded.
+# reads it back from: the layout pinned in docs/tasks/00-conventions.md and
+# extended by 50-addendum-conventions.md, one directory per kind. `load`
+# spells the same pairs inline in `load_store`; the round-trip test over
+# every `Kind` keeps the two in step, because an element written to a
+# directory `load` does not read is one nobody loaded.
 _KINDS: dict[str, tuple[type[Element], str]] = {
     "component": (Component, "components"),
     "seam": (Seam, "seams"),
@@ -78,16 +88,22 @@ _KINDS: dict[str, tuple[type[Element], str]] = {
     "question": (Question, "questions"),
     "milestone": (Milestone, "milestones"),
     "external": (External, "externals"),
+    "resource": (Resource, "resources"),
+    "behavior": (Behavior, "behaviors"),
 }
 
-# The kinds whose model has a required field no default exists for, and the
-# placeholder `ab new` fills it with: the enum's first declared member, the
-# smallest honest choice rather than an editorial one. `_placeholder_note`
-# names the field in the body, so the file itself says what to replace.
-_PLACEHOLDERS: dict[str, tuple[str, object]] = {
-    "seam": ("style", SeamStyle.CALL),
-    "nfr": ("attribute", QualityAttribute.LATENCY),
-    "external": ("external_kind", ExternalKind.SERVICE),
+# The kinds whose model has required fields no default exists for, and the
+# placeholders `ab new` fills them with: the enum's first declared member —
+# the smallest honest choice rather than an editorial one — where an enum is
+# involved, and `replace me` where the field is free text (no technology or
+# trigger anyone would ship). `_placeholder_note` names every field in the
+# body, so the file itself says what to replace.
+_PLACEHOLDERS: dict[str, tuple[tuple[str, object], ...]] = {
+    "seam": (("style", SeamStyle.CALL),),
+    "nfr": (("attribute", QualityAttribute.LATENCY),),
+    "external": (("external_kind", ExternalKind.SERVICE),),
+    "resource": (("resource_kind", ResourceKind.STORE), ("technology", "replace me")),
+    "behavior": (("trigger", "replace me"),),
 }
 
 
@@ -118,10 +134,13 @@ def scaffold(
         "state": state,
         "owner": owner,
     }
-    if kind in _PLACEHOLDERS:
-        name, value = _PLACEHOLDERS[kind]
-        fields[name] = value
-        fields["body"] = _placeholder_note(name, str(value))
+    placeholders = _PLACEHOLDERS.get(kind, ())
+    fields.update(placeholders)
+    if placeholders:
+        body = _placeholder_note(placeholders)
+        if kind == "behavior":
+            body += _observation_example(f"{kind}:{slug}")
+        fields["body"] = body
     try:
         return model.model_validate(fields)
     except ValidationError as exc:
@@ -131,11 +150,33 @@ def scaffold(
         raise NewError(f"cannot scaffold {kind} {slug!r}: {problems}") from exc
 
 
-def _placeholder_note(field: str, value: str) -> str:
-    """The template comment that owns up to a guessed field."""
+def _placeholder_note(fields: tuple[tuple[str, object], ...]) -> str:
+    """The template comment that owns up to guessed fields, every one named."""
+    named = ", ".join(f"{name}: {value}" for name, value in fields)
     return (
-        f"<!-- {field}: {value} is a placeholder `ab new` chose because the model has no "
-        f"default for it; replace it before this element is trusted. -->\n"
+        f"<!-- {named} — placeholders `ab new` chose because the model has no "
+        f"defaults for them; replace them before this element is trusted. -->\n"
+    )
+
+
+def _observation_example(behavior_id: str) -> str:
+    """The worked example from the addendum (§3.3), commented out in the
+    template's body: `#obs-1`'s anchoring to this behavior — plus `outcome`
+    and `timing`, which a `must_not` omits — reads easier as a filled-in
+    example than as a rule, and the ids stay authored, never generated."""
+    return (
+        "<!--\n"
+        "Observations are authored inline in the front matter above, anchored to\n"
+        "this behavior exactly as a criterion anchors to its story; `ab new` never\n"
+        "generates them. The worked example from the model addendum, commented:\n"
+        "\n"
+        "    observations:\n"
+        f"      - id: {behavior_id}#obs-1\n"
+        "        statement: Cache entry exists under sess:{id}\n"
+        "        at: resource:session-cache\n"
+        "        outcome: must\n"
+        "        timing: immediate\n"
+        "-->\n"
     )
 
 

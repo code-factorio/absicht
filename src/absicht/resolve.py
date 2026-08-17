@@ -24,7 +24,7 @@ from types import UnionType
 from typing import get_args, get_origin, get_type_hints
 
 from absicht.load import LoadedStore
-from absicht.models import Behavior, Design, Element, Record, Ref, Story
+from absicht.models import Behavior, Design, Element, Record, Ref, State, Story
 
 
 class ResolveError(Exception):
@@ -236,3 +236,31 @@ def subtree(index: Index, ref: Ref) -> frozenset[Ref]:
                 seen.add(edge.target)
                 pending.append(edge.target)
     return frozenset(seen)
+
+
+def inherited_owners(index: Index) -> dict[Ref, str]:
+    """§7's owner inheritance, as a query over one index: each unowned
+    ``unknown`` mapped to the owner of the element that references it.
+
+    Exactly one referencing element must carry an owner — two referencing
+    owners are an ambiguity, and ambiguity is not a guess — and the level is
+    one: a referencing element's own ``owner`` field is read, never an owner
+    it would itself inherit, so chains stop here. Computed, never stored
+    (same inversion as ``parent`` with no ``children[]``).
+
+    Lives here, beside the ``Index`` it reads, because two commands group
+    unknowns by owner — ``ab gaps``' worklist and ``ab list --owner`` — and
+    one inheritance rule should mean one thing wherever it appears.
+    """
+    owners: dict[Ref, str] = {}
+    for ref, element in index.by_id.items():
+        if element.state is not State.UNKNOWN or element.owner is not None:
+            continue
+        candidates = [
+            owner
+            for edge in index.referenced_by.get(ref, ())
+            if (owner := index.by_id[edge.source].owner) is not None
+        ]
+        if len(candidates) == 1:
+            owners[ref] = candidates[0]
+    return owners
