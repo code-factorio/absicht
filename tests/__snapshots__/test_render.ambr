@@ -1,0 +1,29 @@
+# serializer version: 1
+# name: test_the_inbox_page_is_snapshotted
+  '''
+  <!DOCTYPE html>
+  <html lang="en">
+  <head>
+  <meta charset="utf-8">
+  <title>Note inbox</title>
+  </head>
+  <body>
+  <p><a href="index.html">index</a> · <a href="gaps.html">gaps</a> · <a href="trace.html">traceability</a> · <a href="notes.html">notes</a></p>
+  <h1>Note inbox</h1>
+  <p>2 notes, oldest 6 weeks</p>
+  <h2><code>note:anchr1</code></h2>
+  <p>6 weeks · against <a href="elements/resource/order-cache.html">resource:order-cache</a></p>
+  <p>The order cache needs a TTL.</p>
+  <p>Measure before deciding.</p>
+  <h2><code>note:plain01</code></h2>
+  <p>3 days</p>
+  <p>Ask finance about refunds.</p>
+  <h2>Promoted</h2>
+  <ul>
+  <li><code>note:gone01</code> — became <a href="elements/requirement/cancel-orders.html">requirement:cancel-orders</a></li>
+  </ul>
+  </body>
+  </html>
+  
+  '''
+# ---

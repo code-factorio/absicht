@@ -18,8 +18,7 @@ from typing import Annotated
 
 import typer
 
-from absicht.build import BuildError, design_json
-from absicht.build import build as build_design
+from absicht.build import BuildError, build_with_notes, design_json
 from absicht.cli._app import app
 from absicht.cli._common import (
     DEFAULT_DESIGN_OUT,
@@ -58,6 +57,7 @@ from absicht.models import (
     Element,
     Lifecycle,
     Milestone,
+    Note,
     Question,
     Ref,
     Scope,
@@ -94,15 +94,24 @@ def _design(opts: GlobalOptions) -> tuple[Path, Design]:
     `build`'s `FINDINGS`-level refusal — a partial artifact is not an answer
     to a query either (docs/tasks/21-show.md's reuse rule).
     """
+    root, design, _notes = _design_and_notes(opts)
+    return root, design
+
+
+def _design_and_notes(opts: GlobalOptions) -> tuple[Path, Design, tuple[Note, ...]]:
+    """`_design`, carrying the loaded notes: `render`'s inbox page reads them,
+    and no other command in this group has a use for them (addendum §6 —
+    notes are nobody's input but the inbox's)."""
     try:
         root = resolve_store(opts.store)
-        return root, build_design(root, rev=opts.rev)
+        design, notes = build_with_notes(root, rev=opts.rev)
     except (StoreResolutionError, GitError, ValueError) as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(ExitCode.USAGE) from exc
     except BuildError as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(ExitCode.FINDINGS) from exc
+    return root, design, notes
 
 
 @app.command(rich_help_panel=PANEL)
@@ -529,12 +538,12 @@ def render(
         # diagram files would promise rebuilds that never happen.
         typer.echo("--serve previews the site; diagrams are written once, not watched", err=True)
         raise typer.Exit(ExitCode.USAGE)
-    root, design = _design(opts)
+    root, design, notes = _design_and_notes(opts)
     if wants_diagram:
         _render_diagrams(opts, root, design, out, output_format, overlay or (), scope)
         return
     try:
-        pages = generate_site(design, out, today=date.today(), scope=scope)
+        pages = generate_site(design, out, today=date.today(), scope=scope, notes=notes)
     except UnknownRefError as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(ExitCode.USAGE) from exc
@@ -548,11 +557,12 @@ def render(
         return
 
     # The rebuild re-reads the store rather than reusing this run's design —
-    # picking up the change is the point. A frozen --rev is not watched:
-    # editing the working tree under a pinned revision would trigger rebuilds
-    # that cannot change anything.
+    # picking up the change is the point, notes included. A frozen --rev is
+    # not watched: editing the working tree under a pinned revision would
+    # trigger rebuilds that cannot change anything.
     def rebuild() -> None:
-        generate_site(build_design(root, rev=opts.rev), out, today=date.today(), scope=scope)
+        fresh, fresh_notes = build_with_notes(root, rev=opts.rev)
+        generate_site(fresh, out, today=date.today(), scope=scope, notes=fresh_notes)
 
     server = SiteServer(out, port, watch=None if opts.rev is not None else root, rebuild=rebuild)
     typer.echo(f"serving {out} at http://127.0.0.1:{port} (Ctrl-C to stop)", err=True)

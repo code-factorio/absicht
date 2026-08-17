@@ -12,6 +12,11 @@ never sees a note. This module is the whole lifecycle around that exclusion:
   became is the point of keeping it;
 - ``drop`` deletes a note that never mattered, and refuses a promoted one.
 
+The inbox's *reading* lives here too — ``age_text`` and ``inbox_headline``,
+the pressure vocabulary addendum §6 asks for ("age is surfaced, not just
+count") — so the terminal list and the site's inbox page spell one answer,
+never two that drift.
+
 Identity is the one place in the store not derived from a slug: ``note:`` +
 six lowercase base36 characters, drawn at random and collision-checked
 against the store, never asked for — editing a note must not change its
@@ -23,6 +28,7 @@ collision re-draw; ids are identity, not secrets.
 from __future__ import annotations
 
 import random
+from collections.abc import Sequence
 from datetime import date
 from pathlib import Path
 
@@ -115,7 +121,7 @@ def select(
         for note in _notes(root)
         if (include_promoted or note.promoted_to is None) and (ref is None or note.ref == ref)
     ]
-    return tuple(sorted(chosen, key=lambda note: (note.created, note.id)))
+    return tuple(sorted(chosen, key=inbox_order))
 
 
 def promote(store: Path, note_id: str, kind: str, slug: str) -> Element:
@@ -154,6 +160,53 @@ def drop(store: Path, note_id: str) -> None:
             "the record of what it became must survive"
         )
     (root / note.source).unlink()
+
+
+# --- the inbox's reading -----------------------------------------------------------
+
+
+def inbox_order(note: Note) -> tuple[date, str]:
+    """The inbox's deterministic order: oldest first, the id as tiebreak —
+    the one spelling of "oldest first" both readers (`ab note list`, the
+    site's inbox page) sort by, so they cannot disagree."""
+    return (note.created, note.id)
+
+
+def age_text(created: date, today: date) -> str:
+    """A rough human age — the pressure reading, not accounting.
+
+    Approximate buckets (30-day months, 365-day years) are the point: "3
+    months" is the reading the addendum's own example wants, and a day-exact
+    figure would bury it in precision nobody acts on differently. ``today``
+    is a parameter, never a clock read: the caller injects it the way every
+    dated judgement in this project is injected.
+    """
+    days = (today - created).days
+    if days <= 0:
+        return "today"
+    if days < 14:
+        return _plural(days, "day")
+    if days < 60:
+        return _plural(days // 7, "week")
+    if days < 365:
+        return _plural(days // 30, "month")
+    return _plural(days // 365, "year")
+
+
+def inbox_headline(selected: Sequence[Note], today: date) -> str:
+    """`N notes, oldest X`: the count and the age of the oldest, nothing else
+    — §6's "useful pressure", shared by the terminal list and the site's
+    inbox page so the two spell one headline. ``selected`` arrives already in
+    ``inbox_order`` (both callers sort with it), so the first entry *is* the
+    oldest."""
+    if not selected:
+        return "0 notes"
+    count = len(selected)
+    return f"{count} note{'s' if count != 1 else ''}, oldest {age_text(selected[0].created, today)}"
+
+
+def _plural(count: int, unit: str) -> str:
+    return f"{count} {unit}{'s' if count != 1 else ''}"
 
 
 def _root(store: Path) -> Path:

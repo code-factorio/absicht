@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import json
 import sys
-from collections.abc import Sequence
 from datetime import date
 from typing import Annotated
 
@@ -131,22 +130,16 @@ def list_notes(
         if selected:
             typer.echo("\n".join(note.id for note in selected))
     else:
-        typer.echo(_header(selected, today))
+        # The headline and the ages are `absicht.notes`' spellings — the site's
+        # inbox page renders the same two, so one home beats two drifters.
+        typer.echo(notes.inbox_headline(selected, today))
         for note in selected:
             typer.echo(_line(note, today))
 
 
-def _header(selected: Sequence[Note], today: date) -> str:
-    """`N notes, oldest X`: the count and the age of the oldest, nothing else."""
-    if not selected:
-        return "0 notes"
-    count = len(selected)
-    return f"{count} note{'s' if count != 1 else ''}, oldest {_age(selected[0].created, today)}"
-
-
 def _line(note: Note, today: date) -> str:
     """One line per note: id, age, the anchor and the promotion when present, then the gist."""
-    parts = [note.id, _age(note.created, today)]
+    parts = [note.id, notes.age_text(note.created, today)]
     if note.ref is not None:
         parts.append(f"-> {note.ref}")
     if note.promoted_to is not None:
@@ -166,29 +159,6 @@ def _entry(note: Note, today: date) -> dict[str, object]:
         "promoted_to": note.promoted_to,
         "age_days": (today - note.created).days,
     }
-
-
-def _age(created: date, today: date) -> str:
-    """A rough human age — the pressure reading, not accounting.
-
-    Approximate buckets (30-day months, 365-day years) are the point: "3
-    months" is the reading the addendum's own example wants, and a day-exact
-    figure would bury it in precision nobody acts on differently.
-    """
-    days = (today - created).days
-    if days <= 0:
-        return "today"
-    if days < 14:
-        return _plural(days, "day")
-    if days < 60:
-        return _plural(days // 7, "week")
-    if days < 365:
-        return _plural(days // 30, "month")
-    return _plural(days // 365, "year")
-
-
-def _plural(count: int, unit: str) -> str:
-    return f"{count} {unit}{'s' if count != 1 else ''}"
 
 
 @note_app.command("show")

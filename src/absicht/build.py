@@ -28,8 +28,8 @@ from __future__ import annotations
 from pathlib import Path
 
 from absicht.git import list_files_at_rev, read_file_at_rev, repo_root, resolve_rev
-from absicht.load import load_store
-from absicht.models import Design
+from absicht.load import LoadedStore, load_store
+from absicht.models import Design, Note
 from absicht.resolve import resolve
 
 
@@ -42,8 +42,8 @@ class BuildError(Exception):
     """
 
 
-def build(store: Path, *, rev: str | None = None) -> Design:
-    """Load and resolve one store into the `Design` artifact.
+def _loaded(store: Path, *, rev: str | None) -> LoadedStore:
+    """Walk one store with `build`'s refusal: a partial load is not an input.
 
     Without `rev` the store is read from the working tree. With it, the store
     is read out of git at that revision through the `FileSource` seam
@@ -63,7 +63,23 @@ def build(store: Path, *, rev: str | None = None) -> Design:
             f"{len(loaded.errors)} file(s) did not load; refusing to build a partial "
             f"artifact. Run `ab check` for the full report:\n{details}"
         )
-    return resolve(loaded)
+    return loaded
+
+
+def build(store: Path, *, rev: str | None = None) -> Design:
+    """Load and resolve one store into the `Design` artifact."""
+    return resolve(_loaded(store, rev=rev))
+
+
+def build_with_notes(store: Path, *, rev: str | None = None) -> tuple[Design, tuple[Note, ...]]:
+    """`build`, carrying the loaded notes beside the artifact.
+
+    The one caller that needs both is `ab render`'s site: notes are store
+    contents the `Design` never folds in (addendum §6), and its inbox page
+    reads them. The walk parses them either way — this just refuses to drop
+    them — so the same `BuildError` refusal covers both halves."""
+    loaded = _loaded(store, rev=rev)
+    return resolve(loaded), loaded.notes
 
 
 def design_json(design: Design) -> str:

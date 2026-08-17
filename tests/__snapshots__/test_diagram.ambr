@@ -28,6 +28,9 @@
   component_orders: "Orders" {
     shape: rectangle
   }
+  resource_order_cache: "Order cache" {
+    shape: cylinder
+  }
   seam_order_events: "Order events" {
     shape: rectangle
   }
@@ -72,6 +75,7 @@
     component_cancellation["component:cancellation"]
     component_catalog["component:catalog"]
     component_orders["component:orders"]
+    resource_order_cache{{"resource:order-cache"}}
     seam_order_events["seam:order-events"]
     component_cancellation -->|consumes| seam_order_events
     component_orders -->|contains| component_catalog
@@ -114,19 +118,19 @@
 # name: test_each_format_is_snapshotted_per_fixture[svg-clean]
   '''
   <?xml version="1.0" encoding="UTF-8"?>
-  <svg xmlns="http://www.w3.org/2000/svg" viewBox="-2.02 -1.80 12.24 11.30">
-  <rect x="-2.02" y="-1.80" width="12.24" height="11.30" fill="#fcfcfb"/>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="-2.32 -1.80 12.54 19.30">
+  <rect x="-2.32" y="-1.80" width="12.54" height="19.30" fill="#fcfcfb"/>
   <defs>
   <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
   <path d="M 0 0 L 10 5 L 0 10 z" fill="#52514e"/>
   </marker>
   </defs>
-  <line x1="0.34" y1="0.96" x2="0.29" y2="7.10" stroke="#c3c2b7" stroke-width="0.06" marker-end="url(#arrow)"/>
-  <text x="0.31" y="3.91" text-anchor="middle" font-size="0.22" fill="#c3c2b7" paint-order="stroke" stroke="#fcfcfb" stroke-width="0.08">consumes</text>
+  <line x1="0.31" y1="0.96" x2="0.01" y2="7.38" stroke="#c3c2b7" stroke-width="0.06" marker-end="url(#arrow)"/>
+  <text x="0.16" y="4.05" text-anchor="middle" font-size="0.22" fill="#c3c2b7" paint-order="stroke" stroke="#fcfcfb" stroke-width="0.08">consumes</text>
   <line x1="4.72" y1="0.60" x2="7.21" y2="3.06" stroke="#c3c2b7" stroke-width="0.06" marker-end="url(#arrow)"/>
   <text x="5.97" y="1.71" text-anchor="middle" font-size="0.22" fill="#c3c2b7" paint-order="stroke" stroke="#fcfcfb" stroke-width="0.08">contains</text>
-  <line x1="3.68" y1="0.60" x2="0.61" y2="7.10" stroke="#c3c2b7" stroke-width="0.06" marker-end="url(#arrow)"/>
-  <text x="2.15" y="3.73" text-anchor="middle" font-size="0.22" fill="#c3c2b7" paint-order="stroke" stroke="#fcfcfb" stroke-width="0.08">provides</text>
+  <line x1="3.67" y1="0.60" x2="0.32" y2="7.38" stroke="#c3c2b7" stroke-width="0.06" marker-end="url(#arrow)"/>
+  <text x="1.99" y="3.87" text-anchor="middle" font-size="0.22" fill="#c3c2b7" paint-order="stroke" stroke="#fcfcfb" stroke-width="0.08">provides</text>
   <rect x="-0.96" y="-0.44" width="2.60" height="1.40" rx="0.12" data-ref="component:cancellation" fill="#fcfcfb" stroke="#c3c2b7" stroke-width="0.05"/>
   <text x="0.34" y="0.14" text-anchor="middle" font-size="0.32" font-weight="600" fill="#0b0b0b">Cancellation</text>
   <text x="0.34" y="0.50" text-anchor="middle" font-size="0.24" fill="#0b0b0b" textLength="2.40" lengthAdjust="spacingAndGlyphs">component:cancellation</text>
@@ -136,9 +140,12 @@
   <rect x="2.71" y="-0.80" width="2.60" height="1.40" rx="0.12" data-ref="component:orders" fill="#fcfcfb" stroke="#c3c2b7" stroke-width="0.05"/>
   <text x="4.01" y="-0.22" text-anchor="middle" font-size="0.32" font-weight="600" fill="#0b0b0b">Orders</text>
   <text x="4.01" y="0.14" text-anchor="middle" font-size="0.24" fill="#0b0b0b">component:orders</text>
-  <rect x="-1.02" y="7.10" width="2.60" height="1.40" rx="0.12" data-ref="seam:order-events" fill="#fcfcfb" stroke="#c3c2b7" stroke-width="0.05"/>
-  <text x="0.28" y="7.68" text-anchor="middle" font-size="0.32" font-weight="600" fill="#0b0b0b">Order events</text>
-  <text x="0.28" y="8.04" text-anchor="middle" font-size="0.24" fill="#0b0b0b" textLength="2.40" lengthAdjust="spacingAndGlyphs">seam:order-events</text>
+  <rect x="-1.02" y="15.10" width="2.60" height="1.40" rx="0.12" data-ref="resource:order-cache" fill="#fcfcfb" stroke="#c3c2b7" stroke-width="0.05" stroke-dasharray="0.16 0.12"/>
+  <text x="0.28" y="15.68" text-anchor="middle" font-size="0.32" font-weight="600" fill="#0b0b0b">Order cache</text>
+  <text x="0.28" y="16.04" text-anchor="middle" font-size="0.24" fill="#0b0b0b" textLength="2.40" lengthAdjust="spacingAndGlyphs">resource:order-cache</text>
+  <rect x="-1.32" y="7.38" width="2.60" height="1.40" rx="0.12" data-ref="seam:order-events" fill="#fcfcfb" stroke="#c3c2b7" stroke-width="0.05"/>
+  <text x="-0.02" y="7.96" text-anchor="middle" font-size="0.32" font-weight="600" fill="#0b0b0b">Order events</text>
+  <text x="-0.02" y="8.32" text-anchor="middle" font-size="0.24" fill="#0b0b0b" textLength="2.40" lengthAdjust="spacingAndGlyphs">seam:order-events</text>
   </svg>
   '''
 # ---

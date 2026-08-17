@@ -6,11 +6,14 @@ the stack. The element view behind ``ab show REF`` ("literally reuse
 gaps`` ("a gaps page, reusing 23-gaps.md's worklist") and the trace paths
 behind ``ab trace REF``; the static site those three become under ``ab
 render`` (docs/tasks/26-render-site.md) and the preview server that serves
-it; plus the one mermaid emitter every ``--format mermaid`` output calls, so
-two diagram spellings cannot drift apart (docs/tasks/27-render-diagrams.md),
-and the Markdown document ``ab packet --format md`` writes
-(docs/tasks/32-packet-cli.md). The CLI stays a thin adapter over all of them;
-the projections and their reasoning live here.
+it — grown by docs/tasks/60-addendum-render.md with the behavior page's own
+reading (the observation table, the derived facts, the composition graph),
+the traceability sections on the pages the reverse refs answer for, and the
+note inbox; plus the one mermaid emitter every ``--format mermaid`` output
+calls, so two diagram spellings cannot drift apart
+(docs/tasks/27-render-diagrams.md), and the Markdown document ``ab packet
+--format md`` writes (docs/tasks/32-packet-cli.md). The CLI stays a thin
+adapter over all of them; the projections and their reasoning live here.
 
 Rendering is deterministic because the data under it is: neighbours keep the
 order ``Index`` indexed them in, which is ``models.py``'s field declaration
@@ -23,6 +26,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import re
 import threading
 from collections.abc import Callable, Iterable, Iterator, Sequence
@@ -38,20 +42,26 @@ from absicht.check import expired_externals
 from absicht.models import (
     SCHEMA_VERSION,
     Behavior,
+    Component,
     Criterion,
     Design,
     Element,
     Fidelity,
     Lifecycle,
+    Note,
     Observation,
     Packet,
     PacketElement,
     Question,
     Ref,
+    Requirement,
+    Resource,
     Scope,
+    Seam,
     State,
     Timing,
 )
+from absicht.notes import age_text, inbox_headline, inbox_order
 from absicht.resolve import (
     Index,
     Reference,
@@ -548,7 +558,12 @@ def _attribution(gap: Gap) -> str:
 # --- the mermaid emitter ---------------------------------------------------------
 
 
-def mermaid(nodes: Iterable[Ref], edges: Iterable[tuple[Ref, str, Ref]]) -> str:
+def mermaid(
+    nodes: Iterable[Ref],
+    edges: Iterable[tuple[Ref, str, Ref]],
+    *,
+    shape: Callable[[Ref], str] | None = None,
+) -> str:
     """One ``graph TD`` diagram from refs and labelled, directed edges.
 
     The one mermaid emitter in the project: ``ab trace --format mermaid``
@@ -556,14 +571,18 @@ def mermaid(nodes: Iterable[Ref], edges: Iterable[tuple[Ref, str, Ref]]) -> str:
     mermaid`` (docs/tasks/27-render-diagrams.md) with its own node set, so
     the two outputs cannot drift apart. Mermaid node ids may not carry the
     ``:`` a ref is spelled with, so separators flatten to underscores and the
-    full ref rides along as the label. Both iterables are rendered in the
-    order given — determinism is the caller's duty, and both callers walk the
-    design deterministically.
+    full ref rides along as the label. ``shape`` spells a node's bracket per
+    ref — the rectangle by default, whatever the caller's diagram wants
+    otherwise (the diagram half draws resources as hexagons) — still through
+    this emitter, so node lines cannot drift into two spellings. Both
+    iterables are rendered in the order given — determinism is the caller's
+    duty, and both callers walk the design deterministically.
     """
+    spell = shape if shape is not None else (lambda ref: f'["{ref}"]')
     return "\n".join(
         [
             "graph TD",
-            *(f'  {node_key(ref)}["{ref}"]' for ref in nodes),
+            *(f"  {node_key(ref)}{spell(ref)}" for ref in nodes),
             *(
                 f"  {node_key(source)} -->|{field}| {node_key(target)}"
                 for source, field, target in edges
@@ -977,23 +996,32 @@ def _criterion_text(criterion: Criterion) -> str:
 
 
 def generate_site(
-    design: Design, out: Path, *, today: date, scope: str | None = None
+    design: Design,
+    out: Path,
+    *,
+    today: date,
+    scope: str | None = None,
+    notes: Sequence[Note] = (),
 ) -> tuple[Path, ...]:
     """Write the read-only site for ``design`` under ``out``; every page it wrote.
 
-    Four page families: one page per element — ``ab show``'s neighbourhood,
+    Five page families: one page per element — ``ab show``'s neighbourhood,
     reused rather than re-derived, so a page and a terminal view can never
     disagree — an index grouping elements by kind, a traceability page
-    rendering ``ab trace``'s paths per requirement, and a gaps page from the
-    worklist. ``today`` is injected, not read: nothing between the store and
-    the bytes reads a clock, which is what makes the site byte-deterministic.
+    rendering ``ab trace``'s paths per requirement, a gaps page from the
+    worklist, and the note inbox (docs/tasks/60-addendum-render.md).
+    ``today`` is injected, not read: nothing between the store and the bytes
+    reads a clock, which is what makes the site byte-deterministic.
 
-    ``scope`` restricts every page to the subtree reachable from that ref by
-    following refs outward — ``contains`` primarily, the containment tree,
-    plus every other edge the ``Index`` already hands out: a component's own
-    mini-site. Reachability rather than containment alone is also what keeps
-    the site link-consistent under scoping: every ref an in-scope page points
-    at is in scope by construction, so it has a page to link to.
+    ``notes`` are the store's notes, carried in by the caller because no
+    ``Design`` holds them (addendum §6): outside this page they are invisible,
+    exactly as they are in the graph. ``scope`` restricts every page to the
+    subtree reachable from that ref by following refs outward — ``contains``
+    primarily, the containment tree, plus every other edge the ``Index``
+    already hands out: a component's own mini-site. Reachability rather than
+    containment alone is also what keeps the site link-consistent under
+    scoping: every ref an in-scope page points at is in scope by
+    construction, so it has a page to link to.
 
     Raises ``UnknownRefError`` for a scope ref no element has, like ``show``
     and ``trace`` do for theirs.
@@ -1009,6 +1037,7 @@ def generate_site(
         out=out,
         scope=subtree(index, scope) if scope is not None else frozenset(index.by_id),
         today=today,
+        notes=tuple(notes),
     )
     return site.write()
 
@@ -1016,7 +1045,7 @@ def generate_site(
 @dataclass(frozen=True, slots=True)
 class _Site:
     """One site generation run: the design, its index, the pages in scope and
-    where they go. A dataclass because every page builder needs the same five
+    where they go. A dataclass because every page builder needs the same six
     facts, and a parameter list that long would be the same coupling in
     disguise."""
 
@@ -1025,6 +1054,7 @@ class _Site:
     out: Path
     scope: frozenset[Ref]
     today: date
+    notes: tuple[Note, ...]
 
     def write(self) -> tuple[Path, ...]:
         """Render and write every page: the whole-store views first, then one
@@ -1034,6 +1064,7 @@ class _Site:
             ("index.html", self._index_page()),
             ("gaps.html", self._gaps_page()),
             ("trace.html", self._trace_page()),
+            ("notes.html", self._notes_page()),
         ]
         pages += [
             (_page_path(ref), self._element_page(_neighbourhood(self.index, ref, depth=1)))
@@ -1056,11 +1087,12 @@ class _Site:
         return f"<code>{escape(ref)}</code>"
 
     def _nav(self, levels: int) -> str:
-        """The three whole-store views, linked from any page's depth."""
+        """The four whole-store views, linked from any page's depth."""
         links = [
             f'<a href="{_rel("index.html", levels)}">index</a>',
             f'<a href="{_rel("gaps.html", levels)}">gaps</a>',
             f'<a href="{_rel("trace.html", levels)}">traceability</a>',
+            f'<a href="{_rel("notes.html", levels)}">notes</a>',
         ]
         return "<p>" + " · ".join(links) + "</p>"
 
@@ -1069,7 +1101,10 @@ class _Site:
         for kind, elements in self._groups():
             body.append(f"<h2>{escape(kind)}</h2>")
             body.append("<ul>")
-            body += [f"<li>{self._ref(e.id, 0)} — {escape(e.title)}</li>" for e in elements]
+            body += [
+                f"<li>{self._ref(e.id, 0)} — {escape(e.title + superseded_mark(e))}</li>"
+                for e in elements
+            ]
             body.append("</ul>")
         return _page(self.design.system.title, "\n".join(body))
 
@@ -1094,6 +1129,8 @@ class _Site:
             f"<h1>{escape(element.title)}</h1>",
             f"<p><code>{escape(element.id)}</code></p>",
         ]
+        if isinstance(element, Behavior) and element.lifecycle is Lifecycle.SUPERSEDED:
+            body.append(self._superseded_badge(view))
         if fields := view._fields():
             body.append("<ul>")
             body += [
@@ -1101,14 +1138,8 @@ class _Site:
             ]
             body.append("</ul>")
         if view.observations:
-            # The same line the text format prints, the page's own spelling of
-            # the show view it reuses.
-            body += ["<h2>Observations</h2>", "<ul>"]
-            body += [
-                f"<li><code>{escape(_observation_line(observation))}</code></li>"
-                for observation in view.observations
-            ]
-            body.append("</ul>")
+            body += ["<h2>Observations</h2>", self._observation_table(view)]
+        body += self._behavior_sections(view)
         if points := self._hop_list(view.outgoing, levels=2):
             body += ["<h2>Points at</h2>", points]
         if incoming := view.incoming:
@@ -1118,9 +1149,164 @@ class _Site:
                 for link in incoming
             ]
             body.append("</ul>")
+        body += self._traceability_sections(element)
         if element.body:
             body += ["<h2>Body</h2>", _body_html(element.body)]
         return _page(element.title, "\n".join(body))
+
+    def _superseded_badge(self, view: Neighbourhood) -> str:
+        """§5's visible mark on a behavior's own page: it is not deleted, but
+        it must not read as current — and its derived replacements are a click
+        away, the same edges the text view spells ``superseded_by``."""
+        assert view.facts is not None, "a behavior's view always carries its facts"
+        links = ", ".join(self._ref(ref, 2) for ref in view.facts.superseded_by)
+        return f"<p><strong>superseded</strong>{f' by {links}' if links else ''}</p>"
+
+    def _observation_table(self, view: Neighbourhood) -> str:
+        """The addendum's observation table: statement, at (linked to the page
+        it names), outcome, and the *effective* timing — the §1.2 default when
+        the author said nothing, never the raw field, and an em dash for
+        ``must_not``, which carries no when at all."""
+        rows = [
+            "<tr>"
+            f"<td>{escape(entry.observation.statement)}</td>"
+            f"<td>{self._ref(entry.observation.at, 2)}</td>"
+            f"<td>{escape(entry.observation.outcome.value)}</td>"
+            f"<td>{_timing_text(entry)}</td>"
+            "</tr>"
+            for entry in view.observations
+        ]
+        header = "<tr><th>statement</th><th>at</th><th>outcome</th><th>effective timing</th></tr>"
+        return "<table>\n" + header + "\n" + "\n".join(rows) + "\n</table>"
+
+    def _behavior_sections(self, view: Neighbourhood) -> list[str]:
+        """A behavior page's own sections, empty for every other kind: the
+        requirement links it is the how of, and the addendum's derived facts —
+        scope, composition both ways — computed here, never stored (§4.1,
+        §4.2). ``superseded_by`` is the badge's content when the lifecycle
+        says superseded, so the list spells it only in the half-marked case a
+        replacement exists but the element still claims to be current."""
+        element = view.element
+        facts = view.facts
+        if not isinstance(element, Behavior) or facts is None:
+            return []
+        body: list[str] = []
+        if realizes := element.realizes:
+            body += ["<h2>Realizes</h2>", "<ul>"]
+            body += [f"<li>{self._ref(ref, 2)}</li>" for ref in realizes]
+            body.append("</ul>")
+        rows = [f"<li>scope: {facts.scope.value}</li>"]
+        for name, refs in (("composes", facts.composes), ("composed by", facts.composed_by)):
+            if refs:
+                joined = ", ".join(self._ref(ref, 2) for ref in refs)
+                rows.append(f"<li>{name}: {joined}</li>")
+        if facts.superseded_by and element.lifecycle is not Lifecycle.SUPERSEDED:
+            joined = ", ".join(self._ref(ref, 2) for ref in facts.superseded_by)
+            rows.append(f"<li>superseded by: {joined}</li>")
+        body += ["<h2>Derived</h2>", "<ul>", *rows, "</ul>"]
+        if facts.composes or facts.composed_by:
+            body += ["<h2>Composition</h2>", self._composition_svg(element, facts)]
+        return body
+
+    def _traceability_sections(self, element: Element) -> list[str]:
+        """The site-side reading of the reverse refs: a requirement lists the
+        behaviors that realize it, a component, resource or seam the behaviors
+        whose observations touch it — the must-not-break question, answered
+        where the element is. Kinds the spec leaves out get no empty section;
+        a behavior's own composition is the graph it owns."""
+        if isinstance(element, Requirement):
+            heading, field = "Realizing behaviors", "realizes"
+        elif isinstance(element, (Component, Resource, Seam)):
+            heading, field = "Observing behaviors", "at"
+        else:
+            return []
+        behaviors = self._behaviors_by_field(element.id, field)
+        if not behaviors:
+            return []
+        return [
+            f"<h2>{heading}</h2>",
+            "<ul>",
+            *(
+                f"<li>{self._ref(behavior.id, 2)}{escape(superseded_mark(behavior))}"
+                f" — {escape(behavior.title)}</li>"
+                for behavior in behaviors
+            ),
+            "</ul>",
+        ]
+
+    def _behaviors_by_field(self, ref: Ref, field: str) -> tuple[Behavior, ...]:
+        """The behaviors pointing at ``ref`` through ``field``, id-ordered —
+        the reverse refs ``Index`` already holds, filtered to the one
+        relation a traceability section names."""
+        sources = {
+            edge.source
+            for edge in self.index.referenced_by.get(ref, ())
+            if edge.field == field and isinstance(self.index.by_id[edge.source], Behavior)
+        }
+        return tuple(cast("Behavior", self.index.by_id[source]) for source in sorted(sources))
+
+    def _composition_svg(self, behavior: Behavior, facts: BehaviorFacts) -> str:
+        """§4.2 as its own small graph on the behavior's page: what composes
+        it on the left, the behavior itself centre, what it composes on the
+        right — the same two lists the Derived section spells, drawn.
+
+        Positions are computed here, a pure function of the id-ordered edge
+        tuples: this graph has no ``layout.yaml`` to read (``ab layout`` pins
+        the component diagram's nodes, and behaviors are not among them), and
+        a pure function of the same store spells the same picture on every
+        render — which is the whole of the determinism the site promises."""
+        left = self._resolve_all(facts.composed_by)
+        right = self._resolve_all(facts.composes)
+        boxes: list[tuple[Element, float, float]] = []
+        for side, members in ((-1, left), (0, (behavior,)), (1, right)):
+            x = side * (_GRAPH_WIDTH + _GRAPH_GAP)
+            for row, element in enumerate(members):
+                y = (row - (len(members) - 1) / 2) * (_GRAPH_HEIGHT + _GRAPH_ROW)
+                boxes.append((element, x, y))
+        placed = {element.id: (x, y) for element, x, y in boxes}
+        edges = [
+            _graph_edge(placed[source.id], placed[target.id])
+            for source, target in (
+                *((other, behavior) for other in left),
+                *((behavior, other) for other in right),
+            )
+            # A composition self-loop is `ab check`'s cycle finding, not a
+            # picture: it has no direction to draw and no length to aim by.
+            if source.id != target.id
+        ]
+        spans = _graph_bounds(boxes)
+        parts = [
+            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="'
+            f'{_g(spans[0])} {_g(spans[1])} {_g(spans[2])} {_g(spans[3])}">',
+            *edges,
+            *(self._graph_box(element, x, y) for element, x, y in boxes),
+            "</svg>",
+        ]
+        return "\n".join(parts)
+
+    def _resolve_all(self, refs: tuple[Ref, ...]) -> tuple[Element, ...]:
+        """Refs resolved to the elements this site's index holds — a dangling
+        ref resolves to nothing, the policy every view here holds; reporting
+        it is ``ab check``'s job."""
+        return tuple(self.index.by_id[ref] for ref in refs if ref in self.index.by_id)
+
+    def _graph_box(self, element: Element, x: float, y: float) -> str:
+        """One node of the composition graph: the ref as the label — the
+        identity every other view keys on; the title rides as a tooltip —
+        linking to its page when this site holds one."""
+        box = "\n".join(
+            (
+                f"<title>{escape(element.title)}</title>",
+                f'<rect x="{_g(x - _GRAPH_WIDTH / 2)}" y="{_g(y - _GRAPH_HEIGHT / 2)}"'
+                f' width="{_g(_GRAPH_WIDTH)}" height="{_g(_GRAPH_HEIGHT)}" rx="0.12"'
+                ' fill="#ffffff" stroke="#767676" stroke-width="0.05"/>',
+                f'<text x="{_g(x)}" y="{_g(y + 0.08)}" text-anchor="middle" font-size="0.24"'
+                f' fill="#1a1a1a">{escape(element.id)}</text>',
+            )
+        )
+        if element.id in self.scope:
+            return f'<a href="{_rel(_page_path(element.id), 2)}">{box}</a>'
+        return box
 
     def _hop_list(self, hops: tuple[Hop, ...], *, levels: int) -> str:
         """The outgoing side as nested lists, one list level per hop depth —
@@ -1178,6 +1364,46 @@ class _Site:
             parts.append(self._ref(step.ref, 0))
         return "".join(parts)
 
+    def _notes_page(self) -> str:
+        """The inbox (addendum §6): unpromoted notes oldest first under the
+        age headline — `absicht.notes`' one spelling of both — each body
+        rendered, the anchor linked when the site holds its page; promoted
+        notes archived below under what they became. The page is the whole of
+        notes' projection onto the site: nowhere else does a note appear, not
+        as a node, not on a graph, not in traceability."""
+        inbox = sorted((note for note in self.notes if note.promoted_to is None), key=inbox_order)
+        promoted = sorted(
+            (note for note in self.notes if note.promoted_to is not None), key=inbox_order
+        )
+        body = [
+            self._nav(0),
+            "<h1>Note inbox</h1>",
+            f"<p>{escape(inbox_headline(inbox, self.today))}</p>",
+        ]
+        for note in inbox:
+            meta = escape(age_text(note.created, self.today))
+            if note.ref is not None:
+                meta += f" · against {self._ref(note.ref, 0)}"
+            body += [f"<h2><code>{escape(note.id)}</code></h2>", f"<p>{meta}</p>"]
+            if note.body:
+                body.append(_body_html(note.body))
+        if promoted:
+            body += [
+                "<h2>Promoted</h2>",
+                "<ul>",
+                *(self._promoted_line(n) for n in promoted),
+                "</ul>",
+            ]
+        return _page("Note inbox", "\n".join(body))
+
+    def _promoted_line(self, note: Note) -> str:
+        """One archived note: what it became, linked when the site holds its
+        page. Called only on promoted notes — ``promoted_to`` is what put them
+        in the archive."""
+        target = note.promoted_to
+        assert target is not None, "a promoted note carries promoted_to"
+        return f"<li><code>{escape(note.id)}</code> — became {self._ref(target, 0)}</li>"
+
 
 def _page_path(ref: Ref) -> str:
     """A ref's page as a path from the site root: the id's kind as a
@@ -1185,6 +1411,70 @@ def _page_path(ref: Ref) -> str:
     store."""
     kind, _, slug = ref.partition(":")
     return f"elements/{kind}/{slug}.html"
+
+
+# --- the composition graph's geometry ------------------------------------------------
+#
+# The behavior page's small SVG is laid out here rather than read from
+# `layout.yaml`: behaviors are not layout nodes (`ab layout` pins the
+# component diagram's), and the three-column shape — composed-by left, the
+# behavior centre, composes right — states the relation without any layout
+# algorithm at all. Every number is fixed, so the same edges always draw the
+# same picture.
+
+_GRAPH_WIDTH = 3.6
+_GRAPH_HEIGHT = 1.2
+_GRAPH_GAP = 2.0
+_GRAPH_ROW = 0.8
+_GRAPH_MARGIN = 0.5
+
+
+def _g(value: float) -> str:
+    """One number, always the same spelling: two decimals, never an exponent
+    — the fixed precision that keeps the graph byte-identical across runs."""
+    return f"{value:.2f}"
+
+
+def _graph_bounds(
+    boxes: list[tuple[Element, float, float]],
+) -> tuple[float, float, float, float]:
+    """The viewBox over the boxes and a margin: left, top, width, height."""
+    left = min(x for _, x, _ in boxes) - _GRAPH_WIDTH / 2 - _GRAPH_MARGIN
+    top = min(y for _, _, y in boxes) - _GRAPH_HEIGHT / 2 - _GRAPH_MARGIN
+    right = max(x for _, x, _ in boxes) + _GRAPH_WIDTH / 2 + _GRAPH_MARGIN
+    bottom = max(y for _, _, y in boxes) + _GRAPH_HEIGHT / 2 + _GRAPH_MARGIN
+    return left, top, right - left, bottom - top
+
+
+def _graph_edge(source: tuple[float, float], target: tuple[float, float]) -> str:
+    """One directed edge of the composition graph: a line, the triangle that
+    makes it an arrow — computed from the segment's own direction, so a
+    diagonal edge gets a diagonal arrow — and the relation's name above the
+    middle."""
+    (sx, sy), (tx, ty) = source, target
+    dx, dy = tx - sx, ty - sy
+    length = math.sqrt(dx * dx + dy * dy)
+    ux, uy = dx / length, dy / length
+    px, py = -uy, ux
+    back, wing = 0.32, 0.13
+    ax, ay = tx - ux * back + px * wing, ty - uy * back + py * wing
+    bx, by = tx - ux * back - px * wing, ty - uy * back - py * wing
+    return "\n".join(
+        (
+            f'<line x1="{_g(sx)}" y1="{_g(sy)}" x2="{_g(tx)}" y2="{_g(ty)}"'
+            ' stroke="#767676" stroke-width="0.05"/>',
+            f'<polygon points="{_g(tx)},{_g(ty)} {_g(ax)},{_g(ay)} {_g(bx)},{_g(by)}"'
+            ' fill="#767676"/>',
+            f'<text x="{_g((sx + tx) / 2)}" y="{_g((sy + ty) / 2 - 0.08)}"'
+            ' text-anchor="middle" font-size="0.2" fill="#52514e">composes</text>',
+        )
+    )
+
+
+def _timing_text(view: ObservationView) -> str:
+    """The timing cell's text: the effective timing that governs, or an em
+    dash where ``must_not`` has no when to spell — at no point, never."""
+    return view.effective_timing.value if view.effective_timing is not None else "—"
 
 
 def _rel(target: str, levels: int) -> str:

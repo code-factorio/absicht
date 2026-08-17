@@ -35,14 +35,14 @@ from __future__ import annotations
 
 import math
 import re
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from html import escape
 from pathlib import Path
 
 from absicht.git import GitError, commit_count, repo_root
 from absicht.layout import LayoutError, nodes, read_layout
-from absicht.models import Component, Design, Element, Position, Ref, Seam, State
+from absicht.models import Component, Design, Element, Position, Ref, Resource, Seam, State
 from absicht.render import UnknownRefError, mermaid, node_key
 from absicht.resolve import Index, subtree
 
@@ -147,12 +147,17 @@ class Diagram:
 
     def render_mermaid(self, colouring: Colouring | None = None) -> str:
         """The shared emitter's graph — the same node and edge spelling ``ab
-        trace`` prints — plus, with an overlay, one ``classDef``/``class``
-        pair per class. The class statements reuse the emitter's own node
-        keys, which is why those keys are public: a private twin would be
-        free to drift. Mermaid auto-lays-out; the pinned coordinates are
-        SVG's to honour."""
-        lines = [mermaid((element.id for element in self.nodes), self.edges)]
+        trace`` prints, resources wearing the hexagon that keeps them apart
+        from every designed thing's rectangle — plus, with an overlay, one
+        ``classDef``/``class`` pair per class. The class statements reuse the
+        emitter's own node keys, which is why those keys are public: a
+        private twin would be free to drift. Mermaid auto-lays-out; the
+        pinned coordinates are SVG's to honour."""
+        lines = [
+            mermaid(
+                (element.id for element in self.nodes), self.edges, shape=_node_shape(self.nodes)
+            )
+        ]
         if colouring is not None:
             classes = _classes(self.nodes, colouring)
             for caption, fill in classes.items():
@@ -168,11 +173,15 @@ class Diagram:
 
     def render_d2(self, colouring: Colouring | None = None) -> str:
         """[d2](https://d2lang.com) source: one labelled box per node, one
-        labelled arrow per edge, styles as flat key paths. Produced, never
-        rendered — no d2 CLI or library is a dependency of this command."""
+        labelled arrow per edge, styles as flat key paths. A resource is a
+        cylinder, the store/gauge shape d2 spells natively — the boundary's
+        own shape, the rectangle staying every designed thing's. Produced,
+        never rendered — no d2 CLI or library is a dependency of this
+        command."""
         lines = ["direction: right", ""]
         lines += [
-            f'{node_key(element.id)}: "{_d2_text(element.title)}" {{\n  shape: rectangle\n}}'
+            f'{node_key(element.id)}: "{_d2_text(element.title)}" {{\n'
+            f"  shape: {_d2_shape(element)}\n}}"
             for element in self.nodes
         ]
         lines.append("")
@@ -218,11 +227,14 @@ class Diagram:
             position = self.positions[element.id]
             fill = colouring.fill[element.id] if colouring is not None else _SURFACE
             ink = _ink(fill)
+            # A resource's box is dashed — outside the design boundary, the
+            # one stroke style change that says so without a second palette.
+            dash = ' stroke-dasharray="0.16 0.12"' if isinstance(element, Resource) else ""
             lines.append(
                 f'<rect x="{_n(position.x - _BOX_WIDTH / 2)}" y="{_n(position.y - _BOX_HEIGHT / 2)}"'
                 f' width="{_n(_BOX_WIDTH)}" height="{_n(_BOX_HEIGHT)}" rx="0.12"'
                 f' data-ref="{escape(element.id, quote=True)}" fill="{fill}"'
-                f' stroke="{_FRAME}" stroke-width="0.05"/>'
+                f' stroke="{_FRAME}" stroke-width="0.05"{dash}/>'
             )
             # Three lines when the overlay's class rides on the box, two
             # centred ones when it does not.
@@ -462,6 +474,20 @@ def _class_name(caption: str) -> str:
 def _d2_text(title: str) -> str:
     """A title as d2 string content: quotes and backslashes escaped."""
     return title.replace("\\", "\\\\").replace('"', '\\"')
+
+
+def _d2_shape(element: Element) -> str:
+    """The d2 shape a node wears: a cylinder for a resource — the boundary's
+    own shape — the rectangle for everything designed."""
+    return "cylinder" if isinstance(element, Resource) else "rectangle"
+
+
+def _node_shape(node_list: tuple[Element, ...]) -> Callable[[Ref], str]:
+    """The mermaid bracket per ref: a hexagon for a resource, the rectangle
+    every other node wears — handed to the shared emitter so the node lines
+    stay one spelling, whatever shape they wear."""
+    hexagons = frozenset(element.id for element in node_list if isinstance(element, Resource))
+    return lambda ref: f'{{{{"{ref}"}}}}' if ref in hexagons else f'["{ref}"]'
 
 
 def _border_points(

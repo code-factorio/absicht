@@ -231,8 +231,10 @@ Four small systems under `tests/fixtures/systems/`: a clean one, a brownfield
 one that is mostly `observed`, one deliberately broken for the checker, and
 one multi-repo composite. The build artifact is snapshotted per fixture in
 `tests/test_build.py`, each diagram format per fixture in
-`tests/test_diagram.py`; a rendered page and a packet are still to come.
-`syrupy` is already a dev dependency for this.
+`tests/test_diagram.py`, the packet document in `tests/test_packet_cli.py`,
+and the addendum's golden pages (a behavior page with its superseded
+predecessor, a resource page, the note inbox) in `tests/test_render.py` and
+`tests/test_render_cli.py`. `syrupy` is already a dev dependency for this.
 
 **Determinism**, as its own job. Build twice from a clean checkout, diff the
 artifacts, byte-identical or fail. The same for SVG output under a pinned

@@ -12,7 +12,9 @@ enough for a generated diagram"; the graphs here are small and mostly
 hierarchical via ``contains``, which a layered layout states directly.
 Components are ranked by ``contains`` depth and spread along columns by a
 depth-first walk of the ``contains`` forest in id order; seams sit one rank
-below the deepest component, externals one below that. Determinism is by
+below the deepest component, externals one below that, resources one below
+the externals — the boundary the diagram's own shapes underline. Determinism
+is by
 construction — no iteration order a dict could choose differently, no clock —
 and the only input beyond the graph is ``random.Random(seed)``, drawn once
 per node in id order: that is what makes ``--seed`` honest (same seed, same
@@ -52,11 +54,16 @@ class LayoutError(Exception):
 
 
 def nodes(design: Design) -> tuple[Ref, ...]:
-    """The diagram node set: components, seams and externals, in id order.
+    """The diagram node set: components, seams, externals and resources, in
+    id order.
 
     The same boxes `docs/tasks/27-render-diagrams.md` draws, no more: data
     entities and the prose kinds are not diagram nodes, and `--check` asks
-    exactly "does every one of these have a position".
+    exactly "does every one of these have a position". Resources joined the
+    set with `docs/tasks/60-addendum-render.md` — they are drawn at the
+    boundary, outside the design boundary the addendum's §1 argues them into,
+    and `ab layout` positions them like every other node because this one
+    function is the whole node set.
     """
     return tuple(
         sorted(
@@ -64,6 +71,7 @@ def nodes(design: Design) -> tuple[Ref, ...]:
                 *(component.id for component in design.components),
                 *(seam.id for seam in design.seams),
                 *(external.id for external in design.externals),
+                *(resource.id for resource in design.resources),
             )
         )
     )
@@ -94,6 +102,12 @@ def compute(design: Design, *, seed: int = 0) -> Layout:
     positions += _row((seam.id for seam in design.seams), rank=seam_rank, wobble=wobble)
     positions += _row(
         (external.id for external in design.externals), rank=seam_rank + 1, wobble=wobble
+    )
+    # Resources take the outermost rank: outside the design boundary, past the
+    # externals — the spatial form of addendum §1's argument, which the
+    # diagram half of `ab render` underlines with their own shape.
+    positions += _row(
+        (resource.id for resource in design.resources), rank=seam_rank + 2, wobble=wobble
     )
     return Layout(positions=tuple(sorted(positions, key=lambda position: position.ref)))
 

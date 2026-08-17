@@ -204,7 +204,8 @@ decision, in either direction.
 
 ### `ab render`
 
-Generate the read-only site: element pages, traceability, gaps, diagrams.
+Generate the read-only site: element pages, traceability, gaps, the note
+inbox, diagrams.
 
 - `--out DIR` default `.absicht/build/site`
 - `--serve` `--port N` local preview with rebuild on change
