@@ -857,9 +857,9 @@ def test_the_inbox_page_renders_bodies_anchors_and_the_promotion_archive(
 
     page = (tmp_path / "notes.html").read_text(encoding="utf-8")
     # The headline counts the inbox only: promotion removed `note:gone01` from
-    # it — and the oldest unpromoted is 45 days old, a month and a half the
-    # rough buckets round to "1 month".
-    assert "<p>2 notes, oldest 1 month</p>" in page
+    # it — and the oldest unpromoted is 45 days old, six weeks in the rough
+    # buckets (weeks up to 60 days, months from there).
+    assert "<p>2 notes, oldest 6 weeks</p>" in page
     assert "<p>Look at cancellation.</p>" in page
     assert "<p>Twice.</p>" in page
     assert '<a href="elements/component/cancellation.html">component:cancellation</a>' in page

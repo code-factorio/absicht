@@ -168,7 +168,12 @@ def test_mermaid_with_an_overlay_styles_by_class(tmp_path: Path) -> None:
     assert "classDef constrained fill:#" in text
     assert "classDef specified fill:#" in text
     assert "class component_cancellation constrained" in text
-    assert "class component_catalog,component_orders,seam_order_events specified" in text
+    # The resource wears the same specified class — an element like any other
+    # under an overlay — in the members' id order.
+    assert (
+        "class component_catalog,component_orders,resource_order_cache,seam_order_events specified"
+        in text
+    )
 
 
 def test_d2_spells_boxes_and_edges(tmp_path: Path) -> None:

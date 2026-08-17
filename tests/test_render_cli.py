@@ -214,7 +214,7 @@ def test_a_behavior_page_spells_the_observation_table(tmp_path: Path) -> None:
         "<td>must</td><td>immediate</td></tr>"
     ) in page
     assert (
-        "<tr><td>The order shows in the customer's order list</td>"
+        "<tr><td>The order shows in the customer&#x27;s order list</td>"
         '<td><a href="../../elements/component/orders.html">component:orders</a></td>'
         "<td>must</td><td>eventual</td></tr>"
     ) in page
