@@ -12,8 +12,10 @@ resources, observations, notes, and the run store.
 Derived from [`../spec/cli.md`](../spec/cli.md) (the surface), the project
 README and [`CONTEXT.md`](../../CONTEXT.md) (the why), `AGENTS.md` /
 `CLAUDE.md` (house rules), [`../maintainers/verification.md`](../maintainers/verification.md)
-(the gate), `pyproject.toml` (the layer contract), and the current state of
-`src/absicht` — models done, CLI scaffolded, nothing behind it yet.
+(the gate), `pyproject.toml` (the layer contract), and the state `src/absicht`
+was in when these tasks were cut — models done, CLI scaffolded, nothing
+behind it yet. Every numbered task has since landed; only the `9x` block
+remains, deliberately unscoped.
 
 ## Read first
 

@@ -163,17 +163,20 @@ none is a plugin of the others.
 Under construction, command by command — see
 [docs/tasks/](docs/tasks/README.md) for the per-task state and
 [docs/spec/ABSICHT-MODEL-ADDENDUM.md](docs/spec/ABSICHT-MODEL-ADDENDUM.md)
-for the behaviors / resources / notes additions to the model.
+for the behaviors / resources / notes additions to the model. The design
+itself now lives in this repo's own `.absicht/` store; the run that authored
+it is written up in
+[docs/maintainers/dogfooding-the-first-store.md](docs/maintainers/dogfooding-the-first-store.md).
 
 | Step | Contents | State |
 | --- | --- | --- |
 | **0** | Hand-written packets for three real slices; measure agent output against them | |
 | **1** | Schema, file layout, `ab check` — link integrity, orphans, ungoverned elements | done |
-| **2** | `ab build` and a generated read-only site: pages, traceability, gaps, stable-layout SVG | queries done; site in progress |
-| **3** | Milestones as selections; `ab packet` with a one-ring context horizon | in progress |
-| **4** | Source correlation: `.absicht` markers, watermarks, seam contract tests, `ab status` in CI | |
-| **addendum** | Behaviors, observations, resources, notes, run store — [tasks 50–60](docs/tasks/README.md) | proposed |
-| **later** | Brownfield extraction, decision mining from git history, drag-to-reposition | |
+| **2** | `ab build` and a generated read-only site: pages, traceability, gaps, stable-layout SVG | done |
+| **3** | Milestones as selections; `ab packet` with a one-ring context horizon | done |
+| **4** | Source correlation: `.absicht` markers, watermarks, seam contract tests, `ab status` in CI | done |
+| **addendum** | Behaviors, observations, resources, notes, run store — [tasks 50–60](docs/tasks/README.md) | done |
+| **later** | Brownfield extraction, decision mining from git history, drag-to-reposition | dropped until falsified |
 
 Step 0 is the falsification. If a hand-written packet does not measurably
 improve what an agent produces, the rest of this is decoration and the project

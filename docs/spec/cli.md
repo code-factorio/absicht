@@ -200,9 +200,10 @@ decision, in either direction.
 
 Enumeration is bounded: a dense graph holds exponentially many simple paths,
 so the walk carries a budget — 1000 paths, spent in deterministic walk order
-— and says `truncated` in every format when the answer was cut short rather
-than complete. The site's traceability page shows the first 50 per
-requirement and spells its own cut.
+— and says `truncated` in text and json when the answer was cut short rather
+than complete (the mermaid diagram draws the paths it was given, silently).
+The site's traceability page shows the first 50 per requirement and spells
+its own cut.
 
 - `--to REF` paths between two elements
 - `--up` / `--down` direction. Default both
@@ -299,7 +300,8 @@ reported, never failed). The unchecked-`should` count is surfaced as
 visibility, not as an error. absicht does not run checks and does not own
 assertions. Each run is recorded in the local run store
 (`(packet id, commit sha, per-criterion result, evidence ref)`) — beside the
-design store, never in git.
+design store, never in git; a run where no design store can be located, the
+fetched-packet CI case, prints a note and records nothing.
 
 - `--packet PATH` default: the sealed packet in the build dir
 - `--repo PATH` repeatable, for multi-repo slices
