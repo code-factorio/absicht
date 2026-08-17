@@ -60,6 +60,7 @@ from absicht.models import (
     Milestone,
     Question,
     Ref,
+    Scope,
     State,
 )
 from absicht.render import (
@@ -71,10 +72,11 @@ from absicht.render import (
     neighbourhood,
     owner_text,
     reasons_text,
+    superseded_mark,
     trace_paths,
     worklist,
 )
-from absicht.resolve import Index, inherited_owners
+from absicht.resolve import Index, inherited_owners, scope_of
 
 PANEL = "Step 2 — build, query, look at it"
 """Where these commands appear in `ab --help`."""
@@ -258,6 +260,10 @@ def list_elements(
             "--lifecycle", help="Behaviors only: still how the system works, or replaced."
         ),
     ] = None,
+    scope: Annotated[
+        Scope | None,
+        typer.Option("--scope", help="Behaviors only: the derived local/system classification."),
+    ] = None,
     output_format: Annotated[
         ListFormat,
         typer.Option("--format", help="ids for piping."),
@@ -271,9 +277,15 @@ def list_elements(
     if lifecycle is not None and kind is not Kind.BEHAVIOR:
         typer.echo(f"--lifecycle filters behaviors' second axis; a {kind.value} has none", err=True)
         raise typer.Exit(ExitCode.USAGE)
+    if scope is not None and kind is not Kind.BEHAVIOR:
+        typer.echo(
+            f"--scope filters behaviors' derived classification; a {kind.value} has none",
+            err=True,
+        )
+        raise typer.Exit(ExitCode.USAGE)
     opts = options(ctx)
     _, design = _design(opts)
-    scope = _milestone_scope(design, milestone)
+    milestone_scope = _milestone_scope(design, milestone)
     states = frozenset(state) if state else None
     tags = frozenset(tag) if tag else None
     index = Index.from_design(design)
@@ -293,11 +305,12 @@ def list_elements(
         and (owner is None or element.owner == owner or inherited.get(element.id) == owner)
         and (not unowned or (element.owner is None and element.id not in inherited))
         and (tags is None or not tags.isdisjoint(element.tags))
-        and (scope is None or element.id in scope)
+        and (milestone_scope is None or element.id in milestone_scope)
         and (orphans is None or element.id in orphans)
         and (
             lifecycle is None or (isinstance(element, Behavior) and element.lifecycle is lifecycle)
         )
+        and (scope is None or (isinstance(element, Behavior) and scope_of(element) is scope))
     ]
     output = effective_format(ctx, output_format, opts.json_output, json_member=ListFormat.JSON)
     if output is ListFormat.JSON:
@@ -306,7 +319,7 @@ def list_elements(
                 {
                     "schema_version": SCHEMA_VERSION,
                     "kind": kind.value,
-                    "elements": [element.model_dump(mode="json") for element in selected],
+                    "elements": [_element_json(element) for element in selected],
                 }
             )
         )
@@ -317,12 +330,28 @@ def list_elements(
             typer.echo("\n".join(element.id for element in selected))
         else:
             width = max(len(element.id) for element in selected)
-            typer.echo(
-                "\n".join(
-                    f"{element.id.ljust(width)}  {element.state}  {element.title}"
-                    for element in selected
-                )
-            )
+            typer.echo("\n".join(_row(element, width=width) for element in selected))
+
+
+def _element_json(element: Element) -> dict[str, object]:
+    """One listed element as json: the element itself, plus — for a behavior,
+    beside its own fields — the §4.1 classification the `--scope` filter keyed
+    on (derived values appear in `--json`, never in a file an author edits)."""
+    dump: dict[str, object] = element.model_dump(mode="json")
+    if isinstance(element, Behavior):
+        dump["scope"] = scope_of(element).value
+    return dump
+
+
+def _row(element: Element, *, width: int) -> str:
+    """One `list` row: id, state, then — for a behavior, the §4.1 scope the
+    column exists to triage by — then the title, marked when §5 says the
+    element is no longer how the system works."""
+    columns = [element.id.ljust(width), element.state]
+    if isinstance(element, Behavior):
+        columns.append(scope_of(element).value)
+    columns.append(f"{element.title}{superseded_mark(element)}")
+    return "  ".join(columns)
 
 
 def _blocks(element: Element, target: Element) -> bool:

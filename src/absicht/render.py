@@ -42,6 +42,7 @@ from absicht.models import (
     Design,
     Element,
     Fidelity,
+    Lifecycle,
     Observation,
     Outcome,
     Packet,
@@ -49,10 +50,20 @@ from absicht.models import (
     Question,
     Ref,
     Resource,
+    Scope,
     State,
     Timing,
 )
-from absicht.resolve import Index, Reference, inherited_owners, subtree
+from absicht.resolve import (
+    Index,
+    Reference,
+    composed_by,
+    composes,
+    inherited_owners,
+    scope_of,
+    subtree,
+    superseded_by,
+)
 
 log = logging.getLogger(__name__)
 
@@ -103,6 +114,32 @@ class ObservationView:
 
 
 @dataclass(frozen=True, slots=True)
+class BehaviorFacts:
+    """The facts about a behavior the addendum derives rather than stores:
+    its §4.1 scope, the §4.2 composition edges in both directions, and §5's
+    reverse supersession edge.
+
+    Carried on the view so ``show``'s three formats and the site's page spell
+    them identically; computed in ``absicht.resolve``, the one home of each
+    rule, exactly as the packet and verify layers will read them.
+    """
+
+    scope: Scope
+    composes: tuple[Ref, ...]
+    composed_by: tuple[Ref, ...]
+    superseded_by: tuple[Ref, ...]
+
+
+def superseded_mark(element: Element) -> str:
+    """§5's visible mark: a superseded behavior is not deleted — it is the
+    record of what was expected before — but wherever a view names it, it
+    must not read as current. One spelling, so the ``show`` views and the
+    ``list`` rows cannot drift apart."""
+    replaced = isinstance(element, Behavior) and element.lifecycle is Lifecycle.SUPERSEDED
+    return " [superseded]" if replaced else ""
+
+
+@dataclass(frozen=True, slots=True)
 class Neighbourhood:
     """The answer to ``ab show``: one element with both sides of its graph."""
 
@@ -112,22 +149,30 @@ class Neighbourhood:
     observations: tuple[ObservationView, ...] = ()
     """A behavior's observations with their effective timings; empty for
     every other kind, which is what keeps the field one concern."""
+    facts: BehaviorFacts | None = None
+    """A behavior's derived §4/§5 facts; ``None`` for every other kind, the
+    same one-concern shape ``observations`` holds."""
 
     def render_text(self, *, include_body: bool) -> str:
-        lines = [f"{self.element.id} — {self.element.title}"]
+        lines = [f"{self.element.id}{superseded_mark(self.element)} — {self.element.title}"]
         lines += [f"  {name}: {_value_text(value)}" for name, value in self._fields()]
         lines += _section(
             "observations:", (f"  {_observation_line(view)}" for view in self.observations)
         )
+        lines += _section("derived:", (f"  {line}" for line in self._derived_lines()))
         lines += _section(
             "points at:",
             (
-                f"{'  ' * (level + 1)}{hop.other.id} ({hop.field})"
+                f"{'  ' * (level + 1)}{hop.other.id}{superseded_mark(hop.other)} ({hop.field})"
                 for level, hop in _walk(self.outgoing)
             ),
         )
         lines += _section(
-            "referenced by:", (f"  {link.other.id} ({link.field})" for link in self.incoming)
+            "referenced by:",
+            (
+                f"  {link.other.id}{superseded_mark(link.other)} ({link.field})"
+                for link in self.incoming
+            ),
         )
         if include_body and self.element.body:
             lines += ["", self.element.body.rstrip()]
@@ -135,7 +180,11 @@ class Neighbourhood:
 
     def render_markdown(self, *, include_body: bool) -> str:
         """One Markdown document — the shape the site's element pages reuse."""
-        lines = [f"# {self.element.title}", "", f"`{self.element.id}`"]
+        lines = [
+            f"# {self.element.title}",
+            "",
+            f"`{self.element.id}`{superseded_mark(self.element)}",
+        ]
         lines += [f"- {name}: {_value_text(value)}" for name, value in self._fields()]
         lines += _section(
             "## Observations",
@@ -145,15 +194,20 @@ class Neighbourhood:
                 for view in self.observations
             ),
         )
+        lines += _section("## Derived", (f"- {line}" for line in self._derived_lines()))
         lines += _section(
             "## Points at",
             (
-                f"{'  ' * level}- `{hop.other.id}` — {hop.field}"
+                f"{'  ' * level}- `{hop.other.id}`{superseded_mark(hop.other)} — {hop.field}"
                 for level, hop in _walk(self.outgoing)
             ),
         )
         lines += _section(
-            "## Referenced by", (f"- `{link.other.id}` — {link.field}" for link in self.incoming)
+            "## Referenced by",
+            (
+                f"- `{link.other.id}`{superseded_mark(link.other)} — {link.field}"
+                for link in self.incoming
+            ),
         )
         if include_body and self.element.body:
             lines += ["", "## Body", "", self.element.body.rstrip()]
@@ -165,7 +219,9 @@ class Neighbourhood:
         The effective timing rides *beside* the authored one, additively per
         the envelope rules: ``timing`` stays exactly what the file said (null
         when unsaid), ``effective_timing`` is the derived answer a consumer
-        acts on.
+        acts on. The derived §4/§5 facts follow the same rule one level up —
+        beside ``element``, never inside it, where a computed answer would
+        read as an authored field.
         """
         exclude = None if include_body else {"body"}
         dump = self.element.model_dump(mode="json", exclude=exclude)
@@ -174,7 +230,7 @@ class Neighbourhood:
             entry["effective_timing"] = (
                 view.effective_timing.value if view.effective_timing is not None else None
             )
-        return {
+        envelope: dict[str, object] = {
             "schema_version": SCHEMA_VERSION,
             "element": dump,
             "points_at": [_hop_json(hop) for hop in self.outgoing],
@@ -182,6 +238,28 @@ class Neighbourhood:
                 {"field": link.field, "source": _fields_of(link.other)} for link in self.incoming
             ],
         }
+        if self.facts is not None:
+            envelope["scope"] = self.facts.scope.value
+            envelope["composes"] = list(self.facts.composes)
+            envelope["composed_by"] = list(self.facts.composed_by)
+            envelope["superseded_by"] = list(self.facts.superseded_by)
+        return envelope
+
+    def _derived_lines(self) -> Iterator[str]:
+        """The derived block's rows: the scope always, each edge list only
+        when it has content — the omit-don't-prove-empty discipline the
+        headed sections hold."""
+        facts = self.facts
+        if facts is None:
+            return
+        yield f"scope: {facts.scope.value}"
+        for name, refs in (
+            ("composes", facts.composes),
+            ("composed_by", facts.composed_by),
+            ("superseded_by", facts.superseded_by),
+        ):
+            if refs:
+                yield f"{name}: {', '.join(refs)}"
 
     def _fields(self) -> tuple[tuple[str, Any], ...]:
         """The element's own fields for the prose renderers: declaration
@@ -236,6 +314,16 @@ def _neighbourhood(index: Index, ref: str, *, depth: int) -> Neighbourhood:
             for edge in index.referenced_by.get(ref, ())
         ),
         observations=_observation_views(element, index),
+        facts=(
+            BehaviorFacts(
+                scope=scope_of(element),
+                composes=composes(element),
+                composed_by=composed_by(index, ref),
+                superseded_by=superseded_by(index, ref),
+            )
+            if isinstance(element, Behavior)
+            else None
+        ),
     )
 
 

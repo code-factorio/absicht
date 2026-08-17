@@ -204,11 +204,13 @@ def test_a_composing_behavior_names_the_behavior_it_composes() -> None:
     """§4.2: `behavior:order-placed-v2` observes `behavior:order-placed` —
     composition, through an observation's `at`, attributed to the behavior
     that carries it — so the composed behavior appears among the refs out,
-    named with the field that reached it."""
+    named with the field that reached it. The mark beside the id is §5's:
+    the composed behavior is superseded, and a neighbour line is one of the
+    places it must not read as current."""
     result = _show("behavior:order-placed-v2")
 
     assert result.exit_code == ExitCode.OK
-    assert "behavior:order-placed (at)" in result.stdout
+    assert "behavior:order-placed [superseded] (at)" in result.stdout
 
 
 def test_observations_render_readably_not_as_a_json_blob() -> None:
@@ -314,7 +316,7 @@ def test_a_superseded_behavior_is_marked_wherever_it_appears() -> None:
     page = _show("behavior:order-placed-v2", "--format", "md")
 
     assert "behavior:order-placed [superseded] — Order placed" in focus.stdout
-    assert "behavior:order-placed (at) [superseded]" in composer.stdout
-    assert "behavior:order-placed (at) [superseded]" in watched.stdout
-    assert "`behavior:order-placed` — at [superseded]" in page.stdout
+    assert "behavior:order-placed [superseded] (at)" in composer.stdout
+    assert "behavior:order-placed [superseded] (at)" in watched.stdout
+    assert "`behavior:order-placed` [superseded] — at" in page.stdout
     assert "[superseded]" not in _show("behavior:catalog-browsable").stdout

@@ -409,6 +409,21 @@ class Lifecycle(StrEnum):
     SUPERSEDED = "superseded"
 
 
+class Scope(StrEnum):
+    """A behavior's reach, computed from its observations (§4.1).
+
+    `local` — one component, no resources, no seams; `system` — anything
+    else, including nothing observed anywhere. Never a field: the author
+    states observations, the classification follows, so a behavior that
+    grows an observation on a second component becomes a system behavior
+    with no edit to say so. `absicht.resolve.scope_of` is the one spelling
+    of the rule.
+    """
+
+    LOCAL = "local"
+    SYSTEM = "system"
+
+
 class Behavior(Element):
     """An expectation about how the system acts.
 

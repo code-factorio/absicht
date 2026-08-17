@@ -24,7 +24,7 @@ from types import UnionType
 from typing import get_args, get_origin, get_type_hints
 
 from absicht.load import LoadedStore
-from absicht.models import Behavior, Design, Element, Record, Ref, State, Story
+from absicht.models import Behavior, Design, Element, Record, Ref, Scope, State, Story
 
 
 class ResolveError(Exception):
@@ -264,3 +264,75 @@ def inherited_owners(index: Index) -> dict[Ref, str]:
         if len(candidates) == 1:
             owners[ref] = candidates[0]
     return owners
+
+
+# --- the addendum's derived behavior facts (§4.1, §4.2, §5) ----------------------
+
+
+def touches(behavior: Behavior) -> tuple[Ref, ...]:
+    """The union of a behavior's observations' ``at`` refs — §4.1's primitive —
+    deduplicated and id-ordered, so the same store always derives the same
+    tuple whatever order the observations were authored in.
+
+    Composition targets (``behavior:`` refs) ride along, because they are
+    ``at`` refs; they are never followed. A composed behavior's own touches
+    stay its own — the one-hop discipline §4.2 pins for the packet walk,
+    applied to scope — which is why this reads one behavior's observations
+    and walks nothing.
+    """
+    return tuple(sorted({observation.at for observation in behavior.observations}))
+
+
+def scope_of(behavior: Behavior) -> Scope:
+    """§4.1's classification: ``local`` iff the behavior's direct non-behavior
+    touches are exactly one component ref and nothing else — no resource, no
+    seam, no second component — and ``system`` otherwise, including zero
+    touches: nothing observed anywhere is not local, and the policy rule
+    already flags the behavior that observes nothing.
+    """
+    non_behaviors = tuple(ref for ref in touches(behavior) if not ref.startswith("behavior:"))
+    if len(non_behaviors) == 1 and non_behaviors[0].startswith("component:"):
+        return Scope.LOCAL
+    return Scope.SYSTEM
+
+
+def composes(behavior: Behavior) -> tuple[Ref, ...]:
+    """The behavior-to-behavior edges out of ``behavior``: its observations
+    whose ``at`` is a behavior ref (§4.2) — the same behavior-prefix filter
+    that says what the composition graph *is* in ``check``'s cycle rule."""
+    return tuple(ref for ref in touches(behavior) if ref.startswith("behavior:"))
+
+
+def composed_by(index: Index, ref: Ref) -> tuple[Ref, ...]:
+    """The behavior-to-behavior edges into ``ref``: the behaviors whose
+    observations assert that it occurs. An ``at`` edge onto anything else is
+    an observation, not composition, so a non-behavior answers empty — the
+    prefix guard is the definition, not a filter bolted on. Sources are
+    deduplicated (two observations of the same behavior are one edge) and
+    id-ordered.
+    """
+    if not ref.startswith("behavior:"):
+        return ()
+    return tuple(
+        sorted({edge.source for edge in index.referenced_by.get(ref, ()) if edge.field == "at"})
+    )
+
+
+def superseded_by(index: Index, ref: Ref) -> tuple[Ref, ...]:
+    """The reverse of stored ``supersedes`` (§5): who replaced ``ref``.
+
+    Only behaviors are answered — ``Decision.supersedes`` is the pre-addendum
+    ADR relation, with no lifecycle of its own — and the answer is one hop
+    per edge, never the transitive closure of a chain. Wrapped with the name
+    rather than read as "referrers filtered by field": the call sites say
+    what they mean.
+    """
+    return tuple(
+        sorted(
+            {
+                edge.source
+                for edge in index.referenced_by.get(ref, ())
+                if edge.field == "supersedes" and isinstance(index.by_id[edge.source], Behavior)
+            }
+        )
+    )
