@@ -85,7 +85,11 @@ from absicht.models import (
     Observation,
     Question,
     Requirement,
+    Resource,
+    ResourceKind,
     Reversibility,
+    Seam,
+    SeamStyle,
     State,
     System,
 )
@@ -367,6 +371,59 @@ def test_a_seam_referencing_a_resource_is_an_error_naming_the_field() -> None:
     )
 
 
+def test_a_seam_may_not_name_a_resource_through_any_of_its_ref_fields() -> None:
+    """The rule's reach beyond the fixture's `provider` case: a resource as a
+    consumer or carried across is the same dependency wearing a contract, one
+    finding per offending ref with the field it came through named — the
+    reach mutation testing asked for, since `provider` was all the fixture
+    pinned."""
+
+    design = Design(
+        system=System(id="system:tiny", title="Tiny"),
+        components=(Component(id="component:api", title="API"),),
+        # Both resources exist, like the fixture's: the refs resolve, and the
+        # defect is the kind they point at through the seam — not a dangle.
+        resources=(
+            Resource(
+                id="resource:cache",
+                title="Cache",
+                resource_kind=ResourceKind.STORE,
+                technology="Redis",
+            ),
+            Resource(
+                id="resource:store",
+                title="Store",
+                resource_kind=ResourceKind.STORE,
+                technology="PostgreSQL",
+            ),
+        ),
+        seams=(
+            Seam(
+                id="seam:leaky",
+                title="Leaky",
+                style=SeamStyle.SCHEMA,
+                consumers=("component:api", "resource:cache"),
+                carries=("resource:store",),
+            ),
+        ),
+    )
+
+    findings = integrity_findings(design, Index.from_design(design))
+
+    assert [(found.rule_id, found.message) for found in findings] == [
+        (
+            "integrity/seam-references-resource",
+            "seam:leaky's consumers names resource:cache: a seam is a contract between "
+            "components, and a component's relationship to a resource is a dependency",
+        ),
+        (
+            "integrity/seam-references-resource",
+            "seam:leaky's carries names resource:store: a seam is a contract between "
+            "components, and a component's relationship to a resource is a dependency",
+        ),
+    ]
+
+
 def test_an_observation_at_the_wrong_kind_is_an_error_naming_the_observation() -> None:
     """`at` pointing at a requirement, decision or question resolves — the
     target exists — and is still wrong: what an observation may be about is a
@@ -419,6 +476,38 @@ def test_an_observation_at_a_note_says_why_that_target_can_never_resolve() -> No
         "behavior:watching#obs-1's at points at note:abc123; a note is not an element "
         "and can never resolve — an observation may point at a component, a resource, "
         "a seam or another behavior"
+    )
+
+
+def test_an_allowed_observation_does_not_stop_the_wrong_kind_walk() -> None:
+    """One behavior, two observations — the first points at a component
+    (allowed), the second at a question (forbidden): the walk reads every
+    observation a behavior carries, not just the first. The cheap failure
+    this pins against — skipping to the next behavior on the first allowed
+    one — is the survivor mutation testing surfaced."""
+    design = Design(
+        system=System(id="system:tiny", title="Tiny"),
+        components=(Component(id="component:api", title="API"),),
+        questions=(Question(id="question:why", title="Why"),),
+        behaviors=(
+            Behavior(
+                id="behavior:mixed",
+                title="Mixed",
+                trigger="A flow runs.",
+                observations=(
+                    Observation(id="behavior:mixed#obs-1", statement="Fine", at="component:api"),
+                    Observation(id="behavior:mixed#obs-2", statement="Not fine", at="question:why"),
+                ),
+            ),
+        ),
+    )
+
+    (only,) = integrity_findings(design, Index.from_design(design))
+
+    assert only.rule_id == "integrity/observation-at-wrong-kind"
+    assert only.message == (
+        "behavior:mixed#obs-2's at points at question:why; an observation may point at "
+        "a component, a resource, a seam or another behavior"
     )
 
 
