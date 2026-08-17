@@ -44,6 +44,23 @@ The policy layer is the judgement layer, and its severities are the contract:
 - the clock is injected: ``today`` is a parameter of the run, never read
   inside a rule, so an expiry is "past as of when the caller says", and the
   tests never depend on the real date.
+
+The model addendum grows all three layers, and its rule table — ids,
+severities, which rules are subsumed by existing machinery — is pinned in
+``docs/tasks/50-addendum-conventions.md``; these tests implement that table
+rather than re-deriving it:
+
+- integrity: a seam referencing a resource, an observation whose ``at`` is
+  the wrong kind (existence is already the generic dangling-ref sweep's, so
+  the addendum's unresolvable ids stay registered but never emitted), and
+  the two new cycle walks — composition through observations' ``at``, and
+  supersession — joining the same ``_cycles`` machinery: one finding per
+  distinct loop, self-supersession the length-1 case of the same id.
+- policy: a behavior with no observations is an error whatever its
+  lifecycle; a requirement no *active* behavior realizes is the addendum's
+  one warning (a superseded behavior stopped being true, so realizing with
+  one is not realizing); a milestone selecting a superseded behavior is a
+  contradiction and an error.
 """
 
 from __future__ import annotations
@@ -57,13 +74,17 @@ from absicht.check import integrity_findings, policy_findings, schema_findings
 from absicht.findings import RULES, Finding, Severity
 from absicht.load import LoadedStore, LoadError, LoadErrorReason, load_store
 from absicht.models import (
+    Behavior,
     Component,
     Decision,
     Design,
     External,
     ExternalKind,
+    Lifecycle,
     Milestone,
+    Observation,
     Question,
+    Requirement,
     Reversibility,
     State,
     System,
@@ -163,19 +184,37 @@ def _integrity(name: str) -> tuple[Finding, ...]:
     return integrity_findings(design, Index.from_design(design))
 
 
+def test_broken_reports_exactly_its_integrity_findings() -> None:
+    """The whole integrity report over `broken/`, in the order the layer yields
+    it: the pre-addendum trio (two dangling refs, the `contains` cycle) then
+    one finding per addendum rule, each on its own clearly-named fixture file —
+    so `ab check --rule X` points at exactly the case that trips it."""
+
+    assert [found.rule_id for found in _integrity("broken")] == [
+        "integrity/dangling-ref",
+        "integrity/dangling-ref",
+        "integrity/cycle",
+        "integrity/seam-references-resource",
+        "integrity/observation-at-wrong-kind",
+        "integrity/composition-cycle",
+        "integrity/supersession-cycle",
+    ]
+
+
 def test_broken_reports_exactly_its_dangling_refs_and_its_contains_cycle() -> None:
-    """`broken/`'s three integrity findings, per `06-fixtures.md`: `dangling.md`
-    points at a ghost through `contains`, the dangling observation's `at` names
-    a resource nothing defines, and `loop-a`/`loop-b` contain each other — one
-    cycle, one finding. The observation finding is the generic sweep covering
-    the addendum's nested records: it names the behavior that carries the
-    observation, the `at` field and the missing target, with no rule of its
-    own. The policy cases parse and resolve fine, and the three files that
-    fail to load never reach a `Design` at all."""
+    """`broken/`'s pre-addendum integrity findings, still exactly these three:
+    `dangling.md` points at a ghost through `contains`, the dangling
+    observation's `at` names a resource nothing defines, and `loop-a`/`loop-b`
+    contain each other — one cycle, one finding. The observation finding is
+    the generic sweep covering the addendum's nested records: it names the
+    behavior that carries the observation, the `at` field and the missing
+    target, with no rule of its own. Selected by rule id from the report the
+    test above inventories; the addendum's own findings are pinned below."""
 
-    (dangling, observation, cycle) = _integrity("broken")
+    dangling, observation = (
+        found for found in _integrity("broken") if found.rule_id == "integrity/dangling-ref"
+    )
 
-    assert dangling.rule_id == "integrity/dangling-ref"
     assert dangling.severity is Severity.ERROR
     assert dangling.ref == "component:dangling"
     assert dangling.source == "components/dangling.md"
@@ -183,7 +222,6 @@ def test_broken_reports_exactly_its_dangling_refs_and_its_contains_cycle() -> No
     assert "contains" in dangling.message
     assert "component:ghost" in dangling.message
 
-    assert observation.rule_id == "integrity/dangling-ref"
     assert observation.severity is Severity.ERROR
     assert observation.ref == "behavior:dangling-observation"
     assert observation.source == "behaviors/dangling-observation.md"
@@ -194,7 +232,8 @@ def test_broken_reports_exactly_its_dangling_refs_and_its_contains_cycle() -> No
         "which no element in the store defines"
     )
 
-    assert cycle.rule_id == "integrity/cycle"
+    (cycle,) = (found for found in _integrity("broken") if found.rule_id == "integrity/cycle")
+
     assert cycle.severity is Severity.ERROR
     # Pinned exactly, not as substrings: the finding text is user-facing and
     # must stay deterministic — same store, same line, closed path included.
@@ -297,6 +336,154 @@ def test_criteria_anchoring_is_registered_as_handled_upstream() -> None:
     assert "integrity/criteria-anchored" in RULES
 
 
+# --- the addendum's integrity rules -------------------------------------------
+
+
+def _broken_integrity(rule_id: str) -> Finding:
+    """The one finding `broken/` carries under an addendum rule — the fixture
+    holds exactly one clearly-named file per rule, so a rule with no finding
+    here is a fixture that lost its trip wire, not a quiet rule."""
+    matches = [found for found in _integrity("broken") if found.rule_id == rule_id]
+    (only,) = matches
+    return only
+
+
+def test_a_seam_referencing_a_resource_is_an_error_naming_the_field() -> None:
+    """`broken/`'s `legacy-cache` seam resolves — the resource exists — but the
+    kind it points at is the defect (§1.4): the finding names the seam, the
+    field and the resource, so the fix (a dependency, not a contract) has a
+    place to land. `clean/`'s `order-events` seam, provider and consumers all
+    components, is the adjacent case that says nothing."""
+
+    only = _broken_integrity("integrity/seam-references-resource")
+
+    assert only.severity is Severity.ERROR
+    assert only.ref == "seam:legacy-cache"
+    assert only.source == "seams/legacy-cache.md"
+    # Pinned exactly: the message is user-facing and must stay deterministic.
+    assert only.message == (
+        "seam:legacy-cache's provider names resource:audit-store: a seam is a contract "
+        "between components, and a component's relationship to a resource is a dependency"
+    )
+
+
+def test_an_observation_at_the_wrong_kind_is_an_error_naming_the_observation() -> None:
+    """`at` pointing at a requirement, decision or question resolves — the
+    target exists — and is still wrong: what an observation may be about is a
+    component, a resource, a seam or another behavior. The finding names the
+    observation (its id embeds the behavior) and the target."""
+
+    only = _broken_integrity("integrity/observation-at-wrong-kind")
+
+    assert only.severity is Severity.ERROR
+    assert only.ref == "behavior:observation-at-decision"
+    assert only.source == "behaviors/observation-at-decision.md"
+    assert only.message == (
+        "behavior:observation-at-decision#obs-1's at points at decision:one-way-no-why; "
+        "an observation may point at a component, a resource, a seam or another behavior"
+    )
+
+
+def test_an_observation_at_a_note_says_why_that_target_can_never_resolve() -> None:
+    """The note half of the wrong-kind rule, which no fixture holds (a note is
+    not an element, so a fixture file pointing at one would dangle as well):
+    the message folds in why a note is special — it can never resolve, not
+    merely does not. The same design also dangles, which is the generic
+    sweep's finding, not this rule's."""
+
+    design = Design(
+        system=System(id="system:tiny", title="Tiny"),
+        behaviors=(
+            Behavior(
+                id="behavior:watching",
+                title="Watching",
+                trigger="Something is watched.",
+                observations=(
+                    Observation(
+                        id="behavior:watching#obs-1",
+                        statement="A note is pointed at",
+                        at="note:abc123",
+                    ),
+                ),
+            ),
+        ),
+    )
+
+    findings = integrity_findings(design, Index.from_design(design))
+
+    assert [found.rule_id for found in findings] == [
+        "integrity/dangling-ref",
+        "integrity/observation-at-wrong-kind",
+    ]
+    assert findings[1].message == (
+        "behavior:watching#obs-1's at points at note:abc123; a note is not an element "
+        "and can never resolve — an observation may point at a component, a resource, "
+        "a seam or another behavior"
+    )
+
+
+def test_a_composition_cycle_is_one_finding_for_the_one_loop() -> None:
+    """`compose-loop-a` and `compose-loop-b` assert each other's occurrence:
+    one loop, one finding, the closed path named — the same shape as
+    `integrity/cycle`, because it is the same failure: a cycle leaves "what
+    causes what" undefined. `clean/`'s `order-placed-v2` composing the
+    superseded `order-placed` is the adjacent acyclic case."""
+
+    only = _broken_integrity("integrity/composition-cycle")
+
+    assert only.severity is Severity.ERROR
+    assert only.message == (
+        "composition edges form a cycle: "
+        "behavior:compose-loop-a -> behavior:compose-loop-b -> behavior:compose-loop-a"
+    )
+
+
+def test_a_supersession_cycle_is_one_finding_for_the_one_loop() -> None:
+    """`supersede-a` and `supersede-b` replace each other: one loop, one
+    finding. `clean/`'s `order-placed-v2` superseding `order-placed` is the
+    adjacent acyclic case."""
+
+    only = _broken_integrity("integrity/supersession-cycle")
+
+    assert only.severity is Severity.ERROR
+    assert only.message == (
+        "supersession edges form a cycle: "
+        "behavior:supersede-a -> behavior:supersede-b -> behavior:supersede-a"
+    )
+
+
+def test_self_supersession_is_the_length_one_case_of_the_same_rule() -> None:
+    """A behavior superseding itself is the degenerate loop, not its own rule
+    id: the pinned table gives supersession one id, and "which behavior is
+    current" has no answer either way. No fixture holds it — the cycle pair
+    already trips the rule — so this is the one in-design case."""
+
+    design = Design(
+        system=System(id="system:tiny", title="Tiny"),
+        components=(Component(id="component:api", title="API"),),
+        behaviors=(
+            Behavior(
+                id="behavior:self",
+                title="Self",
+                trigger="A behavior replaces itself.",
+                supersedes=("behavior:self",),
+                observations=(
+                    Observation(
+                        id="behavior:self#obs-1",
+                        statement="Something is observable",
+                        at="component:api",
+                    ),
+                ),
+            ),
+        ),
+    )
+
+    (only,) = integrity_findings(design, Index.from_design(design))
+
+    assert only.rule_id == "integrity/supersession-cycle"
+    assert only.message == "supersession edges form a cycle: behavior:self -> behavior:self"
+
+
 # --- the policy layer --------------------------------------------------------
 
 
@@ -316,14 +503,14 @@ def test_brownfield_reports_exactly_its_policy_findings() -> None:
     case this layer must not get wrong: every element but one is `observed`,
     and `observed` alone is never a finding — unexplained is that store's
     honest default, not a violation. The real gaps are `requirement:audit-trail`
-    (unknown and unowned — and unrealized: the spec reads "a requirement needs
-    a realizing component" unconditionally, and the warning severity, not
-    silence, is what keeps that honesty from reading as breakage) and, since
-    the gaps task grew the fixture, `external:payment-api`, whose assumptions
-    lapsed in the past. The two questions and the milestone are owned, so the
-    unknown-owner rule still fires exactly once."""
+    (unknown and unowned — and unrealized twice over: no component realizes it
+    and no behavior does either, the addendum's second warning landing beside
+    the pre-addendum one) and, since the gaps task grew the fixture,
+    `external:payment-api`, whose assumptions lapsed in the past. The two
+    questions and the milestone are owned, so the unknown-owner rule still
+    fires exactly once."""
 
-    (unowned, unrealized, expired) = _policy("brownfield", today=date(2026, 8, 16))
+    (unowned, unrealized, expired, unbehaviored) = _policy("brownfield", today=date(2026, 8, 16))
 
     assert unowned.rule_id == "policy/unknown-needs-owner"
     assert unowned.severity is Severity.ERROR
@@ -345,26 +532,36 @@ def test_brownfield_reports_exactly_its_policy_findings() -> None:
         "external:payment-api's assumptions expired on 2026-01-01 — re-check before trusting"
     )
 
+    assert unbehaviored.rule_id == "policy/requirement-needs-behavior"
+    assert unbehaviored.severity is Severity.WARN
+    assert unbehaviored.ref == "requirement:audit-trail"
+    assert unbehaviored.source == "requirements/audit-trail.md"
+    assert unbehaviored.message == "requirement:audit-trail is realized by no active behavior"
+
 
 def test_clean_has_no_policy_findings() -> None:
-    """`clean/` is complete by construction — every requirement realized, its
-    one decision `costly` (not `one_way`) with a real rationale body, no
-    externals to expire — so the judgement layer has nothing to say at any
-    severity."""
+    """`clean/` is complete by construction — every requirement realized by a
+    component and by an active behavior, every behavior carrying
+    observations, its one decision `costly` (not `one_way`) with a real
+    rationale body, no externals to expire — so the judgement layer has
+    nothing to say at any severity, the addendum's warning included."""
 
     assert _policy("clean", today=date(2026, 8, 16)) == ()
 
 
-def test_broken_reports_exactly_its_three_policy_defects() -> None:
+def test_broken_reports_exactly_its_policy_defects() -> None:
     """One finding per deliberately broken policy case in `broken/` — the
     unowned unknown, the rationale-less `one_way` decision, the expired
-    external — and nothing else: the two files the schema layer refused never
-    reach the `Design`, and the dangling ref and the `contains` cycle are the
-    integrity layer's findings, not policy's. The clock is fixed after the
-    fixture's `expires_on` (2026-01-10): the date on disk stays put while
-    "today" moves."""
+    external, and the addendum's three: the behavior with no observations,
+    the requirement no behavior realizes (the one warning), and the milestone
+    selecting superseded work — and nothing else: the files the schema layer
+    refused never reach the `Design`, and the integrity defects are not
+    policy's to judge. The clock is fixed after the fixture's `expires_on`
+    (2026-01-10): the date on disk stays put while "today" moves."""
 
-    (unowned, bare, expired) = _policy("broken", today=date(2026, 8, 16))
+    (unowned, bare, expired, unobservable, unbehaviored, superseded) = _policy(
+        "broken", today=date(2026, 8, 16)
+    )
 
     assert (unowned.rule_id, bare.rule_id, expired.rule_id) == (
         "policy/unknown-needs-owner",
@@ -383,6 +580,27 @@ def test_broken_reports_exactly_its_three_policy_defects() -> None:
     assert expired.ref == "external:expired"
     assert expired.source == "externals/expired.md"
     assert "2026-01-10" in expired.message
+
+    assert unobservable.rule_id == "policy/behavior-needs-observations"
+    assert unobservable.severity is Severity.ERROR
+    assert unobservable.ref == "behavior:no-observations"
+    assert unobservable.source == "behaviors/no-observations.md"
+    assert unobservable.message == "behavior:no-observations has no observations"
+
+    assert unbehaviored.rule_id == "policy/requirement-needs-behavior"
+    assert unbehaviored.severity is Severity.WARN
+    assert unbehaviored.ref == "requirement:no-behavior"
+    assert unbehaviored.source == "requirements/no-behavior.md"
+    assert unbehaviored.message == "requirement:no-behavior is realized by no active behavior"
+
+    assert superseded.rule_id == "policy/superseded-in-must-satisfy"
+    assert superseded.severity is Severity.ERROR
+    assert superseded.ref == "milestone:superseded-slice"
+    assert superseded.source == "milestones/superseded-slice.md"
+    assert superseded.message == (
+        "milestone:superseded-slice's includes names behavior:superseded-flow, "
+        "which is superseded and stopped being must-satisfy input"
+    )
 
 
 @pytest.mark.parametrize(
@@ -482,6 +700,151 @@ def test_an_unknown_with_an_owner_is_not_a_finding() -> None:
         system=System(id="system:tiny", title="Tiny", state=State.SPECIFIED),
         questions=(
             Question(id="question:owned", title="Owned", state=State.UNKNOWN, owner="vinz"),
+        ),
+    )
+
+    assert policy_findings(design, Index.from_design(design), today=date(2026, 8, 16)) == ()
+
+
+# --- the addendum's policy rules ----------------------------------------------
+
+
+def test_a_superseded_behavior_without_observations_is_still_broken() -> None:
+    """The rule's reach beyond the fixture: `lifecycle` carves nothing out —
+    a superseded behavior with no observations was always broken, which is why
+    the severity is an error — while the adjacent active behavior, carrying
+    one, says nothing. States are `specified` so only this rule can speak."""
+
+    design = Design(
+        system=System(id="system:tiny", title="Tiny", state=State.SPECIFIED),
+        components=(Component(id="component:api", title="API", state=State.SPECIFIED),),
+        behaviors=(
+            Behavior(
+                id="behavior:retired-bare",
+                title="Retired and bare",
+                state=State.SPECIFIED,
+                trigger="An old flow ran.",
+                lifecycle=Lifecycle.SUPERSEDED,
+            ),
+            Behavior(
+                id="behavior:watched",
+                title="Watched",
+                state=State.SPECIFIED,
+                trigger="A flow runs.",
+                observations=(
+                    Observation(
+                        id="behavior:watched#obs-1",
+                        statement="Something is observable",
+                        at="component:api",
+                    ),
+                ),
+            ),
+        ),
+    )
+
+    (only,) = policy_findings(design, Index.from_design(design), today=date(2026, 8, 16))
+
+    assert only.rule_id == "policy/behavior-needs-observations"
+    assert only.severity is Severity.ERROR
+    assert only.ref == "behavior:retired-bare"
+    assert only.message == "behavior:retired-bare has no observations"
+
+
+def test_a_requirement_realized_only_by_superseded_behaviors_is_still_unrealized() -> None:
+    """The `active` in the rule is load-bearing: supersession is recorded on
+    the replacement and a superseded behavior stopped being true, so realizing
+    a requirement with one is realizing it with something the system no longer
+    does. The adjacent requirement, realized by an active behavior, says
+    nothing — warning included, which is the severity contract's other half."""
+
+    design = Design(
+        system=System(id="system:tiny", title="Tiny", state=State.SPECIFIED),
+        components=(Component(id="component:api", title="API", state=State.SPECIFIED),),
+        requirements=(
+            Requirement(
+                id="requirement:done",
+                title="Done",
+                state=State.SPECIFIED,
+                realized_by=("component:api",),
+            ),
+            Requirement(
+                id="requirement:legacy-only",
+                title="Legacy only",
+                state=State.SPECIFIED,
+                realized_by=("component:api",),
+            ),
+        ),
+        behaviors=(
+            Behavior(
+                id="behavior:current",
+                title="Current",
+                state=State.SPECIFIED,
+                trigger="A flow runs.",
+                realizes=("requirement:done",),
+                observations=(
+                    Observation(
+                        id="behavior:current#obs-1",
+                        statement="Something is observable",
+                        at="component:api",
+                    ),
+                ),
+            ),
+            Behavior(
+                id="behavior:retired",
+                title="Retired",
+                state=State.SPECIFIED,
+                trigger="An old flow ran.",
+                lifecycle=Lifecycle.SUPERSEDED,
+                realizes=("requirement:legacy-only",),
+                observations=(
+                    Observation(
+                        id="behavior:retired#obs-1",
+                        statement="Something was observable",
+                        at="component:api",
+                    ),
+                ),
+            ),
+        ),
+    )
+
+    (only,) = policy_findings(design, Index.from_design(design), today=date(2026, 8, 16))
+
+    assert only.rule_id == "policy/requirement-needs-behavior"
+    assert only.severity is Severity.WARN
+    assert only.ref == "requirement:legacy-only"
+    assert only.message == "requirement:legacy-only is realized by no active behavior"
+
+
+def test_an_active_behavior_in_a_must_satisfy_set_is_fine() -> None:
+    """The other side of `policy/superseded-in-must-satisfy`: naming an active
+    behavior in `includes` is exactly what the addendum's selection is for —
+    the work a slice must newly satisfy — and no finding fires."""
+
+    design = Design(
+        system=System(id="system:tiny", title="Tiny", state=State.SPECIFIED),
+        components=(Component(id="component:api", title="API", state=State.SPECIFIED),),
+        behaviors=(
+            Behavior(
+                id="behavior:current",
+                title="Current",
+                state=State.SPECIFIED,
+                trigger="A flow runs.",
+                observations=(
+                    Observation(
+                        id="behavior:current#obs-1",
+                        statement="Something is observable",
+                        at="component:api",
+                    ),
+                ),
+            ),
+        ),
+        milestones=(
+            Milestone(
+                id="milestone:m1",
+                title="M1",
+                state=State.SPECIFIED,
+                includes=("behavior:current",),
+            ),
         ),
     )
 

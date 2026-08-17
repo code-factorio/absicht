@@ -48,7 +48,7 @@ FIXTURES = Path(__file__).parent / "fixtures" / "systems"
 CLEAN = FIXTURES / "clean"
 BROWNFIELD = FIXTURES / "brownfield"
 
-# clean/'s fourteen elements plus the three whole-store views. A page's path is
+# clean/'s fifteen elements plus the three whole-store views. A page's path is
 # its id with the kind as a directory — one directory per kind, like the store.
 CLEAN_PAGES = {
     "index.html",
@@ -64,6 +64,7 @@ CLEAN_PAGES = {
     "elements/seam/order-events.html",
     "elements/data/order.html",
     "elements/resource/order-cache.html",
+    "elements/behavior/catalog-browsable.html",
     "elements/behavior/order-placed-v2.html",
     "elements/behavior/order-placed.html",
     "elements/decision/event-log.html",

@@ -44,7 +44,7 @@ EXPECTED_COUNTS: dict[str, dict[str, int]] = {
         "seams": 1,
         "data": 1,
         "resources": 1,
-        "behaviors": 2,
+        "behaviors": 3,
         "decisions": 1,
         "milestones": 1,
     },
@@ -60,13 +60,15 @@ EXPECTED_COUNTS: dict[str, dict[str, int]] = {
     },
     "broken": {
         "externals": 1,
+        "requirements": 1,
         "stories": 1,
         "components": 3,
         "seams": 1,
         "resources": 1,
-        "behaviors": 4,
+        "behaviors": 8,
         "decisions": 1,
         "questions": 1,
+        "milestones": 1,
     },
     "composite": {"externals": 1, "components": 2, "seams": 1, "data": 1},
 }
@@ -104,12 +106,13 @@ def test_by_id_holds_every_element_including_the_system() -> None:
 
     index = Index.from_design(design)
 
-    assert len(index.by_id) == 14  # the system plus thirteen elements
+    assert len(index.by_id) == 15  # the system plus fourteen elements
     assert index.by_id["system:acme"] is design.system
     assert index.by_id["seam:order-events"] is design.seams[0]
-    # `order-placed-v2.md` sorts before `order-placed.md`, so the replacement
-    # is the first behavior on disk.
-    assert index.by_id["behavior:order-placed-v2"] is design.behaviors[0]
+    # Behaviors load in filename order: `catalog-browsable.md` first, then
+    # `order-placed-v2.md` before `order-placed.md`.
+    assert index.by_id["behavior:catalog-browsable"] is design.behaviors[0]
+    assert index.by_id["behavior:order-placed-v2"] is design.behaviors[1]
 
 
 def test_referenced_by_finds_the_requirement_behind_a_component() -> None:

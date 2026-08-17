@@ -10,10 +10,13 @@ the format `00-conventions.md` pins: `system.yaml` as plain YAML, one
   every criterion is anchored to its own story, every element `specified` or
   `constrained`. Nothing here should ever produce a finding — it is the store
   a rule's "does not trip" case runs against. Since the model addendum, it
-  also carries one resource (`resource:order-cache`) and two behaviors:
+  also carries one resource (`resource:order-cache`) and three behaviors:
   `behavior:order-placed-v2` supersedes — and composes, through an
   observation's `at` — the older `behavior:order-placed`, whose observations
-  between them exercise `must`, `must_not`, `should` and both timings.
+  between them exercise `must`, `must_not`, `should` and both timings; and
+  `behavior:catalog-browsable` keeps `requirement:browse-catalog` realized
+  by an active behavior, the state the addendum's requirement-needs-behavior
+  warning asks of every requirement.
 - **`brownfield/`** — an honest reading of a legacy system: `observed`
   elements without rationale, one `unknown` requirement with no owner (the gap
   `ab gaps` exists to surface), the orphaned `data:audit-log` nothing points
@@ -49,14 +52,28 @@ the format `00-conventions.md` pins: `system.yaml` as plain YAML, one
     `integrity/dangling-ref` walk covers observation refs, so the finding
     lands on the behavior that carries the observation.
   - `behaviors/observation-at-decision.md` — an observation whose `at`
-    resolves, but to a decision: the wrong kind of target (the addendum's
-    observation-at-wrong-kind rule, landing with the check addendum).
+    resolves, but to a decision: the wrong kind of target
+    (`integrity/observation-at-wrong-kind`).
   - `behaviors/supersede-a.md` + `behaviors/supersede-b.md` — each
-    `supersedes` the other: a supersession cycle for the check addendum to
-    find, the same shape as the `contains` one above.
+    `supersedes` the other: a supersession cycle
+    (`integrity/supersession-cycle`), the same shape as the `contains` one
+    above.
+  - `behaviors/compose-loop-a.md` + `behaviors/compose-loop-b.md` — each
+    carries an observation whose `at` is the other: a composition cycle
+    (addendum §4.2), one finding for the one loop, like every cycle rule.
+  - `behaviors/no-observations.md` — a behavior with no observations
+    (`policy/behavior-needs-observations`).
+  - `behaviors/superseded-flow.md` + `milestones/superseded-slice.md` — a
+    superseded behavior named in a milestone's must-satisfy set
+    (`policy/superseded-in-must-satisfy`); the behavior itself is
+    well-formed, the defect is the milestone selecting it.
+  - `requirements/no-behavior.md` — realized by a component but by no
+    behavior (`policy/requirement-needs-behavior`, the addendum's one
+    warning; the component keeps `policy/requirement-needs-realizer`
+    quiet so the file trips exactly one rule).
   - `seams/legacy-cache.md` — a seam whose `provider` is
     `resource:audit-store`: resources do not participate in seams (addendum
-    §1.4; the rule lands with the check addendum). `resources/audit-store.md`
+    §1.4; `integrity/seam-references-resource`). `resources/audit-store.md`
     itself is a well-formed element, so the seam's ref resolves — the defect
     is the kind it points at, not a dangling target.
   - `questions/unowned-unknown.md` — `state: unknown`, no owner
@@ -70,7 +87,8 @@ the format `00-conventions.md` pins: `system.yaml` as plain YAML, one
   `stories/minimal-story.md`, the story next to the broken one that proves
   the walk continues — is explicitly `specified`, so the unowned unknown
   above is the only thing in this store that can trip an unknown-state
-  policy rule. Load must not flag any of the nine; `ab check` must.
+  policy rule. Load must not flag any of the check-layer files; `ab check`
+  must flag each under its own rule.
 - **`composite/`** — one design over two units: a `system.yaml` with two
   `units`, a seam whose provider and consumer sit in different units, one
   external assumption that is verified and current (the counterpart to

@@ -16,7 +16,11 @@ the bytes on stdout, and the flags that shape them:
   overriding an explicit one (docs/adr/0001);
 - ``--changed-only`` against a throwaway repo in the shape of
   ``tests/test_git.py``'s fixture;
-- ``--explain``, which answers from the rule catalog without reading a store.
+- ``--explain``, which answers from the rule catalog without reading a store;
+- the model addendum's severity contract on top of both: each new error rule
+  alone exits ``FINDINGS``, its one warning alone exits ``OK`` until
+  ``--strict`` promotes it, and ``--explain`` answers for every id the pinned
+  table names — the handled-upstream ids included.
 """
 
 from __future__ import annotations
@@ -43,12 +47,40 @@ BROKEN_RULES = {
     "schema/validation",
     "integrity/dangling-ref",
     "integrity/cycle",
+    "integrity/seam-references-resource",
+    "integrity/observation-at-wrong-kind",
+    "integrity/composition-cycle",
+    "integrity/supersession-cycle",
     "policy/unknown-needs-owner",
     "policy/one-way-needs-rationale",
     "policy/external-assumptions-expired",
+    "policy/behavior-needs-observations",
+    "policy/requirement-needs-behavior",
+    "policy/superseded-in-must-satisfy",
 }
 """Everything `broken/` was built to trip, across all three layers — the
-combination itself is under test as much as any one finding."""
+combination itself is under test as much as any one finding. The addendum's
+three handled-upstream ids are deliberately absent: they surface as
+`schema/validation` (the `must_not` timing) and `integrity/dangling-ref` (the
+unresolvable `at` and `supersedes`), never under their own ids."""
+
+ADDENDUM_RULES = (
+    "integrity/seam-references-resource",
+    "integrity/observation-at-unresolvable",
+    "integrity/observation-at-wrong-kind",
+    "integrity/composition-cycle",
+    "integrity/supersedes-unresolvable",
+    "integrity/supersession-cycle",
+    "integrity/note-promoted-to-unresolvable",
+    "schema/must-not-has-timing",
+    "policy/behavior-needs-observations",
+    "policy/requirement-needs-behavior",
+    "policy/superseded-in-must-satisfy",
+)
+"""The addendum's whole rule table, as pinned in
+`docs/tasks/50-addendum-conventions.md` — the three enforced upstream
+included, whose registration is the point: `--explain` must answer for every
+id the addendum implies, emitted or not."""
 
 
 def _rule_ids(stdout: str) -> set[str]:
@@ -85,8 +117,9 @@ def test_a_store_with_nothing_wrong_is_empty_and_ok_at_every_severity(
 
 @pytest.mark.parametrize("argv", [[], ["--severity", "info"], ["--strict"]])
 def test_broken_exits_findings_whatever_the_severity_or_strictness(argv: list[str]) -> None:
-    """Six of `broken/`'s seven findings are errors, so no flag combination
-    can argue them below the threshold — which is the point of the fixture."""
+    """Fourteen of `broken/`'s sixteen findings are errors, so no flag
+    combination can argue them below the threshold — which is the point of the
+    fixture."""
     result = runner.invoke(app, ["--store", str(FIXTURES / "broken"), "check", *argv])
 
     assert result.exit_code == ExitCode.FINDINGS
@@ -104,7 +137,8 @@ def test_brownfield_exits_findings_because_its_unknown_requirement_is_an_error()
     own siblings built holds `requirement:audit-trail` unknown and unowned —
     an error by the policy layer's own severity contract, so `OK` at default
     severity was never this store's verdict. The expired external the gaps
-    task added is one more warning beside it, not a second error."""
+    task added and the addendum's no-active-behavior warning are two more
+    warnings beside it, not a second error."""
     result = runner.invoke(app, ["--store", str(FIXTURES / "brownfield"), "check"])
 
     assert result.exit_code == ExitCode.FINDINGS
@@ -112,6 +146,7 @@ def test_brownfield_exits_findings_because_its_unknown_requirement_is_an_error()
         "policy/unknown-needs-owner",
         "policy/requirement-needs-realizer",
         "policy/external-assumptions-expired",
+        "policy/requirement-needs-behavior",
     }
 
 
@@ -164,12 +199,66 @@ def test_rule_limits_the_report_and_the_error_threshold_with_it() -> None:
 
 
 def test_severity_error_drops_the_advisory_findings_from_the_report() -> None:
+    """`--severity error` keeps the fourteen errors and drops the fixture's two
+    warnings — the expired external and the addendum's no-active-behavior —
+    without changing the verdict, because an error crosses the threshold on
+    its own."""
+
     result = runner.invoke(
         app, ["--store", str(FIXTURES / "broken"), "check", "--severity", "error"]
     )
 
     assert result.exit_code == ExitCode.FINDINGS
-    assert _rule_ids(result.stdout) == BROKEN_RULES - {"policy/external-assumptions-expired"}
+    assert _rule_ids(result.stdout) == BROKEN_RULES - {
+        "policy/external-assumptions-expired",
+        "policy/requirement-needs-behavior",
+    }
+
+
+# --- the addendum's severity and exit-code contract ----------------------------
+
+
+@pytest.mark.parametrize(
+    "rule_id",
+    [
+        "integrity/seam-references-resource",
+        "integrity/observation-at-wrong-kind",
+        "integrity/composition-cycle",
+        "integrity/supersession-cycle",
+        "policy/behavior-needs-observations",
+        "policy/superseded-in-must-satisfy",
+    ],
+)
+def test_each_addendum_error_rule_alone_exits_findings(rule_id: str) -> None:
+    """`--rule` isolates one addendum error on `broken/`'s clearly-named file:
+    alone, it still crosses the threshold — `FINDINGS` is what CI reads, and
+    an error that could be argued below it is a warning mislabeled."""
+
+    result = runner.invoke(app, ["--store", str(FIXTURES / "broken"), "check", "--rule", rule_id])
+
+    assert result.exit_code == ExitCode.FINDINGS
+    assert _rule_ids(result.stdout) == {rule_id}
+
+
+def test_the_addendum_warning_alone_passes_until_strict_promotes_it() -> None:
+    """The addendum's one warning, alone: advisory by default (`OK`) and
+    promoted by `--strict` (`FINDINGS`) — the same distinction the
+    pre-addendum warning rules keep, so CI can adopt it without new rules."""
+
+    argv = [
+        "--store",
+        str(FIXTURES / "broken"),
+        "check",
+        "--rule",
+        "policy/requirement-needs-behavior",
+    ]
+
+    plain = runner.invoke(app, argv)
+    strict = runner.invoke(app, [*argv, "--strict"])
+
+    assert plain.exit_code == ExitCode.OK
+    assert _rule_ids(plain.stdout) == {"policy/requirement-needs-behavior"}
+    assert strict.exit_code == ExitCode.FINDINGS
 
 
 # --- formats and the --json fold ----------------------------------------------
@@ -269,15 +358,18 @@ def test_changed_only_keeps_findings_about_the_diff_and_the_sourceless_ones(
 ) -> None:
     """The diff names `.absicht/externals/expired.md` only: findings about
     every other element drop — findings carry store-relative sources, the
-    diff repo-relative paths, and the two must join — while the cycle, which
-    has no file to attribute, survives: the failure mode the task pins as the
-    safer default for a checker."""
+    diff repo-relative paths, and the two must join — while the three cycle
+    findings, which have no file to attribute, survive: the failure mode the
+    task pins as the safer default for a checker. The addendum's composition
+    and supersession cycles are sourceless exactly like `contains`."""
     result = runner.invoke(app, ["check", "--changed-only", "--diff-base", "main"])
 
-    assert result.exit_code == ExitCode.FINDINGS  # the kept cycle is an error
+    assert result.exit_code == ExitCode.FINDINGS  # every kept cycle is an error
     assert _rule_ids(result.stdout) == {
         "policy/external-assumptions-expired",
         "integrity/cycle",
+        "integrity/composition-cycle",
+        "integrity/supersession-cycle",
     }
 
 
@@ -341,6 +433,19 @@ def test_explain_of_an_unknown_rule_is_a_usage_error() -> None:
 
     assert result.exit_code == ExitCode.USAGE
     assert "policy/not-a-rule" in result.stderr
+
+
+@pytest.mark.parametrize("rule_id", ADDENDUM_RULES)
+def test_explain_answers_for_every_addendum_rule(rule_id: str) -> None:
+    """The pinned table's whole inventory, including the three ids enforced
+    upstream: an id `--explain` cannot answer for is a silent gap in the one
+    command whose job is to answer, emitted or not — the reason the
+    handled-upstream ids are registered rather than dropped."""
+
+    result = runner.invoke(app, ["check", "--explain", rule_id])
+
+    assert result.exit_code == ExitCode.OK
+    assert RULES[rule_id] in result.stdout
 
 
 def test_no_store_at_all_is_a_usage_error(tmp_path: Path) -> None:

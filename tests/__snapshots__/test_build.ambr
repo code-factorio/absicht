@@ -268,6 +268,33 @@
       dict({
         'body': '',
         'confidence': 'assumed',
+        'id': 'behavior:catalog-browsable',
+        'lifecycle': 'active',
+        'observations': list([
+          dict({
+            'at': 'component:catalog',
+            'id': 'behavior:catalog-browsable#obs-1',
+            'outcome': 'must',
+            'statement': 'The catalog page lists the current products',
+            'timing': None,
+          }),
+        ]),
+        'owner': None,
+        'realizes': list([
+          'requirement:browse-catalog',
+        ]),
+        'source': 'behaviors/catalog-browsable.md',
+        'state': 'specified',
+        'supersedes': list([
+        ]),
+        'tags': list([
+        ]),
+        'title': 'The catalog answers a browse',
+        'trigger': 'A customer opens the catalog.',
+      }),
+      dict({
+        'body': '',
+        'confidence': 'assumed',
         'id': 'behavior:order-placed-v2',
         'lifecycle': 'active',
         'observations': list([
