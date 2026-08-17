@@ -5,8 +5,9 @@ The command contract — exit codes, flags, the files on disk — lives in
 ``docs/tasks/27-render-diagrams.md``:
 
 - the node set is the one ``ab layout`` positions (components, seams,
-  externals) and the edges are ``contains``/``consumes``/``provides``, in a
-  deterministic order — the property the CI determinism job cross-checks from
+  externals, and — per docs/tasks/60-addendum-render.md — resources, outside
+  the design boundary) and the edges are ``contains``/``consumes``/``provides``,
+  in a deterministic order — the property the CI determinism job cross-checks from
   a clean checkout is tested here as two runs spelling byte-identical SVG;
 - each format is syntactically plausible for its DSL: SVG parses as XML,
   mermaid starts with a diagram keyword, d2 spells boxes and edges;
@@ -48,7 +49,11 @@ CLEAN_NODES = {
     "component:catalog",
     "component:orders",
     "seam:order-events",
+    "resource:order-cache",
 }
+"""Every diagram node in ``clean/``: three components, one seam, one resource.
+No externals, and the prose kinds are not diagram nodes — that boundary is
+itself under test."""
 
 # The renderers, keyed the way the snapshot parametrization spells the format.
 RENDERERS = {
@@ -92,6 +97,29 @@ def test_edges_are_contains_consumes_and_provides_between_diagram_nodes(
         ("component:orders", "provides", "seam:order-events"),
     )
     assert {position.ref for position in picture.positions.values()} == CLEAN_NODES
+
+
+def test_resources_draw_as_distinct_shapes_at_the_boundary(tmp_path: Path) -> None:
+    """§1's argument, shown: a resource is outside the design boundary, so
+    each format draws it differently from a component — a dashed box in SVG,
+    a hexagon in mermaid, a cylinder in d2 — while the components keep the
+    rectangle every non-resource node wears."""
+    design = _laid_out(CLEAN, tmp_path / "store")
+    picture = _picture(design, tmp_path / "store")
+
+    svg = picture.render_svg()
+    resource = svg[svg.index('data-ref="resource:order-cache"') :].split("/>", 1)[0]
+    component = svg[svg.index('data-ref="component:orders"') :].split("/>", 1)[0]
+    assert 'stroke-dasharray="' in resource
+    assert 'stroke-dasharray="' not in component
+
+    mermaid = picture.render_mermaid()
+    assert 'resource_order_cache{{"resource:order-cache"}}' in mermaid
+    assert 'component_orders["component:orders"]' in mermaid
+
+    d2 = picture.render_d2()
+    assert 'resource_order_cache: "Order cache" {\n  shape: cylinder\n}' in d2
+    assert 'component_orders: "Orders" {\n  shape: rectangle\n}' in d2
 
 
 def test_svg_is_byte_identical_across_runs(tmp_path: Path) -> None:

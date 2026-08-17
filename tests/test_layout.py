@@ -7,9 +7,10 @@ What these tests pin, per ``docs/tasks/25-layout.md``:
   different ``--seed`` really does move something, so the flag is not
   decorative;
 - the node set is the one ``docs/tasks/27-render-diagrams.md`` draws —
-  components, seams and externals, not every element — with the layered
-  shape: a contained component ranks below its parent, seams below every
-  component;
+  components, seams and externals, plus the resources
+  ``docs/tasks/60-addendum-render.md`` adds at the boundary, never every
+  element — with the layered shape: a contained component ranks below its
+  parent, seams below every component, resources below the externals;
 - ``--recompute`` (the default behaviour) only fills gaps: positions an
   earlier run pinned survive a new element verbatim, which is what "stable
   layout" means in practice;
@@ -36,7 +37,16 @@ from typer.testing import CliRunner
 from absicht.cli import app
 from absicht.cli._common import ExitCode
 from absicht.layout import compute, read_layout
-from absicht.models import SCHEMA_VERSION, Component, Design, System
+from absicht.models import (
+    SCHEMA_VERSION,
+    Component,
+    Design,
+    External,
+    ExternalKind,
+    Resource,
+    ResourceKind,
+    System,
+)
 
 runner = CliRunner()
 
@@ -48,10 +58,11 @@ CLEAN_NODES = {
     "component:catalog",
     "component:orders",
     "seam:order-events",
+    "resource:order-cache",
 }
-"""Every diagram node in ``clean/``: three components and one seam. No
-externals, and the prose kinds are not diagram nodes — that boundary is
-itself under test."""
+"""Every diagram node in ``clean/``: three components, one seam and the one
+resource the store depends on. No externals, and the prose kinds are not
+diagram nodes — that boundary is itself under test."""
 
 _NEW_COMPONENT = """---
 id: component:new-thing
@@ -153,7 +164,7 @@ def test_recompute_all_discards_the_pinned_positions(store: Path) -> None:
 
 
 def test_check_names_the_element_without_a_position(store: Path) -> None:
-    covered, uncovered = sorted(CLEAN_NODES)[:3], sorted(CLEAN_NODES)[3]
+    covered, uncovered = sorted(CLEAN_NODES)[:4], sorted(CLEAN_NODES)[4]
     _pin(store, dict.fromkeys(covered, (1.0, 1.0)))
 
     result = runner.invoke(app, ["--store", str(store), "layout", "--check"])
@@ -235,3 +246,43 @@ def test_a_contains_cycle_still_lays_out_deterministically() -> None:
 
     assert set(positions) == {"component:loop-a", "component:loop-b"}
     assert positions["component:loop-a"] != positions["component:loop-b"]
+
+
+def test_a_resource_in_the_store_gets_a_position_like_every_node(store: Path) -> None:
+    """docs/tasks/60-addendum-render.md's own assert: `ab layout` handles the
+    addendum's kinds generically — `clean/` ships a resource, and a bare
+    invocation pins it with no flag, because the node set is one function."""
+    result = runner.invoke(app, ["--store", str(store), "layout"])
+
+    assert result.exit_code == ExitCode.OK
+    assert "resource:order-cache" in _positions(store)
+
+
+def test_resources_rank_below_the_externals_at_the_boundary() -> None:
+    """A resource is outside the design boundary (addendum §1), and the
+    picture says so spatially: resources take the outermost rank, below the
+    externals, which sit below the seams, which sit below every component."""
+    design = Design(
+        system=System(id="system:edge", title="Edge"),
+        components=(Component(id="component:core", title="Core"),),
+        externals=(
+            External(
+                id="external:payment-api", title="Payment API", external_kind=ExternalKind.SERVICE
+            ),
+        ),
+        resources=(
+            Resource(
+                id="resource:order-cache",
+                title="Order cache",
+                resource_kind=ResourceKind.STORE,
+                technology="Redis",
+            ),
+        ),
+    )
+
+    positions = {
+        position.ref: (position.x, position.y) for position in compute(design, seed=0).positions
+    }
+
+    assert positions["resource:order-cache"][1] > positions["external:payment-api"][1]
+    assert positions["external:payment-api"][1] > positions["component:core"][1]

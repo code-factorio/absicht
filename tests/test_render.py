@@ -6,7 +6,9 @@ The command contracts — exit codes, flags, the bytes on stdout — live in
 ``tests/test_trace_cli.py`` and ``tests/test_render_cli.py``. What is pinned
 here is the projections themselves, the shapes ``docs/tasks/26-render-site.md``
 builds on ("literally reuse" the show view; "a gaps page, reusing 23-gaps.md's
-worklist") and the machinery the CLI tests cannot reach without a socket or
+worklist"), the note inbox page ``docs/tasks/60-addendum-render.md`` adds
+(notes are store contents no ``Design`` carries, so they reach the site as an
+argument), and the machinery the CLI tests cannot reach without a socket or
 a clock:
 
 - ``--depth`` bounds the *outgoing* side only; the inbound side is one hop at
@@ -42,6 +44,7 @@ from pathlib import Path
 from urllib.request import urlopen
 
 import pytest
+from syrupy.assertion import SnapshotAssertion
 
 from absicht.load import load_store
 from absicht.models import (
@@ -54,6 +57,7 @@ from absicht.models import (
     External,
     ExternalKind,
     Fidelity,
+    Note,
     Observation,
     Outcome,
     Packet,
@@ -779,7 +783,137 @@ def test_the_site_is_byte_identical_across_runs(clean: Design, tmp_path: Path) -
 
     first = _site_bytes(tmp_path / "first")
     assert first == _site_bytes(tmp_path / "second")
-    assert len(first) == 18  # fifteen element pages, index, traceability, gaps
+    assert len(first) == 19  # fifteen element pages, index, traceability, gaps, inbox
+
+
+# --- the note inbox page ----------------------------------------------------------
+
+
+def _note(
+    note_id: str,
+    created: date,
+    *,
+    body: str = "A thought.",
+    ref: str | None = None,
+    promoted_to: str | None = None,
+) -> Note:
+    """One note as the loader would deliver it, with the clock already folded
+    into `created` — the page's ages hang on the injected `today`, never on a
+    wall clock."""
+    return Note(id=note_id, created=created, ref=ref, promoted_to=promoted_to, body=body)
+
+
+def test_the_inbox_page_headlines_the_age_and_runs_oldest_first(
+    clean: Design, tmp_path: Path
+) -> None:
+    """§6's pressure reading, on the page: the headline names the count and
+    the age of the oldest against the injected `today` — a bare count is not
+    useful pressure — and the list runs oldest first, the same order `ab note
+    list` prints (the headline and the ages are that command's spellings,
+    shared, not a second humanizer)."""
+    notes = (
+        _note("note:newer1", TODAY, body="Fresh."),
+        _note("note:older1", TODAY - timedelta(days=90), body="Old."),
+    )
+
+    generate_site(clean, tmp_path, today=TODAY, notes=notes)
+
+    page = (tmp_path / "notes.html").read_text(encoding="utf-8")
+    assert "<h1>Note inbox</h1>" in page
+    assert "<p>2 notes, oldest 3 months</p>" in page
+    assert page.index("note:older1") < page.index("note:newer1")
+
+
+def test_the_inbox_page_renders_bodies_anchors_and_the_promotion_archive(
+    clean: Design, tmp_path: Path
+) -> None:
+    """The inbox at reading width: each body rendered as prose, the anchor
+    linked when the site holds its page and plain text when nothing defines it
+    (a dangling `ref` is `ab check`'s finding, not a dead link), and promoted
+    notes archived under what they became — the record of what became what is
+    part of the design story, so promotion leaves the inbox, never the store."""
+    notes = (
+        _note(
+            "note:free01",
+            TODAY - timedelta(days=45),
+            body="Look at cancellation.\n\nTwice.",
+            ref="component:cancellation",
+        ),
+        _note(
+            "note:lost01",
+            TODAY - timedelta(days=3),
+            body="Points nowhere yet.",
+            ref="component:ghost",
+        ),
+        _note(
+            "note:gone01",
+            TODAY - timedelta(days=60),
+            body="Became a requirement.",
+            promoted_to="requirement:cancel-orders",
+        ),
+    )
+
+    generate_site(clean, tmp_path, today=TODAY, notes=notes)
+
+    page = (tmp_path / "notes.html").read_text(encoding="utf-8")
+    # The headline counts the inbox only: promotion removed `note:gone01` from
+    # it — and the oldest unpromoted is 45 days old, a month and a half the
+    # rough buckets round to "1 month".
+    assert "<p>2 notes, oldest 1 month</p>" in page
+    assert "<p>Look at cancellation.</p>" in page
+    assert "<p>Twice.</p>" in page
+    assert '<a href="elements/component/cancellation.html">component:cancellation</a>' in page
+    assert "<code>component:ghost</code>" in page
+    archived = page.index("<h2>Promoted</h2>")
+    assert archived < page.index("note:gone01")
+    assert 'became <a href="elements/requirement/cancel-orders.html">' in page
+
+
+def test_an_empty_inbox_still_has_its_page(clean: Design, tmp_path: Path) -> None:
+    """A store with no notes still writes the page — a missing page would read
+    as "render forgot the inbox" — and says there are none, like the gaps
+    page's empty stretch."""
+    generate_site(clean, tmp_path, today=TODAY)
+
+    assert "<p>0 notes</p>" in (tmp_path / "notes.html").read_text(encoding="utf-8")
+
+
+def test_notes_never_become_element_pages(clean: Design, tmp_path: Path) -> None:
+    """The inbox is a list, not nodes (§6): a note joins no index group, no
+    traceability view, and gets no element page even when the store holds it —
+    the page count the site test pins stays what it was."""
+    generate_site(clean, tmp_path, today=TODAY, notes=(_note("note:a11111", TODAY),))
+
+    assert not (tmp_path / "elements" / "note").exists()
+    for page in ("index.html", "trace.html", "gaps.html"):
+        assert "note:a11111" not in (tmp_path / page).read_text(encoding="utf-8")
+
+
+def test_the_inbox_page_is_snapshotted(
+    clean: Design, tmp_path: Path, snapshot: SnapshotAssertion
+) -> None:
+    """The golden inbox of docs/tasks/60-addendum-render.md: one anchored
+    note, one plain, one promoted — ages against the injected `today`, so the
+    bytes never rot with the calendar."""
+    notes = (
+        _note(
+            "note:anchr1",
+            TODAY - timedelta(days=45),
+            body="The order cache needs a TTL.\n\nMeasure before deciding.",
+            ref="resource:order-cache",
+        ),
+        _note("note:plain01", TODAY - timedelta(days=3), body="Ask finance about refunds."),
+        _note(
+            "note:gone01",
+            TODAY - timedelta(days=60),
+            body="Became a requirement.",
+            promoted_to="requirement:cancel-orders",
+        ),
+    )
+
+    generate_site(clean, tmp_path, today=TODAY, notes=notes)
+
+    assert (tmp_path / "notes.html").read_text(encoding="utf-8") == snapshot
 
 
 def test_the_change_detection_notices_edits_additions_and_removals(tmp_path: Path) -> None:
