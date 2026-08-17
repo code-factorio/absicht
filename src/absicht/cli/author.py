@@ -177,9 +177,13 @@ def check(
 
     Schema is fields, types and patterns. Integrity is that every ref resolves,
     that `contains` and `depends_on` hold no cycles, and that criteria are
-    anchored to their story. Policy is the judgement layer: an `unknown` needs an
-    owner, a requirement needs a realizing component, a `one_way` decision needs
-    a rationale body, an external's assumptions have not expired.
+    anchored to their story; the model addendum adds that a seam names no
+    resource, an observation points at a component, resource, seam or behavior,
+    and composition and supersession hold no cycles. Policy is the judgement
+    layer: an `unknown` needs an owner, a requirement needs a realizing
+    component and an active behavior (a warning), a behavior needs
+    observations, a milestone selects no superseded behavior, a `one_way`
+    decision needs a rationale body, an external's assumptions have not expired.
     """
     opts = options(ctx)
     if explain is not None:

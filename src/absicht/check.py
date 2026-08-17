@@ -31,6 +31,17 @@ errors on them teaches people to stop recording them. The clock is injected
 (``today`` is a parameter, never read inside a rule), so a run answers
 "expired as of when" and stays reproducible. The CLI wiring — flags,
 formats, exit codes — is task 15's.
+
+The model addendum grows every layer, and its rule table is pinned in
+``docs/tasks/50-addendum-conventions.md`` — this module implements that
+table, it does not re-derive it. Two shapes are worth naming: an addendum
+rule can be *handled upstream* (enforced at parse time by a model validator,
+or subsumed by the generic dangling-ref sweep) and then only its id and
+explanation are registered, so ``--explain`` answers for it — the
+``integrity/criteria-anchored`` precedent; and a rule can be the *same walk*
+under a new name, which is what composition and supersession cycles are —
+they reuse ``_cycles`` with their own ids rather than folding into
+``integrity/cycle``, because a finding's id is what ``--rule`` selects on.
 """
 
 from __future__ import annotations
@@ -41,7 +52,7 @@ from graphlib import CycleError, TopologicalSorter
 
 from absicht.findings import RULES, Finding, Severity, finding
 from absicht.load import LoadedStore, LoadErrorReason
-from absicht.models import Design, External, Ref, Reversibility, State
+from absicht.models import Behavior, Design, External, Lifecycle, Ref, Reversibility, State
 from absicht.resolve import Index, iter_references
 
 RULES.update(
@@ -64,6 +75,18 @@ RULES.update(
             "A file the loader could not read at all — permissions, or it vanished "
             "mid-walk. Not a judgement about the design, but check cannot see past a "
             "file it cannot read."
+        ),
+        # The addendum's must_not-with-timing shape is the criteria-anchored
+        # pattern again: Observation's own validator rejects it at parse time
+        # (addendum §3.1), so it only ever surfaces as schema/validation.
+        # Registered as handled upstream so --explain answers for the rule the
+        # addendum states under this id.
+        "schema/must-not-has-timing": (
+            "Handled upstream, at the schema layer: Observation's own validator "
+            "rejects a `must_not` observation that carries a `timing`, because "
+            "`must_not` means at no point and a timing says when the never "
+            "happens. The failure surfaces as schema/validation on the behavior's "
+            "file. No finding can carry this id."
         ),
         "integrity/dangling-ref": (
             "A ref-typed field points at an id no element in the store defines. Refs "
@@ -88,6 +111,57 @@ RULES.update(
             "criterion anchored to another story at parse time, and the failure "
             "surfaces as schema/validation on that story's file. No integrity "
             "finding can carry this id."
+        ),
+        "integrity/seam-references-resource": (
+            "A seam's provider, consumers or carries names a resource. Always an "
+            "error: a seam is a contract between components, while a component's "
+            "relationship to a resource is a dependency — what gives it meaning is "
+            "the observations referencing it, not a contract an author writes. The "
+            "finding names the seam, the field and the resource."
+        ),
+        # The addendum states this rule separately, but an observation's `at`
+        # is yielded by iter_references attributed to the behavior that carries
+        # it — the same walk integrity/dangling-ref reads — so a target no
+        # element defines already reports there. Registered as handled upstream
+        # rather than duplicating the walk with a second id.
+        "integrity/observation-at-unresolvable": (
+            "Handled upstream, by integrity/dangling-ref: an observation's `at` is "
+            "attributed to the behavior that carries it in the generic reference "
+            "walk, so a target no element in the store defines surfaces as a "
+            "dangling ref on that behavior. No finding can carry this id — it stays "
+            "registered so --explain answers for the rule the addendum states."
+        ),
+        "integrity/observation-at-wrong-kind": (
+            "An observation whose `at` points at a requirement, a decision, a "
+            "question or a note. Always an error: what an observation may be about "
+            "is a component, a resource, a seam or another behavior — the things "
+            "whose acting is observable — and a note additionally is not an element "
+            "and can never resolve. The finding names the observation and its "
+            "target; existence is the generic dangling-ref sweep's to judge."
+        ),
+        "integrity/composition-cycle": (
+            "Behaviors composing each other in a circle: observations whose `at` "
+            "points at behavior refs form the composition graph, and one finding "
+            "per distinct cycle names every behavior on the closed path. Always an "
+            "error — the same failure as a contains or depends_on cycle, walked the "
+            "same way, because a cycle leaves what causes what undefined."
+        ),
+        # Supersession is the same subsumption as observation-at-unresolvable:
+        # Behavior.supersedes is a ref-typed field the generic walk already
+        # checks, so only the id is registered here.
+        "integrity/supersedes-unresolvable": (
+            "Handled upstream, by integrity/dangling-ref: a behavior's `supersedes` "
+            "is a ref-typed field in the generic reference walk, so a replacement "
+            "naming a behavior no element in the store defines surfaces as a "
+            "dangling ref on it. No finding can carry this id — it stays registered "
+            "so --explain answers for the rule the addendum states."
+        ),
+        "integrity/supersession-cycle": (
+            "Supersession edges forming a cycle — one behavior's supersedes naming "
+            "another and back again, or a behavior superseding itself, the length-1 "
+            "case under the same id. Always an error: supersession is the one "
+            "relation whose whole job is saying which behavior is current, and a "
+            "cycle leaves that with no answer. One finding per distinct cycle."
         ),
         "integrity/note-promoted-to-unresolvable": (
             "A note's promoted_to names the element it became, and that element "
@@ -124,16 +198,22 @@ def schema_findings(loaded: LoadedStore) -> tuple[Finding, ...]:
 
 
 def integrity_findings(design: Design, index: Index) -> tuple[Finding, ...]:
-    """Every dangling ref, then every cycle in ``contains`` or ``depends_on``.
+    """Every dangling ref, then every cycle, then the addendum's integrity
+    rules.
 
     ``index`` must be ``Index.from_design(design)``: the same enumeration that
     built the index decides what "exists" means here, so a mismatched pair
     would misreport both rules. Dangling refs come first, in ``Design`` field
-    order; cycles after, one finding per distinct cycle.
+    order; cycles after, one finding per distinct cycle; the addendum's
+    kind and cycle rules last, in the order the addendum states them.
     """
     return (
         *_dangling_ref_findings(design, index),
         *_cycle_findings(design, index),
+        *_seam_resource_findings(design),
+        *_observation_at_wrong_kind_findings(design),
+        *_composition_cycle_findings(design, index),
+        *_supersession_cycle_findings(design, index),
     )
 
 
@@ -178,21 +258,37 @@ def _cycle_findings(design: Design, index: Index) -> tuple[Finding, ...]:
         ("contains", tuple((c.id, c.contains) for c in design.components)),
         ("depends_on", tuple((m.id, m.depends_on) for m in design.milestones)),
     )
-    findings: list[Finding] = []
-    for relation, edges in relations:
-        graph = {
-            source: tuple(target for target in targets if target in index.by_id)
-            for source, targets in edges
-        }
-        findings.extend(
-            finding(
-                "integrity/cycle",
-                severity=Severity.ERROR,
-                message=f"{relation} edges form a cycle: {' -> '.join(cycle)}",
-            )
-            for cycle in _cycles(graph)
+    return tuple(
+        finding
+        for relation, edges in relations
+        for finding in _cyclic_relation_findings("integrity/cycle", relation, edges, index)
+    )
+
+
+def _cyclic_relation_findings(
+    rule_id: str, relation: str, edges: tuple[tuple[Ref, tuple[Ref, ...]], ...], index: Index
+) -> tuple[Finding, ...]:
+    """One error per distinct cycle in one directed relation, under its own id.
+
+    The walk every acyclic relation shares: drop targets that do not resolve
+    (a dangling target is the dangling-ref rule's finding and cannot close a
+    cycle), then hand the graph to ``_cycles``. The relation names the edges
+    in the message; the id is what ``--rule`` selects on, which is why the
+    addendum's composition and supersession walks call this with their own
+    ids rather than folding into ``integrity/cycle``.
+    """
+    graph = {
+        source: tuple(target for target in targets if target in index.by_id)
+        for source, targets in edges
+    }
+    return tuple(
+        finding(
+            rule_id,
+            severity=Severity.ERROR,
+            message=f"{relation} edges form a cycle: {' -> '.join(cycle)}",
         )
-    return tuple(findings)
+        for cycle in _cycles(graph)
+    )
 
 
 def _cycles(graph: dict[Ref, tuple[Ref, ...]]) -> Iterator[tuple[Ref, ...]]:
@@ -220,6 +316,116 @@ def _cycles(graph: dict[Ref, tuple[Ref, ...]]) -> Iterator[tuple[Ref, ...]]:
             yield tuple(cycle)
         else:
             return
+
+
+def _seam_resource_findings(design: Design) -> tuple[Finding, ...]:
+    """One finding per ``resource:`` ref a seam carries in its ref fields.
+
+    Only the seam's own ref fields are walked — ``provider``, ``consumers``,
+    ``carries`` — because the rule is about who a contract runs between, not
+    about refs elsewhere on the record. The prefix check is the whole test: a
+    ref's kind is readable without a lookup, and whether the resource exists
+    is the dangling-ref rule's question, not this one's.
+    """
+    findings: list[Finding] = []
+    for seam in design.seams:
+        edges = (
+            ("provider", seam.provider),
+            *(("consumers", consumer) for consumer in seam.consumers),
+            *(("carries", carried) for carried in seam.carries),
+        )
+        findings.extend(
+            finding(
+                "integrity/seam-references-resource",
+                severity=Severity.ERROR,
+                message=(
+                    f"{seam.id}'s {field} names {target}: a seam is a contract "
+                    "between components, and a component's relationship to a "
+                    "resource is a dependency"
+                ),
+                ref=seam.id,
+                source=seam.source or None,
+            )
+            for field, target in edges
+            if target is not None and target.startswith("resource:")
+        )
+    return tuple(findings)
+
+
+_OBSERVATION_AT_WRONG_KINDS = frozenset({"requirement", "decision", "question", "note"})
+"""The kinds an observation's ``at`` may never point at, per the addendum's
+own list (§3.2 names requirement, decision and question; a note joins them
+because it is not an element at all). The kinds not named here — the allowed
+component, resource, seam and behavior — are the rule's silent side."""
+
+
+def _observation_at_wrong_kind_findings(design: Design) -> tuple[Finding, ...]:
+    """One finding per observation whose ``at`` targets a kind it may not.
+
+    The message names the observation (its id embeds the behavior that
+    carries it) and says what an observation may point at instead, so the fix
+    is readable from the finding alone. A note target gets the sharper why —
+    it can never resolve, not merely does not — since no fixture will ever
+    hold one quietly.
+    """
+    findings: list[Finding] = []
+    for behavior in design.behaviors:
+        for observation in behavior.observations:
+            kind = observation.at.split(":", 1)[0]
+            if kind not in _OBSERVATION_AT_WRONG_KINDS:
+                continue
+            allowed = (
+                "an observation may point at a component, a resource, a seam or another behavior"
+            )
+            forbidden = (
+                f"a note is not an element and can never resolve — {allowed}"
+                if kind == "note"
+                else allowed
+            )
+            findings.append(
+                finding(
+                    "integrity/observation-at-wrong-kind",
+                    severity=Severity.ERROR,
+                    message=f"{observation.id}'s at points at {observation.at}; {forbidden}",
+                    ref=behavior.id,
+                    source=behavior.source or None,
+                )
+            )
+    return tuple(findings)
+
+
+def _composition_cycle_findings(design: Design, index: Index) -> tuple[Finding, ...]:
+    """The composition graph: an edge per observation whose ``at`` is a
+    behavior ref, checked for cycles under its own id.
+
+    The behavior-prefix filter says what the graph *is* — composition is
+    behavior-to-behavior — and the shared walk's resolve filter then drops
+    targets that dangle, same as every other cyclic relation.
+    """
+    edges = tuple(
+        (
+            behavior.id,
+            tuple(
+                observation.at
+                for observation in behavior.observations
+                if observation.at.startswith("behavior:")
+            ),
+        )
+        for behavior in design.behaviors
+    )
+    return _cyclic_relation_findings("integrity/composition-cycle", "composition", edges, index)
+
+
+def _supersession_cycle_findings(design: Design, index: Index) -> tuple[Finding, ...]:
+    """The supersession graph over behaviors' stored ``supersedes`` edges.
+
+    Self-supersession needs no case of its own: a behavior naming itself is
+    the length-1 cycle the shared walk already reports under this id. Only
+    behaviors are walked — ``Decision.supersedes`` is the pre-addendum ADR
+    relation, with no spec line asking for a cycle rule.
+    """
+    edges = tuple((behavior.id, behavior.supersedes) for behavior in design.behaviors)
+    return _cyclic_relation_findings("integrity/supersession-cycle", "supersession", edges, index)
 
 
 def note_findings(loaded: LoadedStore, index: Index) -> tuple[Finding, ...]:
@@ -277,6 +483,26 @@ RULES.update(
             "third party, not a break in the design — re-checking is routine "
             "maintenance, and erroring would teach deleting the date."
         ),
+        "policy/behavior-needs-observations": (
+            "A behavior carries no observations. Error, not warn, and whatever "
+            "its lifecycle: a behavior is how you would know the system acts, an "
+            "expectation with nothing observable is not one — and a superseded "
+            "behavior with no observations was always broken."
+        ),
+        "policy/requirement-needs-behavior": (
+            "A requirement no active behavior's realizes names. Warn, not error, "
+            "mirroring requirement-needs-realizer: a requirement still waiting "
+            "for its behavior is incomplete but honest, the state a design in "
+            "progress legitimately holds. Only active behaviors count — a "
+            "superseded behavior stopped being true, so realizing a requirement "
+            "with one is realizing it with something the system no longer does."
+        ),
+        "policy/superseded-in-must-satisfy": (
+            "A milestone's includes names a behavior whose lifecycle is "
+            "superseded. Error: a superseded behavior stopped being packet input "
+            "and stops being verified — selecting it as work a slice must newly "
+            "satisfy is a contradiction; the must-satisfy set is live work only."
+        ),
     }
 )
 
@@ -292,7 +518,8 @@ RULES.update(
 
 
 def policy_findings(design: Design, index: Index, *, today: date) -> tuple[Finding, ...]:
-    """The four policy rules, in the order the spec lists them.
+    """The seven policy rules: the four the original spec lists, then the
+    addendum's three in the order its task names them.
 
     ``index`` must be ``Index.from_design(design)``: the unknown-owner rule
     walks ``index.by_id`` — the one enumeration of every element — so a
@@ -306,6 +533,9 @@ def policy_findings(design: Design, index: Index, *, today: date) -> tuple[Findi
         *_requirement_needs_realizer_findings(design),
         *_one_way_needs_rationale_findings(design),
         *_external_assumptions_expired_findings(design, today=today),
+        *_behavior_needs_observations_findings(design),
+        *_requirement_needs_behavior_findings(design),
+        *_superseded_in_must_satisfy_findings(design, index),
     )
 
 
@@ -414,3 +644,83 @@ def _external_assumptions_expired_findings(design: Design, *, today: date) -> tu
         )
 
     return tuple(as_finding(external) for external in expired_externals(design, today=today))
+
+
+# --- the addendum's policy rules ----------------------------------------------
+
+
+def _behavior_needs_observations_findings(design: Design) -> tuple[Finding, ...]:
+    """A behavior with an empty ``observations`` tuple.
+
+    An empty tuple is valid on the model — a behavior mid-authoring is a
+    legitimate file on disk — which is exactly why this is a report line and
+    not a parse failure. ``lifecycle`` deliberately carves nothing out: a
+    superseded behavior with no observations was already broken when it was
+    live.
+    """
+    return tuple(
+        finding(
+            "policy/behavior-needs-observations",
+            severity=Severity.ERROR,
+            message=f"{behavior.id} has no observations",
+            ref=behavior.id,
+            source=behavior.source or None,
+        )
+        for behavior in design.behaviors
+        if not behavior.observations
+    )
+
+
+def _requirement_needs_behavior_findings(design: Design) -> tuple[Finding, ...]:
+    """A requirement no active behavior's ``realizes`` names.
+
+    The set is computed once, not per requirement — the question is about the
+    design's behavior graph, and asking it per element would walk the same
+    tuples once per requirement. ``active`` is load-bearing: supersession is
+    the record of what stopped being true, so it never rescues a requirement.
+    """
+    realized = {
+        target
+        for behavior in design.behaviors
+        if behavior.lifecycle is Lifecycle.ACTIVE
+        for target in behavior.realizes
+    }
+    return tuple(
+        finding(
+            "policy/requirement-needs-behavior",
+            severity=Severity.WARN,
+            message=f"{requirement.id} is realized by no active behavior",
+            ref=requirement.id,
+            source=requirement.source or None,
+        )
+        for requirement in design.requirements
+        if requirement.id not in realized
+    )
+
+
+def _superseded_in_must_satisfy_findings(design: Design, index: Index) -> tuple[Finding, ...]:
+    """A milestone whose ``includes`` names a superseded behavior.
+
+    The must-satisfy set is ``includes`` filtered to behaviors (the pinned
+    milestone convention), so the walk is over that field alone. An include
+    that does not resolve is the dangling-ref rule's finding; one naming an
+    active behavior is the selection working as intended.
+    """
+    findings: list[Finding] = []
+    for milestone in design.milestones:
+        for include in milestone.includes:
+            element = index.by_id.get(include)
+            if isinstance(element, Behavior) and element.lifecycle is Lifecycle.SUPERSEDED:
+                findings.append(
+                    finding(
+                        "policy/superseded-in-must-satisfy",
+                        severity=Severity.ERROR,
+                        message=(
+                            f"{milestone.id}'s includes names {include}, which is "
+                            "superseded and stopped being must-satisfy input"
+                        ),
+                        ref=milestone.id,
+                        source=milestone.source or None,
+                    )
+                )
+    return tuple(findings)
