@@ -13,6 +13,20 @@ This is the opensource project `absicht`
 - Comments are a great way to clarify functionality and how code is used. Don't comment every line. Simple functions that are mostly self describing by the name do not need a doc string. More complex functions do. Also what the purpose of a class and what the purpose of a module is, is a good thing to document.
 - Keep comments and documentation up to date! When making changes it's important to keep things in sync.
 
+### No defensive code
+Assume the system works. Handle what can actually happen, where it happens, and nowhere else.
+
+Do not:
+- wrap an import of a declared dependency in `try`/`except ImportError`;
+- use `getattr(x, "field", default)` when the field is part of the type;
+- catch an exception the code below cannot raise, or one the library already handles;
+- catch an error only to re-raise it as your own with a nicer message;
+- add a fallback for a state the model makes impossible.
+
+`# pragma: no cover` on an `except` is the tell: a branch no test can reach is a branch nobody needs.
+Let real failures raise — the traceback names the cause better than a rewritten message does.
+Validate only where untrusted input enters: CLI arguments, files, the network.
+
 ### Documentation
 - Separate documentation for maintainers in docs/maintainers, for end users docs/users
 

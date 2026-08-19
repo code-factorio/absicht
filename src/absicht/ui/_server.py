@@ -1,16 +1,12 @@
 """The HTTP surface behind ``ab ui``.
 
-Two rules shape this module.
-
-The extra is optional, so ``fastapi`` and ``uvicorn`` are imported inside the
-functions that need them. A core install must be able to import
-:mod:`absicht.ui` and get a clear refusal, not an ``ImportError`` traceback
-from three frames down.
-
 Nothing is cached. Every request rebuilds from the store, because the designer
 and the agent both edit it while the page is open, and a stale map is worse
 than a slow one. The store is small and the fold is deterministic; when that
 stops being true, the fix is a watcher, not a cache with no invalidation.
+
+``fastapi`` and ``uvicorn`` are the ``ui`` extra, so nothing may import this
+module at start-up. ``ab ui`` imports it when it runs.
 """
 
 # FastAPI registers routes through decorators.
@@ -20,45 +16,21 @@ from __future__ import annotations
 
 from html import escape
 from pathlib import Path
-from typing import TYPE_CHECKING
+
+import uvicorn
+from fastapi import FastAPI
+from fastapi.responses import HTMLResponse
 
 from absicht.build import build as build_design
 from absicht.models.design import Design
 from absicht.resolve import COLLECTIONS
 
-if TYPE_CHECKING:
-    from fastapi import FastAPI
-
-EXTRA_HINT = "ab ui needs the 'ui' extra — install it with: uv add 'absicht[ui]'"
-
-LOCALHOST = "127.0.0.1"
-"""The default bind address. A design store is not something to publish."""
-
-DEFAULT_PORT = 8765
-
-
-class MissingExtraError(RuntimeError):
-    """``fastapi`` or ``uvicorn`` is absent, so the ``ui`` extra was not installed."""
-
-    def __init__(self) -> None:
-        super().__init__(EXTRA_HINT)
-
 
 def create_app(root: Path, *, rev: str | None = None) -> FastAPI:
-    """The application object, built but not served.
-
-    Returned rather than run so tests can drive the routes over an in-process
-    transport instead of a socket.
-    """
-    try:
-        from fastapi import FastAPI
-        from fastapi.responses import HTMLResponse
-    except ModuleNotFoundError as exc:  # pragma: no cover - exercised without the extra
-        raise MissingExtraError from exc
-
+    """The application object, built but not served, so tests can drive the
+    routes over an in-process transport instead of a socket."""
     # The OpenAPI pages are for machine consumers, and the machine consumer of
-    # absicht is the CLI. Off, so the surface is exactly the pages a designer
-    # can reach.
+    # absicht is the CLI.
     app = FastAPI(title="absicht", docs_url=None, redoc_url=None, openapi_url=None)
 
     @app.get("/", response_class=HTMLResponse)
@@ -68,19 +40,7 @@ def create_app(root: Path, *, rev: str | None = None) -> FastAPI:
     return app
 
 
-def serve(
-    root: Path,
-    *,
-    host: str = LOCALHOST,
-    port: int = DEFAULT_PORT,
-    rev: str | None = None,
-) -> None:
-    """Run the interface until interrupted."""
-    try:
-        import uvicorn
-    except ModuleNotFoundError as exc:  # pragma: no cover - exercised without the extra
-        raise MissingExtraError from exc
-
+def serve(root: Path, *, host: str, port: int, rev: str | None = None) -> None:
     uvicorn.run(create_app(root, rev=rev), host=host, port=port, log_level="warning")
 
 
@@ -91,12 +51,8 @@ def counts(design: Design) -> list[tuple[str, int]]:
     again: a new element kind should appear here by existing, not by someone
     remembering this module.
     """
-    found: list[tuple[str, int]] = []
-    for name in COLLECTIONS:
-        records = getattr(design, name, ())
-        if records:
-            found.append((name.replace("_", " "), len(records)))
-    return found
+    counted = ((name.replace("_", " "), len(getattr(design, name))) for name in COLLECTIONS)
+    return [(kind, total) for kind, total in counted if total]
 
 
 def index_page(design: Design) -> str:

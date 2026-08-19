@@ -7,27 +7,13 @@ than ``actor:agent`` — and the two are separate on purpose: an agent wants
 It is a *view*. Every answer on a page comes from the same library the CLI
 calls, so the two surfaces cannot tell different stories about one store.
 
-FastAPI and uvicorn are the ``ui`` extra rather than runtime dependencies:
-importing this package must stay free for a core install, because the agent
-half of the tool should not pay for a server it never starts.
+``fastapi`` and ``uvicorn`` are the ``ui`` extra rather than runtime
+dependencies, so importing this package needs them: the CLI reaches it from
+inside ``ab ui`` rather than at start-up.
 """
 
 from __future__ import annotations
 
-from absicht.ui._server import (
-    DEFAULT_PORT,
-    EXTRA_HINT,
-    LOCALHOST,
-    MissingExtraError,
-    create_app,
-    serve,
-)
+from absicht.ui._server import create_app, serve
 
-__all__ = [
-    "DEFAULT_PORT",
-    "EXTRA_HINT",
-    "LOCALHOST",
-    "MissingExtraError",
-    "create_app",
-    "serve",
-]
+__all__ = ["create_app", "serve"]
