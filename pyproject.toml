@@ -21,9 +21,24 @@ classifiers = [
     "Typing :: Typed",
 ]
 dependencies = [
+    "packaging>=25.0",
     "pydantic>=2.13.4",
     "pyyaml>=6.0.2",
     "typer>=0.27.1",
+]
+
+# The agent half of the tool is the four dependencies above and stays that way.
+# The designer's interface is a different audience with a different budget, so
+# it is an extra: `ab build`, `ab check` and `ab packet` must not pay for a web
+# server they never start.
+#
+# The chat half lands as its own extra when the code that needs it does — the
+# agent harness more than doubles the resolved set on its own, and the map is
+# worth having before the chat exists.
+[project.optional-dependencies]
+ui = [
+    "fastapi>=0.141",
+    "uvicorn>=0.52",
 ]
 
 [project.urls]
@@ -52,7 +67,9 @@ dev = [
     "bandit>=1.9",
     "deptry>=0.23",
     "diff-cover>=9.2",
+    "fastapi>=0.141",
     "hypothesis>=6.140",
+    "httpx2>=0.1",
     "import-linter>=2.5",
     "mutmut>=3.3",
     "mypy>=2.3",
@@ -65,6 +82,7 @@ dev = [
     "ruff>=0.12",
     "syrupy>=4.9",
     "types-pyyaml>=6.0.12",
+    "uvicorn>=0.52",
     "xenon>=0.9.3",
 ]
 
@@ -141,6 +159,7 @@ include_external_packages = true
 #
 #   absicht.__main__
 #   absicht.cli
+#   absicht.ui                             # the designer's surface, behind the [ui] extra
 #   absicht.status | absicht.markers
 #   absicht.diff                                      # borrows render's UnknownRefError, like diagram
 #   absicht.render | absicht.packet | absicht.verify   # resolved graph, read-only
@@ -161,6 +180,7 @@ type = "layers"
 layers = [
     "absicht.__main__",
     "absicht.cli",
+    "absicht.ui",
     "absicht.status",
     "absicht.markers",
     "absicht.diagram",
@@ -178,11 +198,11 @@ layers = [
     "absicht.check",
     "absicht.resolve",
     "absicht.load",
+    "absicht.schema",
     "absicht.codec",
     "absicht.findings",
     "absicht.git",
     "absicht.runstore",
-    "absicht.schema",
     "absicht.models",
 ]
 

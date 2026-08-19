@@ -30,6 +30,7 @@ from absicht.cli import note  # noqa: F401
 from absicht.cli import query  # noqa: F401
 from absicht.cli import handoff  # noqa: F401
 from absicht.cli import reconcile  # noqa: F401
+from absicht.cli import ui  # noqa: F401
 
 # isort: on
 
