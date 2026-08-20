@@ -5,8 +5,6 @@ state: specified
 lifecycle: active
 owner: vfeenstr
 trigger: A change claiming to complete a sealed packet is verified.
-realizes:
-- requirement:verify-returned-work
 observations:
 - id: behavior:verify-reports-unchecked-observations#obs-1
   statement: Each must and must_not observation reports checked with evidence
@@ -30,4 +28,7 @@ observations:
   at: behavior:packet-bounds-the-work
   outcome: should
   timing: immediate
+relates:
+- to: req:verify-returned-work
+  type: realizes
 ---

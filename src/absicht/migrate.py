@@ -1,6 +1,6 @@
-"""The schema-migration seam: a registry, and nothing to run through it yet.
+"""The format-migration seam: a registry, and nothing to run through it yet.
 
-``SCHEMA_VERSION`` is 1 and no other version has ever existed, so there is
+``FORMAT_VERSION`` is 1 and no other version has ever existed, so there is
 nothing to migrate *from*. Per this project's own rules (KISS, YAGNI) this
 module is the harness a version-2 change fills in, not an engine built around
 an empty registry. What it pins today:
@@ -18,7 +18,7 @@ an empty registry. What it pins today:
 Where a store would *declare* its version on disk is deliberately undecided:
 the current format stamps nothing (records validate against the running
 models, ``extra="forbid"``), so every store this binary can resolve is at
-``SCHEMA_VERSION``. The change that introduces version 2 owns both a stamp
+``FORMAT_VERSION``. The change that introduces version 2 owns both a stamp
 and its reader — guessing the stamp's location here would calcify a format
 decision that belongs to that change.
 """
@@ -30,7 +30,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from absicht.load import StoreResolutionError, resolve_store
-from absicht.models import SCHEMA_VERSION
+from absicht.models.design import FORMAT_VERSION
 
 # A migration sees the record's raw field mapping, not a model instance: it
 # runs precisely because the record no longer validates against the models of
@@ -40,7 +40,7 @@ type Migration = Callable[[dict[str, object]], dict[str, object]]
 MIGRATIONS: dict[int, Migration] = {}
 """The registered upgrade steps, keyed by the version each migrates *from*.
 
-Empty on purpose: schema version 1 is the only version that has ever existed,
+Empty on purpose: format version 1 is the only version that has ever existed,
 so there is nothing to migrate from yet, and an engine built around an empty
 registry is the YAGNI violation this project's own rules name. The registry
 arms itself the moment a 1-to-2 entry lands — no configuration change, no
@@ -57,7 +57,7 @@ class MigrationResult:
     """What one migration run found — the CLI's report is built from this."""
 
     from_version: int
-    """The store's schema version when the run started."""
+    """The store's format version when the run started."""
 
     to_version: int
     """The version the store is at once the run finished."""
@@ -87,11 +87,11 @@ def migrate_store(root: Path, *, to: int | None = None) -> MigrationResult:
     # No on-disk stamp exists to read: version 1 is the only version there
     # has ever been, so a store this binary can resolve is at the running
     # version. The version-2 change owns the stamp and its reader.
-    current = SCHEMA_VERSION
-    target = SCHEMA_VERSION if to is None else to
+    current = FORMAT_VERSION
+    target = FORMAT_VERSION if to is None else to
     if target < current:
         raise MigrationError(
-            f"cannot migrate from {current} to {target}: a store never moves to an older schema"
+            f"cannot migrate from {current} to {target}: a store never moves to an older format"
         )
     if target == current:
         return MigrationResult(from_version=current, to_version=target)

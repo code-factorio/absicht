@@ -24,7 +24,7 @@ from absicht.cli._common import (
     GlobalOptions,
     color_enabled,
 )
-from absicht.models import SCHEMA_VERSION
+from absicht.models.design import FORMAT_VERSION
 
 log = logging.getLogger(__name__)
 
@@ -38,7 +38,7 @@ app = typer.Typer(
 
 def _version_callback(value: bool) -> None:
     if value:
-        typer.echo(f"absicht {__version__} (schema {SCHEMA_VERSION})")
+        typer.echo(f"absicht {__version__} (format {FORMAT_VERSION})")
         raise typer.Exit()
 
 
@@ -80,7 +80,7 @@ def _root(
             "--version",
             callback=_version_callback,
             is_eager=True,
-            help="Print the version, including the schema version it speaks.",
+            help="Print the version, including the store format it speaks.",
         ),
     ] = False,
 ) -> None:

@@ -1,7 +1,9 @@
 ---
-# An unknown with no owner — a wish, not a question, per models.py's own
-# docstring. The only deliberately unknown element in this store.
 id: question:unowned-unknown
-title: An unknown nobody owns
+title: Who owns the retention window?
 state: unknown
+confidence: assumed
+question: How long is an audit row kept?
+method: ask
 ---
+`policy/unknown-unowned`: `unknown` means ask, and there is nobody to ask.

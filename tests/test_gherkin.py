@@ -1,20 +1,25 @@
-"""``absicht.gherkin``: behavioural criteria as Gherkin, nothing else.
+"""``absicht.gherkin``: one behavior's observations as Gherkin, nothing else.
 
 The command contracts — flags, exit codes, the bytes on stdout — belong to
-``32-packet-cli.md`` and ``33-features.md`` and are not this module's. What
-is pinned here is the rendering contract both of them build on, per
-``docs/tasks/30-gherkin.md``:
+``tests/test_features_cli.py`` and ``tests/test_packet_cli.py``. What is
+pinned here is the rendering both of them build on:
 
-- one ``Scenario:`` per *behavioural* criterion, in the order given
-  (acceptance order is criterion-id order), while structural and measured
-  criteria are skipped whole — they are ``ab verify``'s and the benchmark's
-  concern, not Gherkin's;
+- one ``.feature`` per behavior and one ``Scenario:`` per observation, in the
+  order the behavior states them, each named by the observation id — the id a
+  step definition binds to, and the one thing that survives every rewording;
+- the mapping is the model's own shape rather than a translation: the trigger
+  is the feature description *and* every scenario's ``When``, an observation's
+  statement is its ``Then``, and the ``at`` ref rides as a comment so a reader
+  knows where to look without leaving the file;
+- ``outcome`` and the effective timing ride as tags, because a runner filters
+  on tags and on nothing else — and a ``must_not`` carries no timing tag at
+  all, since "at no point" has no when to carry;
 - the output is byte-identical across calls: ``ab features --check`` diffs
-  against it and ``ab packet --seal``'s digest seals it, so the same input
+  against it and ``ab packet --seal``'s digest seals it, so the same behavior
   spelling different bytes would break both silently;
-- ``scenario_digest`` folds each file's *name* into the hash with its
-  content — an edited ``then`` and a renamed file are both drift — and is
-  independent of dict order, not of the sorted set of files.
+- ``observations_digest`` folds each file's *name* into the hash with its
+  content — an edited ``Then`` and a renamed file are both drift — and is
+  independent of dict insertion order.
 """
 
 from __future__ import annotations
@@ -24,125 +29,221 @@ from pathlib import Path
 import pytest
 from syrupy.assertion import SnapshotAssertion
 
-from absicht.gherkin import render_feature, scenario_digest
+from absicht.gherkin import observations_digest, render_feature
 from absicht.load import load_store
-from absicht.models import Story
-from absicht.resolve import resolve
+from absicht.models.design import Behavior, Design, Observation
+from absicht.resolve import Index, resolve
 
 FIXTURES = Path(__file__).parent / "fixtures" / "systems"
 
 
 @pytest.fixture
-def cancel_order() -> Story:
-    """The ``clean/`` story the spec's tests are spelled against: two
-    behavioural criteria (one with a ``given``) and one structural."""
-    design = resolve(load_store(FIXTURES / "clean"))
-    return next(story for story in design.stories if story.id == "story:cancel-order")
+def clean() -> Index:
+    """The ``clean/`` fixture indexed, because the timing tags are resolved
+    through what an observation's ``at`` names: the renderer needs the graph,
+    not just the behavior."""
+    return Index(resolve(load_store(FIXTURES / "clean")))
 
 
-def test_only_behavioural_criteria_become_scenarios(cancel_order: Story) -> None:
-    """Two behavioural plus one structural criterion — the fixture's exact
-    split — renders exactly two scenarios; the structural one's statement is
-    not Gherkin's to spell."""
-    feature = render_feature(cancel_order, cancel_order.acceptance)
-
-    assert feature.count("Scenario:") == 2
-    assert "Scenario: story:cancel-order#ac-1" in feature
-    assert "Scenario: story:cancel-order#ac-2" in feature
-    assert "ac-3" not in feature
-    assert "cancellation only consumes" not in feature
+@pytest.fixture
+def order_cancelled(clean: Index) -> Behavior:
+    """The behavior every test here is spelled against: three observations,
+    one per outcome — a ``must`` on a component, a ``must_not`` on a store and
+    a ``should`` on a stream — so one render exercises every tag rule."""
+    behavior = clean.get("behavior:order-cancelled")
+    assert isinstance(behavior, Behavior)
+    return behavior
 
 
-def test_steps_come_from_the_criterion_own_fields(cancel_order: Story) -> None:
-    """``Given``/``When``/``Then`` lines are the criterion's own fields, with
-    ``And`` continuing a section: the fixture's ``#ac-1`` has no ``given``
-    and two ``then``s, ``#ac-2`` one of each."""
-    feature = render_feature(cancel_order, cancel_order.acceptance)
-
-    lines = feature.splitlines()
-    assert "    When the customer cancels a refundable order" in lines
-    assert "    Then the order is cancelled" in lines
-    assert "    And the refund starts" in lines
-    assert "    Given an order that has already shipped" in lines
-    assert "    Then cancellation is refused" in lines
+def _lines(behavior: Behavior, index: Index) -> list[str]:
+    return render_feature(behavior, index).splitlines()
 
 
-def test_the_story_maps_onto_the_gherkin_narrative(cancel_order: Story) -> None:
-    """The story's ``actor``/``outcome`` carry the As a/So that framing; the
-    title is the want, flattened into ``I want to`` the way story titles
-    (imperatives) read as Gherkin infinitives."""
-    feature = render_feature(cancel_order, cancel_order.acceptance)
+def test_the_header_is_the_title_and_the_trigger_is_the_description(
+    order_cancelled: Behavior, clean: Index
+) -> None:
+    """A behavior's own two prose fields, in the two places Gherkin keeps for
+    prose. Nothing is invented around them: there is no "as a" and no "so
+    that", because a behavior carries neither."""
 
-    lines = feature.splitlines()
-    assert lines[0] == "Feature: Cancel an order"
-    assert "  As a customer" in lines
-    assert "  I want to cancel an order" in lines
-    assert "  So that the order is cancelled and the refund starts" in lines
+    lines = _lines(order_cancelled, clean)
 
-
-def test_a_story_without_actor_or_outcome_omits_those_lines() -> None:
-    """The narrative maps the fields a story actually carries: no actor means
-    no ``As a`` line, not an empty one — and a story with no behavioural
-    criteria still renders, as a bare feature header."""
-    story = Story(id="story:bare", title="Ship it")
-
-    feature = render_feature(story, ())
-
-    assert feature.splitlines()[0] == "Feature: Ship it"
-    assert "As a" not in feature
-    assert "So that" not in feature
-    assert "Scenario:" not in feature
+    assert lines[0] == "Feature: Cancelling an unshipped order"
+    assert lines[1] == ""
+    assert lines[2] == "  The customer clicks Cancel on an order that has not shipped."
 
 
-def test_rendering_is_byte_identical_across_calls(cancel_order: Story) -> None:
-    feature = render_feature(cancel_order, cancel_order.acceptance)
+def test_one_scenario_per_observation_named_by_its_id(
+    order_cancelled: Behavior, clean: Index
+) -> None:
+    """The whole selection rule: every observation becomes a scenario, in the
+    behavior's own order, and the scenario's name is the observation id rather
+    than its statement — the statement is the part that gets reworded."""
 
-    assert render_feature(cancel_order, cancel_order.acceptance) == feature
+    feature = render_feature(order_cancelled, clean)
+
+    assert feature.count("Scenario:") == len(order_cancelled.observations) == 3
+    assert [line for line in feature.splitlines() if line.startswith("  Scenario:")] == [
+        "  Scenario: behavior:order-cancelled#obs-1",
+        "  Scenario: behavior:order-cancelled#obs-2",
+        "  Scenario: behavior:order-cancelled#obs-3",
+    ]
+
+
+def test_every_scenario_replays_the_trigger_and_asserts_one_statement(
+    order_cancelled: Behavior, clean: Index
+) -> None:
+    """One expectation per scenario, under the same ``When`` each time: the
+    trigger is what happened, and an observation says one thing about the
+    result. A scenario asserting two would fail without saying which."""
+
+    lines = _lines(order_cancelled, clean)
+
+    assert lines.count("    When The customer clicks Cancel on an order that has not shipped.") == 3
+    assert "    Then The order reads cancelled." in lines
+    assert "    Then No entry for the order remains in the cache." in lines
+    assert "    Then An OrderCancelled event carries the reason the customer gave." in lines
+
+
+def test_each_scenario_names_where_it_is_observed(order_cancelled: Behavior, clean: Index) -> None:
+    """The ``at`` ref as a comment: a step definition has to know what it is
+    watching, and a comment says so without becoming a step a runner would try
+    to bind."""
+
+    lines = _lines(order_cancelled, clean)
+
+    assert "    # at component:orders" in lines
+    assert "    # at resource:order-cache" in lines
+    assert "    # at resource:order-stream" in lines
+
+
+def test_the_tags_carry_the_outcome_and_the_effective_timing(
+    order_cancelled: Behavior, clean: Index
+) -> None:
+    """What changes a runner's handling, in the one form a runner can select
+    on. The timing is the *effective* one, resolved through what ``at`` names:
+    ``#obs-3`` says nothing about when and lands on a stream, so it reads
+    ``eventual`` without an author having repeated the default."""
+
+    lines = _lines(order_cancelled, clean)
+
+    assert lines[4] == "  @must @immediate"
+    assert lines[16] == "  @should @eventual"
+
+
+def test_a_must_not_carries_no_timing_tag(order_cancelled: Behavior, clean: Index) -> None:
+    """ "At no point" has no when. A timing tag here would let a runner wait
+    for the forbidden thing to settle, which is the opposite of the check."""
+
+    lines = _lines(order_cancelled, clean)
+
+    assert lines[10] == "  @must_not"
+    assert not any(line.startswith("  @must_not @") for line in lines)
+
+
+def test_a_behavior_with_no_observations_renders_a_bare_header() -> None:
+    """A behavior mid-authoring is legitimate on disk — ``check`` reports it
+    through ``policy/behavior-unobserved`` — so the renderer states what there
+    is and stops, rather than refusing or inventing a scenario."""
+
+    behavior = Behavior(id="behavior:bare", title="Ship it", trigger="Somebody ships.")
+    index = Index(Design(id="design:bare", title="Bare", version="0.1.0", behaviors=(behavior,)))
+
+    assert render_feature(behavior, index) == "Feature: Ship it\n\n  Somebody ships.\n"
+
+
+def test_an_observation_that_points_at_nothing_still_renders() -> None:
+    """A dangling ``at`` is ``check``'s finding, not a rendering failure: the
+    scenario is written with the ref it names and the timing that "resolves to
+    nothing" implies, so a store somebody is still fixing produces files
+    somebody can still read."""
+
+    behavior = Behavior(
+        id="behavior:ghost",
+        title="Ghost",
+        trigger="Something happens.",
+        observations=(
+            Observation(id="behavior:ghost#obs-1", statement="It lands", at="component:ghost"),
+        ),
+    )
+    index = Index(Design(id="design:ghost", title="Ghost", version="0.1.0", behaviors=(behavior,)))
+
+    lines = _lines(behavior, index)
+
+    assert "  @must @immediate" in lines
+    assert "    # at component:ghost" in lines
+
+
+def test_rendering_is_byte_identical_across_calls(order_cancelled: Behavior, clean: Index) -> None:
+    """The premise under ``--check`` and under every seal: the same behavior
+    renders the same bytes, so a difference is always drift and never noise."""
+
+    assert render_feature(order_cancelled, clean) == render_feature(order_cancelled, clean)
 
 
 def test_the_rendered_feature_is_pinned_whole(
-    cancel_order: Story, snapshot: SnapshotAssertion
+    order_cancelled: Behavior, clean: Index, snapshot: SnapshotAssertion
 ) -> None:
-    """The whole file, byte for byte, for the fixture story: a future
-    formatting change has to arrive as a reviewable snapshot update, not as
-    silent drift in every ``--check`` and every seal computed afterwards."""
-    assert render_feature(cancel_order, cancel_order.acceptance) == snapshot
+    """The whole file, byte for byte: a future formatting change has to arrive
+    as a reviewable snapshot update, not as silent drift in every ``--check``
+    and every digest computed afterwards."""
+
+    assert render_feature(order_cancelled, clean) == snapshot
 
 
-# --- the scenario digest -------------------------------------------------------
+# --- the observations digest ---------------------------------------------------
 
 
-def test_the_digest_moves_when_a_then_line_changes(cancel_order: Story) -> None:
-    """The seal's whole point: an edited step is drift. A reworded ``then``
-    re-renders to different bytes, and the digest of the re-rendered files
-    must say so — this is how ``ab verify`` catches a hand-edited ``.feature``."""
-    reworded = cancel_order.acceptance[0].model_copy(
-        update={"then": ("the order is cancelled", "the refund is skipped")}
+def test_the_digest_moves_when_a_statement_changes(order_cancelled: Behavior, clean: Index) -> None:
+    """The seal's whole point: a reworded observation re-renders to different
+    bytes, and the digest must say so — this is how ``ab verify`` catches a
+    ``.feature`` file somebody edited by hand."""
+
+    first, *rest = order_cancelled.observations
+    reworded = order_cancelled.model_copy(
+        update={
+            "observations": (
+                first.model_copy(update={"statement": "The order reads refunded."}),
+                *rest,
+            )
+        }
     )
-    before = {"cancel-order.feature": render_feature(cancel_order, cancel_order.acceptance)}
-    after = {
-        "cancel-order.feature": render_feature(
-            cancel_order, (reworded, *cancel_order.acceptance[1:])
-        )
+    name = "order-cancelled.feature"
+
+    assert observations_digest({name: render_feature(reworded, clean)}) != observations_digest(
+        {name: render_feature(order_cancelled, clean)}
+    )
+
+
+def test_the_digest_stays_put_when_nothing_changed(order_cancelled: Behavior, clean: Index) -> None:
+    """Same files, different dict insertion order: the walk sorts by filename,
+    so the order a caller happened to build the mapping in cannot move what
+    the seal recorded."""
+
+    features = {
+        "order-cancelled.feature": render_feature(order_cancelled, clean),
+        "bare.feature": "Feature: Bare\n",
     }
 
-    assert scenario_digest(after) != scenario_digest(before)
-
-
-def test_the_digest_stays_put_when_nothing_changed(cancel_order: Story) -> None:
-    features = {"cancel-order.feature": render_feature(cancel_order, cancel_order.acceptance)}
-
-    # Same files, different dict insertion order: the digest walks the files
-    # sorted by name, so dict order cannot move what the seal records.
-    assert scenario_digest(dict(reversed(list(features.items())))) == scenario_digest(features)
+    assert observations_digest(dict(reversed(list(features.items())))) == observations_digest(
+        features
+    )
 
 
 def test_the_digest_counts_a_rename_as_a_change() -> None:
-    """The filename is part of the hash input, tested directly: identical
-    content under a new name is drift too, because the step definitions'
-    home moved."""
-    same = "Feature: Cancel an order\n"
+    """The filename is part of the hash input: identical content under a new
+    name is drift too, because the step definitions' home moved."""
 
-    assert scenario_digest({"renamed.feature": same}) != scenario_digest(
-        {"cancel-order.feature": same}
+    same = "Feature: Cancelling an unshipped order\n"
+
+    assert observations_digest({"renamed.feature": same}) != observations_digest(
+        {"order-cancelled.feature": same}
     )
+
+
+def test_the_digest_keeps_a_name_and_its_content_apart() -> None:
+    """Name and content fold in with separators between them, so two file sets
+    that would concatenate to the same bytes still hash apart — the collision
+    a plain ``name + content`` join would let through."""
+
+    assert observations_digest({"a.feature": "bc"}) != observations_digest({"ab.feature": "c"})

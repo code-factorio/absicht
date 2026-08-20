@@ -45,15 +45,21 @@ import pytest
 from absicht.codec import dump_singleton, parse_singleton
 from absicht.findings import Severity
 from absicht.markers import MarkerError, check, stamp, sync
-from absicht.models import Component, Design, Marker, System, UnitWatermark
+from absicht.models.design import Component, ComponentLevel, Design
+from absicht.models.marker import Marker, Watermark
 
 
 def _design(*components: Component) -> Design:
-    return Design(system=System(id="system:tiny", title="Tiny"), components=components)
+    return Design(id="design:tiny", title="Tiny", version="0.1.0", components=components)
 
 
 def _component(ref: str, *implemented_by: str) -> Component:
-    return Component(id=ref, title=ref.removeprefix("component:"), implemented_by=implemented_by)
+    return Component(
+        id=ref,
+        title=ref.removeprefix("component:"),
+        level=ComponentLevel.COMPONENT,
+        implemented_by=implemented_by,
+    )
 
 
 def _repo(tmp_path: Path, name: str) -> Path:
@@ -75,7 +81,7 @@ def test_a_fresh_repo_gets_the_entries_that_speak_for_it(tmp_path: Path) -> None
 
     assert marker == Marker(
         design="../design",
-        units=(UnitWatermark(id="component:core", path="src/core"),),
+        units=(Watermark(id="component:core", path="src/core"),),
     )
     assert parse_singleton((repo / ".absicht").read_text(encoding="utf-8"), model=Marker) == marker
 
@@ -88,7 +94,7 @@ def test_a_bare_entry_is_the_single_repo_spelling(tmp_path: Path) -> None:
 
     marker = sync(design, _repo(tmp_path, "anywhere"), design_url="../design")
 
-    assert marker.units == (UnitWatermark(id="component:shared", path="src/shared"),)
+    assert marker.units == (Watermark(id="component:shared", path="src/shared"),)
 
 
 def test_an_update_preserves_surviving_watermarks_drops_and_adds_units(
@@ -110,13 +116,13 @@ def test_an_update_preserves_surviving_watermarks_drops_and_adds_units(
             Marker(
                 design="../design",
                 units=(
-                    UnitWatermark(
+                    Watermark(
                         id="component:a", path="src/a", at="milestone:m1", design_rev="deadbeef"
                     ),
-                    UnitWatermark(
+                    Watermark(
                         id="component:a", path="src/legacy", at="milestone:m0", design_rev="older"
                     ),
-                    UnitWatermark(
+                    Watermark(
                         id="component:b", path="src/b", at="milestone:m2", design_rev="beefdead"
                     ),
                 ),
@@ -136,9 +142,9 @@ def test_an_update_preserves_surviving_watermarks_drops_and_adds_units(
 
     assert marker.units == (
         # kept: `src/a`'s own watermark, not `src/legacy`'s
-        UnitWatermark(id="component:a", path="src/a", at="milestone:m1", design_rev="deadbeef"),
+        Watermark(id="component:a", path="src/a", at="milestone:m1", design_rev="deadbeef"),
         # added, with nothing to preserve
-        UnitWatermark(id="component:c", path="src/c"),
+        Watermark(id="component:c", path="src/c"),
     )
 
 
@@ -152,7 +158,7 @@ def test_a_repathed_unit_keeps_its_watermark(tmp_path: Path) -> None:
             Marker(
                 design="../design",
                 units=(
-                    UnitWatermark(
+                    Watermark(
                         id="component:a", path="src/old", at="milestone:m1", design_rev="deadbeef"
                     ),
                 ),
@@ -166,7 +172,7 @@ def test_a_repathed_unit_keeps_its_watermark(tmp_path: Path) -> None:
     )
 
     assert marker.units == (
-        UnitWatermark(id="component:a", path="src/new", at="milestone:m1", design_rev="deadbeef"),
+        Watermark(id="component:a", path="src/new", at="milestone:m1", design_rev="deadbeef"),
     )
 
 
@@ -231,7 +237,7 @@ def test_watermark_drift_is_not_a_marker_disagreement(tmp_path: Path) -> None:
             Marker(
                 design="../design",
                 units=(
-                    UnitWatermark(
+                    Watermark(
                         id="component:a", path="src/a", at="milestone:m0", design_rev="ancient"
                     ),
                 ),
@@ -324,10 +330,10 @@ def test_stamping_moves_one_unit_and_leaves_the_rest_alone(tmp_path: Path) -> No
             Marker(
                 design="../design",
                 units=(
-                    UnitWatermark(
+                    Watermark(
                         id="component:a", path="src/a", at="milestone:m0", design_rev="older"
                     ),
-                    UnitWatermark(
+                    Watermark(
                         id="component:b", path="src/b", at="milestone:m0", design_rev="beefdead"
                     ),
                 ),
@@ -339,9 +345,9 @@ def test_stamping_moves_one_unit_and_leaves_the_rest_alone(tmp_path: Path) -> No
     marker = stamp(repo, "component:a", "milestone:m1", design_rev="deadbeef")
 
     assert marker.units == (
-        UnitWatermark(id="component:a", path="src/a", at="milestone:m1", design_rev="deadbeef"),
+        Watermark(id="component:a", path="src/a", at="milestone:m1", design_rev="deadbeef"),
         # `b`'s watermark is not stamp's to move
-        UnitWatermark(id="component:b", path="src/b", at="milestone:m0", design_rev="beefdead"),
+        Watermark(id="component:b", path="src/b", at="milestone:m0", design_rev="beefdead"),
     )
     assert parse_singleton((repo / ".absicht").read_text(encoding="utf-8"), model=Marker) == marker
 
@@ -355,8 +361,8 @@ def test_a_unit_implemented_at_two_paths_moves_as_one(tmp_path: Path) -> None:
             Marker(
                 design="../design",
                 units=(
-                    UnitWatermark(id="component:a", path="src/a"),
-                    UnitWatermark(id="component:a", path="src/legacy"),
+                    Watermark(id="component:a", path="src/a"),
+                    Watermark(id="component:a", path="src/legacy"),
                 ),
             )
         ),
@@ -366,10 +372,8 @@ def test_a_unit_implemented_at_two_paths_moves_as_one(tmp_path: Path) -> None:
     marker = stamp(repo, "component:a", "milestone:m1", design_rev="deadbeef")
 
     assert marker.units == (
-        UnitWatermark(id="component:a", path="src/a", at="milestone:m1", design_rev="deadbeef"),
-        UnitWatermark(
-            id="component:a", path="src/legacy", at="milestone:m1", design_rev="deadbeef"
-        ),
+        Watermark(id="component:a", path="src/a", at="milestone:m1", design_rev="deadbeef"),
+        Watermark(id="component:a", path="src/legacy", at="milestone:m1", design_rev="deadbeef"),
     )
 
 
@@ -379,7 +383,7 @@ def test_a_unit_the_marker_does_not_carry_is_refused_for_stamping(tmp_path: Path
     repo = _repo(tmp_path, "acme/r")
     (repo / ".absicht").write_text(
         dump_singleton(
-            Marker(design="../design", units=(UnitWatermark(id="component:a", path="src/a"),))
+            Marker(design="../design", units=(Watermark(id="component:a", path="src/a"),))
         ),
         encoding="utf-8",
     )

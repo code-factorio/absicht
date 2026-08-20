@@ -52,23 +52,29 @@ class Kind(StrEnum):
     """The element kinds a store holds.
 
     `note` is deliberately absent: notes are not elements, so there is no
-    `ab new note` and no `ab list note` — `ab note` is its own command group
-    (docs/tasks/50-addendum-conventions.md).
+    `ab new note` and no `ab list note` — `ab note` is its own command group.
+    The values are the `kind:` prefixes a ref carries, so a filter here is a
+    prefix test and never a lookup.
     """
 
-    COMPONENT = "component"
-    SEAM = "seam"
-    DATA = "data"
-    REQUIREMENT = "requirement"
-    NFR = "nfr"
-    STORY = "story"
-    DECISION = "decision"
-    REJECTION = "rejection"
-    QUESTION = "question"
-    MILESTONE = "milestone"
-    EXTERNAL = "external"
-    RESOURCE = "resource"
+    TERM = "term"
+    ACTOR = "actor"
+    GOAL = "goal"
+    REQ = "req"
+    QUALITY = "quality"
+    CONSTRAINT = "constraint"
     BEHAVIOR = "behavior"
+    COMPONENT = "component"
+    INTERFACE = "interface"
+    DATA = "data"
+    RESOURCE = "resource"
+    LIBRARY = "library"
+    EXTERNAL = "external"
+    ASSUMPTION = "assumption"
+    DECISION = "decision"
+    QUESTION = "question"
+    REJECTION = "rejection"
+    MILESTONE = "milestone"
 
 
 class Overlay(StrEnum):

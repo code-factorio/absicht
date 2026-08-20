@@ -1,0 +1,11 @@
+format_version: 1
+id: design:broken
+title: A store with one of everything wrong
+version: 0.1.0
+purpose: One clearly-named file per failure family.
+exports: []
+imports: []
+repositories:
+- id: acme
+  url: https://example.invalid/acme
+  ref: main

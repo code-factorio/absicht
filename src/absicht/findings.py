@@ -25,7 +25,7 @@ from enum import IntEnum, StrEnum
 
 from pydantic import Field
 
-from absicht.models import SCHEMA_VERSION, Record
+from absicht.models.design import FORMAT_VERSION, Record
 
 
 class ExitCode(IntEnum):
@@ -46,7 +46,7 @@ class ExitCode(IntEnum):
     INTERNAL = 3
     """Internal error."""
     SCHEMA_MISMATCH = 4
-    """Schema version mismatch; run ``ab migrate``."""
+    """Format version mismatch; run ``ab migrate``."""
 
 
 class Severity(StrEnum):
@@ -178,7 +178,7 @@ class Report(Record):
     def render_json(self) -> dict[str, object]:
         """The ``--json``/``--format json`` envelope from ``docs/tasks/00-conventions.md``."""
         return {
-            "schema_version": SCHEMA_VERSION,
+            "format_version": FORMAT_VERSION,
             "findings": [f.model_dump(mode="json") for f in self.findings],
         }
 

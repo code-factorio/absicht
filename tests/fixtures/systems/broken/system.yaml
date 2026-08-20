@@ -1,6 +1,0 @@
-# Deliberately specified: the defects in this store live in clearly-named
-# element files, so nothing here should trip a policy rule by accident.
-id: system:broken
-title: Deliberately broken
-state: specified
-purpose: Exercise the failure paths.

@@ -1,29 +1,27 @@
 """Run history — packets issued, verification runs — in SQLite, not in git.
 
-Addendum §8 (docs/spec/ABSICHT-MODEL-ADDENDUM.md#8): packets and verification
-runs are machine-generated, appended per run and never reviewed as a diff, so
-they do not belong in the repository. A local store beside the design store
-records two things, and losing it loses run history, not design — a packet
-artifact is deterministic from milestone plus design rev and is regenerated,
-and a verification run can be re-run.
+Packets and verification runs are machine-generated, appended per run and
+never reviewed as a diff, so they do not belong in the repository. A local
+store beside the design store records two things, and losing it loses run
+history, not design — a packet artifact is deterministic from milestone plus
+design rev and is regenerated, and a verification run can be re-run.
 
-The store is ``build/runs.db`` under the store root (pinned in
-docs/tasks/50-addendum-conventions.md): inside the already-gitignored build
-directory, destroyed by exactly the actions that destroy the other derived
-artifacts.
+The store is ``build/runs.db`` under the store root: inside the
+already-gitignored build directory, destroyed by exactly the actions that
+destroy the other derived artifacts.
 
-Two tables, matching §8's tuples:
+Two tables:
 
 - ``packets`` — one row per packet id ever issued: the milestone, the design
   rev it was built at, when, and to whom. The artifact itself is never
   stored; it is regenerated.
-- ``runs`` — one row per criterion/observation result of one verification
-  run. A run has no header table: its rows share
-  ``(packet_id, commit_sha, recorded_at)`` and are written in one
-  transaction, so a failing row rolls the whole run back — and a run with no
-  results leaves no trace. ``result`` is text, not an enum or a foreign key:
-  59's vocabulary (``checked`` / ``no_check`` / ``advisory``) plus whatever
-  verify's rules record, additive like the JSON envelope.
+- ``runs`` — one row per observation result of one verification run. A run
+  has no header table: its rows share ``(packet_id, commit_sha,
+  recorded_at)`` and are written in one transaction, so a failing row rolls
+  the whole run back — and a run with no results leaves no trace. ``result``
+  is text, not an enum or a foreign key: ``checked`` / ``no_check`` /
+  ``advisory`` plus whatever verify's rules record, additive like the JSON
+  envelope.
 
 Packet ids are ``pkt-`` plus the first 12 hex of
 ``sha256(milestone + design_rev)`` — an opaque handle pinned here so that
@@ -54,7 +52,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-USER_VERSION = 1
+USER_VERSION = 2
 """The schema version this module writes and understands."""
 
 RUNS_DB = Path("build") / "runs.db"
@@ -78,9 +76,9 @@ class IssuedPacket:
 
 @dataclass(frozen=True, slots=True)
 class RunResult:
-    """One criterion/observation result — a row of ``runs``."""
+    """One observation result — a row of ``runs``."""
 
-    criterion: str
+    observation: str
     result: str
     evidence_ref: str | None
 
@@ -108,12 +106,12 @@ CREATE TABLE IF NOT EXISTS packets (
 CREATE TABLE IF NOT EXISTS runs (
     packet_id    TEXT NOT NULL,
     commit_sha   TEXT NOT NULL,
-    criterion    TEXT NOT NULL,
+    observation  TEXT NOT NULL,
     result       TEXT NOT NULL,
     evidence_ref TEXT,
     recorded_at  TEXT NOT NULL
 );
-PRAGMA user_version = 1;
+PRAGMA user_version = 2;
 """
 
 
@@ -177,10 +175,10 @@ def record_run(
     try:
         with conn:
             conn.executemany(
-                "INSERT INTO runs (packet_id, commit_sha, criterion, result, evidence_ref, "
+                "INSERT INTO runs (packet_id, commit_sha, observation, result, evidence_ref, "
                 "recorded_at) VALUES (?, ?, ?, ?, ?, ?)",
                 [
-                    (packet_id, commit_sha, r.criterion, r.result, r.evidence_ref, recorded_at)
+                    (packet_id, commit_sha, r.observation, r.result, r.evidence_ref, recorded_at)
                     for r in results
                 ],
             )
@@ -219,16 +217,16 @@ def runs_for(root: Path, packet_id: str) -> tuple[Run, ...]:
         return ()
     try:
         rows = conn.execute(
-            "SELECT commit_sha, recorded_at, criterion, result, evidence_ref FROM runs "
+            "SELECT commit_sha, recorded_at, observation, result, evidence_ref FROM runs "
             "WHERE packet_id = ? ORDER BY recorded_at, commit_sha, rowid",
             (packet_id,),
         ).fetchall()
     finally:
         conn.close()
     grouped: dict[tuple[str, str], list[RunResult]] = {}
-    for commit_sha, recorded_at, criterion, result, evidence_ref in rows:
+    for commit_sha, recorded_at, observation, result, evidence_ref in rows:
         grouped.setdefault((commit_sha, recorded_at), []).append(
-            RunResult(criterion=criterion, result=result, evidence_ref=evidence_ref)
+            RunResult(observation=observation, result=result, evidence_ref=evidence_ref)
         )
     return tuple(
         Run(
@@ -281,13 +279,18 @@ def _open_for_write(root: Path) -> sqlite3.Connection:
 
 
 def _version(conn: sqlite3.Connection, db: Path) -> int:
-    """The store's ``user_version``, raising on one from a future ``ab``."""
+    """The store's ``user_version``, raising on one this ``ab`` cannot use.
+
+    A future version's file is refused untouched. So is an older one: the
+    columns moved with the model, and the store holds run history rather than
+    design, so starting over costs nothing worth a migration.
+    """
     row = conn.execute("PRAGMA user_version").fetchone()
     version = int(row[0]) if row else 0
-    if version > USER_VERSION:
+    if version not in (0, USER_VERSION):
         conn.close()
         raise RunStoreError(
-            f"{db} is run-store schema version {version}, newer than the "
+            f"{db} is run-store schema version {version}, not the "
             f"{USER_VERSION} this ab understands. It holds run history, not design: "
             "remove it and the history starts over."
         )

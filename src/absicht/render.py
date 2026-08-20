@@ -38,33 +38,31 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, cast
 
-from absicht.check import expired_externals
-from absicht.models import (
-    SCHEMA_VERSION,
+from absicht.check import expired_services
+from absicht.models.design import (
+    FORMAT_VERSION,
     Behavior,
     Component,
-    Criterion,
     Design,
     Element,
-    Fidelity,
+    Interface,
     Lifecycle,
     Note,
     Observation,
-    Packet,
-    PacketElement,
     Question,
     Ref,
+    RelationshipType,
     Requirement,
     Resource,
-    Scope,
-    Seam,
     State,
     Timing,
 )
+from absicht.models.packet import Fidelity, Packet, PacketElement
 from absicht.notes import age_text, inbox_headline, inbox_order
 from absicht.resolve import (
     Index,
     Reference,
+    Scope,
     composed_by,
     composes,
     effective_timing,
@@ -124,13 +122,13 @@ class ObservationView:
 
 @dataclass(frozen=True, slots=True)
 class BehaviorFacts:
-    """The facts about a behavior the addendum derives rather than stores:
-    its §4.1 scope, the §4.2 composition edges in both directions, and §5's
-    reverse supersession edge.
+    """The facts about a behavior that are derived rather than stored: its
+    scope, the composition edges in both directions, and the reverse
+    supersession edge.
 
     Carried on the view so ``show``'s three formats and the site's page spell
     them identically; computed in ``absicht.resolve``, the one home of each
-    rule, exactly as the packet and verify layers will read them.
+    rule, exactly as the packet and verify layers read them.
     """
 
     scope: Scope
@@ -140,12 +138,11 @@ class BehaviorFacts:
 
 
 def superseded_mark(element: Element) -> str:
-    """§5's visible mark: a superseded behavior is not deleted — it is the
+    """The visible mark: a superseded element is not deleted — it is the
     record of what was expected before — but wherever a view names it, it
     must not read as current. One spelling, so the ``show`` views and the
     ``list`` rows cannot drift apart."""
-    replaced = isinstance(element, Behavior) and element.lifecycle is Lifecycle.SUPERSEDED
-    return " [superseded]" if replaced else ""
+    return " [superseded]" if element.lifecycle is Lifecycle.SUPERSEDED else ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -159,8 +156,8 @@ class Neighbourhood:
     """A behavior's observations with their effective timings; empty for
     every other kind, which is what keeps the field one concern."""
     facts: BehaviorFacts | None = None
-    """A behavior's derived §4/§5 facts; ``None`` for every other kind, the
-    same one-concern shape ``observations`` holds."""
+    """A behavior's derived facts; ``None`` for every other kind, the same
+    one-concern shape ``observations`` holds."""
 
     def render_text(self, *, include_body: bool) -> str:
         lines = [f"{self.element.id}{superseded_mark(self.element)} — {self.element.title}"]
@@ -228,8 +225,8 @@ class Neighbourhood:
         The effective timing rides *beside* the authored one, additively per
         the envelope rules: ``timing`` stays exactly what the file said (null
         when unsaid), ``effective_timing`` is the derived answer a consumer
-        acts on. The derived §4/§5 facts follow the same rule one level up —
-        beside ``element``, never inside it, where a computed answer would
+        acts on. The derived behavior facts follow the same rule one level up
+        — beside ``element``, never inside it, where a computed answer would
         read as an authored field.
         """
         exclude = None if include_body else {"body"}
@@ -240,7 +237,7 @@ class Neighbourhood:
                 view.effective_timing.value if view.effective_timing is not None else None
             )
         envelope: dict[str, object] = {
-            "schema_version": SCHEMA_VERSION,
+            "format_version": FORMAT_VERSION,
             "element": dump,
             "points_at": [_hop_json(hop) for hop in self.outgoing],
             "referenced_by": [
@@ -276,9 +273,10 @@ class Neighbourhood:
         `source` is provenance, `body` prints as its own block — and
         `observations`, which render as their own section: the one field a
         compact one-line value would bury five statements inside."""
+        dump: dict[str, Any] = self.element.model_dump(mode="json")
         return tuple(
             (name, value)
-            for name, value in self.element.model_dump(mode="json").items()
+            for name, value in dump.items()
             if name not in ("id", "title", "source", "body", "observations")
             and value not in ("", None, [])
         )
@@ -296,13 +294,13 @@ def neighbourhood(design: Design, ref: str, *, depth: int) -> Neighbourhood:
     the same policy ``Index.referenced_by`` already holds — reporting dangling
     refs is ``ab check``'s job, not a query's.
     """
-    return _neighbourhood(Index.from_design(design), ref, depth=depth)
+    return _neighbourhood(Index(design), ref, depth=depth)
 
 
 def _neighbourhood(index: Index, ref: str, *, depth: int) -> Neighbourhood:
     """The neighbourhood over an index the caller already holds — the site's
     page-per-element loop passes one rather than re-deriving it per page."""
-    element = index.by_id.get(ref)
+    element = index.get(ref)
     if element is None:
         raise UnknownRefError(f"unknown ref {ref!r}: no element in this store has that id")
     return Neighbourhood(
@@ -312,15 +310,16 @@ def _neighbourhood(index: Index, ref: str, *, depth: int) -> Neighbourhood:
         outgoing=(
             tuple(
                 _hop(index, edge, remaining=depth - 1)
-                for edge in index.references_from.get(ref, ())
-                if edge.target in index.by_id
+                for edge in index.references_from(ref)
+                if edge.target in index.local
             )
             if depth > 0
             else ()
         ),
         incoming=tuple(
-            Link(field=edge.field, other=index.by_id[edge.source])
-            for edge in index.referenced_by.get(ref, ())
+            Link(field=edge.field, other=index.local[edge.source])
+            for edge in index.referenced_by(ref)
+            if edge.source in index.local
         ),
         observations=_observation_views(element, index),
         facts=(
@@ -343,7 +342,7 @@ def _observation_views(element: Element, index: Index) -> tuple[ObservationView,
     if not isinstance(element, Behavior):
         return ()
     return tuple(
-        ObservationView(observation, effective_timing(index, observation))
+        ObservationView(observation, effective_timing(observation, index))
         for observation in element.observations
     )
 
@@ -369,21 +368,21 @@ def _observation_line(view: ObservationView) -> str:
 def _hop(index: Index, edge: Reference, *, remaining: int) -> Hop:
     """One resolved outgoing edge, plus its own while budget remains.
 
-    The budget is what makes cyclic graphs — a seam's provider provides that
-    seam right back — safe: expansion stops when it runs out, not when the
-    walk arrives somewhere it has already been. A view of a cyclic graph is a
-    bounded tree, not a search.
+    The budget is what makes cyclic graphs — a component that calls an
+    interface it also declares — safe: expansion stops when it runs out, not
+    when the walk arrives somewhere it has already been. A view of a cyclic
+    graph is a bounded tree, not a search.
     """
     deeper = (
         tuple(
             _hop(index, further, remaining=remaining - 1)
-            for further in index.references_from.get(edge.target, ())
-            if further.target in index.by_id
+            for further in index.references_from(edge.target)
+            if further.target in index.local
         )
         if remaining > 0
         else ()
     )
-    return Hop(field=edge.field, other=index.by_id[edge.target], deeper=deeper)
+    return Hop(field=edge.field, other=index.local[edge.target], deeper=deeper)
 
 
 def _walk(hops: tuple[Hop, ...], level: int = 0) -> Iterator[tuple[int, Hop]]:
@@ -404,8 +403,8 @@ def _section(heading: str, entries: Iterator[str]) -> list[str]:
 
 def _value_text(value: Any) -> str:
     """One line per field value: strings as themselves, lists of strings
-    comma-joined, anything structured (fields, criteria, units) as compact
-    JSON rather than a bespoke pretty-printer per shape."""
+    comma-joined, anything structured (fields, operations) as compact JSON
+    rather than a bespoke pretty-printer per shape."""
     if isinstance(value, str):
         return value
     if isinstance(value, list) and all(isinstance(item, str) for item in value):
@@ -417,7 +416,8 @@ def _fields_of(element: Element) -> dict[str, object]:
     """A neighbour's fields: everything but its prose and provenance. The body
     is the focus element's to print (under ``--body``), and where a neighbour
     lives is not this view's story."""
-    return element.model_dump(mode="json", exclude={"body", "source"})
+    dump: dict[str, object] = element.model_dump(mode="json", exclude={"body", "source"})
+    return dump
 
 
 def _hop_json(hop: Hop) -> dict[str, object]:
@@ -436,13 +436,13 @@ legitimate and expected rather than done. `specified`, `constrained` and
 `out_of_scope` are not unfinished — the last is a decision, not a gap."""
 
 # The reason vocabulary `ab gaps` spells on its worklist. Constants rather
-# than literals at each use site: `ab gaps --overdue` and the text renderer
+# than literals at each use site: `ab gaps --blocking` and the text renderer
 # match on these strings, and a drift there would fail silently — the filter
 # would quietly answer nothing. The `state=<state>` reason is spelled where
 # it is built; nothing keys on its value.
 UNOWNED = "unowned"
 QUESTION_OPEN = "question-open"
-QUESTION_OVERDUE = "question-overdue"
+QUESTION_BLOCKING = "question-blocking"
 EXTERNAL_EXPIRED = "external-expired"
 NO_OBSERVATIONS = "no-observations"
 
@@ -452,18 +452,19 @@ class Gap:
     """One worklist entry: an element plus every reason it is unfinished.
 
     Distinct from a bare `Element` on purpose — the command's whole point is
-    the *why*. `due_on` is carried only for question gaps (the one reason with
-    a deadline) and `expires_on` only for expired externals (the one reason
-    about a lapsed date), so a consumer can prioritize without re-reading the
-    element; both stay `None` elsewhere rather than copying a date over.
-    `owner_inherited` carries §7's inheritance — the owner of the single
-    element referencing this unowned `unknown`, derived here and never
-    stored, which is also why such an entry stops carrying `unowned`.
+    the *why*. `blocks` is carried only for question gaps (urgency is read
+    from what waits on the answer, never from a date somebody guessed and
+    nobody revisits) and `expires_on` only for expired external services (the
+    one reason about a lapsed date), so a consumer can prioritize without
+    re-reading the element. `owner_inherited` carries the inheritance — the
+    owner of the single element referencing this unowned `unknown`, derived
+    here and never stored, which is also why such an entry stops carrying
+    `unowned`.
     """
 
     element: Element
     reasons: tuple[str, ...]
-    due_on: date | None = None
+    blocks: tuple[Ref, ...] = ()
     expires_on: date | None = None
     owner_inherited: str | None = None
 
@@ -472,32 +473,31 @@ def worklist(design: Design, *, today: date) -> tuple[Gap, ...]:
     """Everything unfinished in one worklist, one entry per element, in id order.
 
     Five sources, unioned: an unfinished state, no owner, a behavior with no
-    observations (the query-side twin of `policy/behavior-needs-observations`,
-    the way unowned elements appear both places — whatever the behavior's
-    state, an expectation with nothing observable is not one), an unresolved
-    `Question` (the whole kind is a gap by construction — "an `unknown` with
-    an owner and a way out", and one a decision has `resolved_by` is closed),
-    and an expired external assumption (`absicht.check`'s one spelling of
-    "expired", reused). An element can arrive through several sources at once;
-    the entry then carries every reason, in the order the sources are listed
-    here — deterministic, like the id order the entries come in.
+    observations (the query-side twin of `policy/behavior-unobserved` — whatever
+    the behavior's state, an expectation with nothing observable is not one),
+    an unresolved `Question` (the whole kind is a gap by construction — "an
+    `unknown` with an owner and a way out", and one a decision has
+    `resolved_by` is closed), and an expired external service (`absicht.check`'s
+    one spelling of "expired", reused). An element can arrive through several
+    sources at once; the entry then carries every reason, in the order the
+    sources are listed here — deterministic, like the id order the entries
+    come in.
 
     "Unowned" is scoped to the unfinished states, deliberately narrower than
     "any element without an owner": a store that simply sets no owners (the
-    fixtures never do) would land on the worklist whole and drown it, and the
-    spec's own `clean/` expectation — empty, meant to be complete — pins the
-    same reading. Who owns a finished element is `ab list --owner`'s question.
-    Within it, §7's inheritance applies: an unowned `unknown` that inherits
-    the owner of the single element referencing it (`inherited_owners`) is
-    accounted for — annotated on the entry, not called unowned.
+    fixtures never do) would land on the worklist whole and drown it. Who owns
+    a finished element is `ab list --owner`'s question. Within it, owner
+    inheritance applies: an unowned `unknown` that inherits the owner of the
+    single element referencing it (`inherited_owners`) is accounted for —
+    annotated on the entry, not called unowned.
     """
-    index = Index.from_design(design)
+    index = Index(design)
     inherited = inherited_owners(index)
     expired_on = {
-        external.id: external.expires_on for external in expired_externals(design, today=today)
+        service.id: service.expires_on for service in expired_services(design, today=today)
     }
     gaps: list[Gap] = []
-    for element in sorted(index.by_id.values(), key=lambda e: e.id):
+    for element in sorted(index.local.values(), key=lambda e: e.id):
         reasons: list[str] = []
         unfinished = element.state in UNFINISHED_STATES
         if unfinished:
@@ -506,11 +506,10 @@ def worklist(design: Design, *, today: date) -> tuple[Gap, ...]:
                 reasons.append(UNOWNED)
         if isinstance(element, Behavior) and not element.observations:
             reasons.append(NO_OBSERVATIONS)
-        due_on: date | None = None
+        blocks: tuple[Ref, ...] = ()
         if isinstance(element, Question) and element.resolved_by is None:
-            overdue = element.due_on is not None and element.due_on < today
-            reasons.append(QUESTION_OVERDUE if overdue else QUESTION_OPEN)
-            due_on = element.due_on
+            reasons.append(QUESTION_BLOCKING if element.blocks else QUESTION_OPEN)
+            blocks = element.blocks
         if element.id in expired_on:
             reasons.append(EXTERNAL_EXPIRED)
         if reasons:
@@ -518,7 +517,7 @@ def worklist(design: Design, *, today: date) -> tuple[Gap, ...]:
                 Gap(
                     element=element,
                     reasons=tuple(reasons),
-                    due_on=due_on,
+                    blocks=blocks,
                     expires_on=expired_on.get(element.id),
                     owner_inherited=inherited.get(element.id),
                 )
@@ -527,14 +526,14 @@ def worklist(design: Design, *, today: date) -> tuple[Gap, ...]:
 
 
 def reasons_text(gap: Gap) -> str:
-    """Every reason on one stretch of a worklist line, the dated ones with
-    their date — the fact a reader triages on. One spelling, shared by the
-    ``ab gaps`` text format and the site's gaps page, so the two cannot drift
-    apart."""
+    """Every reason on one stretch of a worklist line, the ones with a fact
+    behind them carrying it — what a reader triages on. One spelling, shared
+    by the ``ab gaps`` text format and the site's gaps page, so the two cannot
+    drift apart."""
     parts: list[str] = []
     for reason in gap.reasons:
-        if reason in (QUESTION_OPEN, QUESTION_OVERDUE) and gap.due_on is not None:
-            parts.append(f"{reason} (due {gap.due_on.isoformat()})")
+        if reason == QUESTION_BLOCKING and gap.blocks:
+            parts.append(f"{reason} ({', '.join(gap.blocks)})")
         elif reason == EXTERNAL_EXPIRED and gap.expires_on is not None:
             parts.append(f"{reason} (expired {gap.expires_on.isoformat()})")
         else:
@@ -543,9 +542,9 @@ def reasons_text(gap: Gap) -> str:
 
 
 def owner_text(gap: Gap) -> str:
-    """The §7 inheritance annotation, empty when the gap does not carry one —
-    so the text line and the site's gaps page grow nothing in the common
-    case. One spelling for both, so the marked form cannot drift apart."""
+    """The inheritance annotation, empty when the gap does not carry one — so
+    the text line and the site's gaps page grow nothing in the common case.
+    One spelling for both, so the marked form cannot drift apart."""
     return f"owner: {gap.owner_inherited} (inherited)" if gap.owner_inherited is not None else ""
 
 
@@ -666,7 +665,7 @@ class Trace:
         direction and arrival — plus the cycle and truncation flags, so a
         consumer knows the walk was bounded."""
         return {
-            "schema_version": SCHEMA_VERSION,
+            "format_version": FORMAT_VERSION,
             "from": self.start,
             "to": self.target,
             "paths": [
@@ -757,10 +756,10 @@ def trace_paths(
     broken invocation, not an empty answer — ``ab trace`` maps it to
     ``USAGE``, like ``ab show``.
     """
-    index = Index.from_design(design)
-    if ref not in index.by_id:
+    index = Index(design)
+    if ref not in index.local:
         raise UnknownRefError(f"unknown ref {ref!r}: no element in this store has that id")
-    if to is not None and to not in index.by_id:
+    if to is not None and to not in index.local:
         raise UnknownRefError(f"unknown --to ref {to!r}: no element in this store has that id")
     downs, ups = down or not up, up or not down
 
@@ -775,13 +774,14 @@ def trace_paths(
                 # A dangling target resolves to no hop, the policy
                 # `Index.referenced_by` already holds — reporting it is
                 # `ab check`'s job, not a query's.
-                for edge in index.references_from.get(node, ())
-                if edge.target in index.by_id
+                for edge in index.references_from(node)
+                if edge.target in index.local
             ]
         if ups:
             hops += [
                 Step(field=edge.field, up=True, ref=edge.source)
-                for edge in index.referenced_by.get(node, ())
+                for edge in index.referenced_by(node)
+                if edge.source in index.local
             ]
         return tuple(hops)
 
@@ -828,7 +828,7 @@ def _reaches_target(
     set for the point-to-point walk, computed backwards from the target so
     the forward walk never enters a subtree it would have to abandon."""
     reverse: dict[Ref, list[Ref]] = {}
-    for node in index.by_id:
+    for node in index.local:
         for step in steps(node):
             reverse.setdefault(step.ref, []).append(node)
     reaches = {target}
@@ -859,8 +859,8 @@ def packet_markdown(packet: Packet, *, features_dir: str | None = None) -> str:
 
     ``features_dir`` names where the ``.feature`` files landed when they were
     rendered, as the caller spelled it — relative, so the document stays
-    byte-identical wherever the packet is written; the criteria section points
-    there for the full Gherkin.
+    byte-identical wherever the packet is written; the done-when section
+    points there for the full Gherkin.
     """
     # `assemble` always carries the milestone itself at full fidelity; the
     # document's header covers it, so Scope is every other full element.
@@ -875,9 +875,9 @@ def packet_markdown(packet: Packet, *, features_dir: str | None = None) -> str:
         and element.ref not in behavior_sections.owned
     ]
     ring = [element for element in packet.elements if element.fidelity is Fidelity.CONTRACT]
-    criteria = [_criterion_text(criterion) for criterion in packet.criteria]
+    done_when = [f"- `{observation}`" for observation in packet.done_when]
     if features_dir is not None:
-        criteria.append(f"Full Gherkin: the `.feature` files under `{features_dir}/`.")
+        done_when.append(f"Full Gherkin: the `.feature` files under `{features_dir}/`.")
     parts = [
         [f"# Packet: {milestone.element['title']}"],
         [identity],
@@ -889,7 +889,7 @@ def packet_markdown(packet: Packet, *, features_dir: str | None = None) -> str:
         _doc_section("## May decide", [f"- {freedom}" for freedom in packet.may_decide]),
         _doc_section("## Unresolved", [f"- `{ref}`" for ref in packet.unresolved]),
         _doc_section("## Rejections", [f"- `{ref}`" for ref in packet.rejections]),
-        _doc_section("## Criteria", criteria),
+        _doc_section("## Done when", done_when),
     ]
     return "\n\n".join("\n".join(part) for part in parts) + "\n"
 
@@ -911,10 +911,9 @@ class _BehaviorSections:
 
 
 def _behavior_sections(packet: Packet) -> _BehaviorSections:
-    """The two behavior sections of docs/tasks/57-packet-behaviors.md:
-    satisfy (the new work) and must-not-break (standing expectations — the
-    addendum's framing leads the section, because breaking one is a
-    regression, not a missed feature).
+    """The packet document's two behavior sections: satisfy (the new work) and
+    must-not-break (standing expectations — that framing leads the section,
+    because breaking one is a regression, not a missed feature).
 
     Composition renders one hop: each listed behavior is followed by a block
     per behavior its observations compose that the packet carries, and what
@@ -1020,23 +1019,9 @@ def _element_block(element: PacketElement, *, heading: str | None = None) -> lis
     ]
     if fields.get("observations"):
         lines += ["", *_doc_section("Observations:", _observation_bullets(element))]
-    if body := fields["body"]:
+    if body := fields.get("body"):
         lines += ["", str(body).rstrip()]
     return lines
-
-
-def _criterion_text(criterion: Criterion) -> str:
-    """One criterion as a bullet: behavioural as its given/when/then clauses
-    on one line, the other kinds by their statement. This is the index of the
-    bar; the full Gherkin is the ``.feature`` files' job."""
-    if criterion.statement:
-        return f"- `{criterion.id}` ({criterion.kind.value}) — {criterion.statement}"
-    clauses = []
-    if criterion.given:
-        clauses.append("given " + ", ".join(criterion.given))
-    clauses.append("when " + criterion.when)
-    clauses.append("then " + ", ".join(criterion.then))
-    return f"- `{criterion.id}` — " + "; ".join(clauses)
 
 
 # --- the site --------------------------------------------------------------------
@@ -1060,21 +1045,21 @@ def generate_site(
     ``today`` is injected, not read: nothing between the store and the bytes
     reads a clock, which is what makes the site byte-deterministic.
 
-    ``notes`` are the store's notes, carried in by the caller because no
-    ``Design`` holds them (addendum §6): outside this page they are invisible,
-    exactly as they are in the graph. ``scope`` restricts every page to the
-    subtree reachable from that ref by following refs outward — ``contains``
-    primarily, the containment tree, plus every other edge the ``Index``
-    already hands out: a component's own mini-site. Reachability rather than
-    containment alone is also what keeps the site link-consistent under
-    scoping: every ref an in-scope page points at is in scope by
-    construction, so it has a page to link to.
+    ``notes`` are the store's notes, carried in by the caller because a
+    ``Design`` folds them in but no view outside this page reads them:
+    outside it they are invisible, exactly as they are in the graph.
+    ``scope`` restricts every page to the subtree reachable from that ref by
+    following refs outward — component nesting primarily, plus every other
+    edge the ``Index`` already hands out: a component's own mini-site.
+    Reachability rather than containment alone is also what keeps the site
+    link-consistent under scoping: every ref an in-scope page points at is in
+    scope by construction, so it has a page to link to.
 
     Raises ``UnknownRefError`` for a scope ref no element has, like ``show``
     and ``trace`` do for theirs.
     """
-    index = Index.from_design(design)
-    if scope is not None and scope not in index.by_id:
+    index = Index(design)
+    if scope is not None and scope not in index.local:
         raise UnknownRefError(
             f"unknown --scope ref {scope!r}: no element in this store has that id"
         )
@@ -1082,7 +1067,7 @@ def generate_site(
         design=design,
         index=index,
         out=out,
-        scope=subtree(index, scope) if scope is not None else frozenset(index.by_id),
+        scope=subtree(index, scope) if scope is not None else frozenset(index.local),
         today=today,
         notes=tuple(notes),
     )
@@ -1144,7 +1129,7 @@ class _Site:
         return "<p>" + " · ".join(links) + "</p>"
 
     def _index_page(self) -> str:
-        body = [self._nav(0), f"<h1>{escape(self.design.system.title)}</h1>"]
+        body = [self._nav(0), f"<h1>{escape(self.design.title)}</h1>"]
         for kind, elements in self._groups():
             body.append(f"<h2>{escape(kind)}</h2>")
             body.append("<ul>")
@@ -1153,7 +1138,7 @@ class _Site:
                 for e in elements
             ]
             body.append("</ul>")
-        return _page(self.design.system.title, "\n".join(body))
+        return _page(self.design.title, "\n".join(body))
 
     def _groups(self) -> list[tuple[str, list[Element]]]:
         """In-scope elements grouped by their id's kind prefix: kinds in the
@@ -1161,7 +1146,7 @@ class _Site:
         store's kinds arrive in — and ids sorted within each group, ``ab
         list``'s own order."""
         groups: dict[str, list[Element]] = {}
-        for element in self.index.by_id.values():
+        for element in self.index.local.values():
             if element.id in self.scope:
                 groups.setdefault(element.id.partition(":")[0], []).append(element)
         return [
@@ -1202,7 +1187,7 @@ class _Site:
         return _page(element.title, "\n".join(body))
 
     def _superseded_badge(self, view: Neighbourhood) -> str:
-        """§5's visible mark on a behavior's own page: it is not deleted, but
+        """The visible mark on a behavior's own page: it is not deleted, but
         it must not read as current — and its derived replacements are a click
         away, the same edges the text view spells ``superseded_by``."""
         assert view.facts is not None, "a behavior's view always carries its facts"
@@ -1210,10 +1195,10 @@ class _Site:
         return f"<p><strong>superseded</strong>{f' by {links}' if links else ''}</p>"
 
     def _observation_table(self, view: Neighbourhood) -> str:
-        """The addendum's observation table: statement, at (linked to the page
-        it names), outcome, and the *effective* timing — the §1.2 default when
-        the author said nothing, never the raw field, and an em dash for
-        ``must_not``, which carries no when at all."""
+        """The observation table: statement, at (linked to the page it names),
+        outcome, and the *effective* timing — the default when the author said
+        nothing, never the raw field, and an em dash for ``must_not``, which
+        carries no when at all."""
         rows = [
             "<tr>"
             f"<td>{escape(entry.observation.statement)}</td>"
@@ -1228,17 +1213,22 @@ class _Site:
 
     def _behavior_sections(self, view: Neighbourhood) -> list[str]:
         """A behavior page's own sections, empty for every other kind: the
-        requirement links it is the how of, and the addendum's derived facts —
-        scope, composition both ways — computed here, never stored (§4.1,
-        §4.2). ``superseded_by`` is the badge's content when the lifecycle
-        says superseded, so the list spells it only in the half-marked case a
+        requirement links it is the how of, and the derived facts — scope,
+        composition both ways — computed here, never stored.
+        ``superseded_by`` is the badge's content when the lifecycle says
+        superseded, so the list spells it only in the half-marked case a
         replacement exists but the element still claims to be current."""
         element = view.element
         facts = view.facts
         if not isinstance(element, Behavior) or facts is None:
             return []
         body: list[str] = []
-        if realizes := element.realizes:
+        realizes = [
+            target
+            for source, target in self.index.edges(RelationshipType.REALIZES)
+            if source == element.id
+        ]
+        if realizes:
             body += ["<h2>Realizes</h2>", "<ul>"]
             body += [f"<li>{self._ref(ref, 2)}</li>" for ref in realizes]
             body.append("</ul>")
@@ -1257,13 +1247,13 @@ class _Site:
 
     def _traceability_sections(self, element: Element) -> list[str]:
         """The site-side reading of the reverse refs: a requirement lists the
-        behaviors that realize it, a component, resource or seam the behaviors
-        whose observations touch it — the must-not-break question, answered
-        where the element is. Kinds the spec leaves out get no empty section;
-        a behavior's own composition is the graph it owns."""
+        behaviors that realize it, a component, resource or interface the
+        behaviors whose observations touch it — the must-not-break question,
+        answered where the element is. Kinds the spec leaves out get no empty
+        section; a behavior's own composition is the graph it owns."""
         if isinstance(element, Requirement):
-            heading, field = "Realizing behaviors", "realizes"
-        elif isinstance(element, (Component, Resource, Seam)):
+            heading, field = "Realizing behaviors", RelationshipType.REALIZES.value
+        elif isinstance(element, Component | Resource | Interface):
             heading, field = "Observing behaviors", "at"
         else:
             return []
@@ -1287,15 +1277,15 @@ class _Site:
         relation a traceability section names."""
         sources = {
             edge.source
-            for edge in self.index.referenced_by.get(ref, ())
-            if edge.field == field and isinstance(self.index.by_id[edge.source], Behavior)
+            for edge in self.index.referenced_by(ref)
+            if edge.field == field and isinstance(self.index.local.get(edge.source), Behavior)
         }
-        return tuple(cast("Behavior", self.index.by_id[source]) for source in sorted(sources))
+        return tuple(cast("Behavior", self.index.local[source]) for source in sorted(sources))
 
     def _composition_svg(self, behavior: Behavior, facts: BehaviorFacts) -> str:
-        """§4.2 as its own small graph on the behavior's page: what composes
-        it on the left, the behavior itself centre, what it composes on the
-        right — the same two lists the Derived section spells, drawn.
+        """Composition as its own small graph on the behavior's page: what
+        composes it on the left, the behavior itself centre, what it composes
+        on the right — the same two lists the Derived section spells, drawn.
 
         Positions are computed here, a pure function of the id-ordered edge
         tuples: this graph has no ``layout.yaml`` to read (``ab layout`` pins
@@ -1335,7 +1325,7 @@ class _Site:
         """Refs resolved to the elements this site's index holds — a dangling
         ref resolves to nothing, the policy every view here holds; reporting
         it is ``ab check``'s job."""
-        return tuple(self.index.by_id[ref] for ref in refs if ref in self.index.by_id)
+        return tuple(self.index.local[ref] for ref in refs if ref in self.index.local)
 
     def _graph_box(self, element: Element, x: float, y: float) -> str:
         """One node of the composition graph: the ref as the label — the
@@ -1386,8 +1376,9 @@ class _Site:
 
     def _trace_page(self) -> str:
         """Traceability as ``ab trace`` spells it, one section per requirement
-        — the kind the spec's own example chain starts from. Stories and NFRs
-        trace too; a section per kind is a step this task does not need.
+        — the kind the spec's own example chain starts from. Goals and quality
+        requirements trace too; a section per kind is a step this does not
+        need.
 
         The page asks for a tighter path budget than the walk's own default:
         it is an overview a person reads, not an export, and fifty linked
@@ -1395,10 +1386,10 @@ class _Site:
         truncated flag is spelled beside them, so the cut is never mistaken
         for completeness."""
         body = [self._nav(0), "<h1>Traceability</h1>"]
-        requirements = sorted(ref for ref in self.scope if ref.startswith("requirement:"))
+        requirements = sorted(ref for ref in self.scope if ref.startswith("req:"))
         for ref in requirements:
             traced = trace_paths(self.design, ref, limit=_TRACE_PAGE_PATH_LIMIT)
-            body.append(f"<h2>{self._ref(ref, 0)} — {escape(self.index.by_id[ref].title)}</h2>")
+            body.append(f"<h2>{self._ref(ref, 0)} — {escape(self.index.local[ref].title)}</h2>")
             body += [f"<p>{self._path_line(ref, path)}</p>" for path in traced.paths]
             if traced.cycle_hit:
                 body.append(
@@ -1423,12 +1414,12 @@ class _Site:
         return "".join(parts)
 
     def _notes_page(self) -> str:
-        """The inbox (addendum §6): unpromoted notes oldest first under the
-        age headline — `absicht.notes`' one spelling of both — each body
-        rendered, the anchor linked when the site holds its page; promoted
-        notes archived below under what they became. The page is the whole of
-        notes' projection onto the site: nowhere else does a note appear, not
-        as a node, not on a graph, not in traceability."""
+        """The inbox: unpromoted notes oldest first under the age headline —
+        `absicht.notes`' one spelling of both — each text rendered, the
+        anchors linked when the site holds their pages; promoted notes
+        archived below under what they became. The page is the whole of notes'
+        projection onto the site: nowhere else does a note appear, not as a
+        node, not on a graph, not in traceability."""
         inbox = sorted((note for note in self.notes if note.promoted_to is None), key=inbox_order)
         promoted = sorted(
             (note for note in self.notes if note.promoted_to is not None), key=inbox_order
@@ -1439,12 +1430,12 @@ class _Site:
             f"<p>{escape(inbox_headline(inbox, self.today))}</p>",
         ]
         for note in inbox:
-            meta = escape(age_text(note.created, self.today))
-            if note.ref is not None:
-                meta += f" · against {self._ref(note.ref, 0)}"
+            meta = escape(age_text(note.created_on, self.today))
+            for about in note.about:
+                meta += f" · about {self._ref(about, 0)}"
             body += [f"<h2><code>{escape(note.id)}</code></h2>", f"<p>{meta}</p>"]
-            if note.body:
-                body.append(_body_html(note.body))
+            if note.text:
+                body.append(_body_html(note.text))
         if promoted:
             body += [
                 "<h2>Promoted</h2>",

@@ -1,25 +1,85 @@
 # serializer version: 1
 # name: test_the_md_document_is_snapshotted
   '''
-  # Packet: Cancellation MVP
+  # Packet: Cancellation
   
-  `milestone:m1` — A customer can cancel a refundable order.
+  `milestone:m1` — A customer can cancel an order that has not shipped.
   
   ## Scope
   
   ### Cancellation
   
   `component:cancellation`
-  - state: constrained
-  - confidence: assumed
-  - responsibility: Decide whether an order can still be cancelled, and start the refund.
-  - consumes: seam:order-events
+  - state: specified
+  - confidence: reviewed
+  - lifecycle: active
+  - owner: dana
+  - level: component
+  - responsibility: Decide whether an order may still be cancelled, and do it.
+  - parent: component:orders
+  - implemented_by: acme#src/orders/cancel.py
+  
+  ### Orders
+  
+  `component:orders`
+  - state: specified
+  - confidence: reviewed
+  - lifecycle: active
+  - owner: dana
+  - level: container
+  - responsibility: Take orders and record what happened to them.
+  - technology: Python 3.14
+  - parent: component:acme
+  - implemented_by: acme#src/orders
+  
+  ### Orders publish an event log
+  
+  `decision:event-log`
+  - state: specified
+  - confidence: reviewed
+  - reversibility: costly
+  - lifecycle: active
+  - owner: dana
+  - context: Cancellation and the catalog both need to know an order moved.
+  - choice: Orders publishes every state change as an event; nobody reads its tables.
+  - consequences: A reader can be added without touching Orders., Every reader has to cope with an event arriving twice.
+  - alternatives: A shared table, which makes every reader a writer's problem.
+  - applies_to: component:orders
+  - decided_on: 2026-01-04
+  
+  ### Cancelling is immediate to a human
+  
+  `quality:cancel-latency`
+  - state: specified
+  - confidence: reviewed
+  - lifecycle: active
+  - owner: dana
+  - attribute: latency
+  - stimulus: 1000 concurrent cancellations
+  - measure: p99 response time
+  - target: < 200 ms
+  - scope: component:cancellation
+  - priority: must
+  - evidence: bench/cancel.py
   
   ## Behaviors to satisfy
   
   The new work: behaviors this slice must newly satisfy.
   
-  (none)
+  ### Cancelling an unshipped order
+  
+  `behavior:order-cancelled`
+  - state: specified
+  - confidence: reviewed
+  - lifecycle: active
+  - owner: dana
+  - trigger: The customer clicks Cancel on an order that has not shipped.
+  
+  Observations:
+  
+  - `behavior:order-cancelled#obs-1` — The order reads cancelled. (must, at component:orders)
+  - `behavior:order-cancelled#obs-2` — No entry for the order remains in the cache. (must_not, at resource:order-cache)
+  - `behavior:order-cancelled#obs-3` — An OrderCancelled event carries the reason the customer gave. (should, at resource:order-stream)
   
   ## Behaviors that must not break
   
@@ -29,16 +89,23 @@
   
   ## Contract ring
   
-  - `requirement:cancel-orders` — Orders can be cancelled
-  - `seam:order-events` — Order events
+  - `component:acme` — ACME
+  - `constraint:gdpr-erasure` — A customer's data is erasable on request
+  - `data:order` — Order
+  - `interface:order-events` — Order events
+  - `library:pydantic` — pydantic
+  - `req:cancel-orders` — Cancel an order
+  - `resource:order-cache` — Order cache
+  - `resource:order-stream` — Order stream
   
   ## Must hold
   
-  (none)
+  - `decision:event-log`
+  - `quality:cancel-latency`
   
   ## May decide
   
-  (none)
+  - The retry policy behind publishing the cancellation event.
   
   ## Unresolved
   
@@ -48,11 +115,9 @@
   
   (none)
   
-  ## Criteria
+  ## Done when
   
-  - `story:cancel-order#ac-1` — when the customer cancels a refundable order; then the order is cancelled, the refund starts
-  - `story:cancel-order#ac-2` — given an order that has already shipped; when the customer asks to cancel it; then cancellation is refused
-  - `story:cancel-order#ac-3` (structural) — cancellation only consumes the order-events seam
+  - `behavior:order-cancelled#obs-1`
   Full Gherkin: the `.feature` files under `features/`.
   
   '''

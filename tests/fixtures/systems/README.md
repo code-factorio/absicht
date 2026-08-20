@@ -1,98 +1,81 @@
 # Fixture systems
 
-The four stores every task tests against instead of inventing ad hoc ones
-(`docs/tasks/00-conventions.md`, *Fixtures*; the shapes are
-`docs/tasks/06-fixtures.md`'s). Each is a hand-authored `.absicht/` tree in
-the format `00-conventions.md` pins: `system.yaml` as plain YAML, one
-`<slug>.md` file per element under its kind directory.
+The four stores every test works against instead of inventing ad hoc ones.
+Each is a hand-authored `.absicht/` tree in the format `absicht.codec` pins:
+`design.yaml` as plain YAML, one `<slug>.md` file per element under its kind
+directory, each element's outgoing edges in its own `relates` block.
 
 - **`clean/`** — small, complete, internally consistent: every ref resolves,
-  every criterion is anchored to its own story, every element `specified` or
-  `constrained`. Nothing here should ever produce a finding — it is the store
-  a rule's "does not trip" case runs against. Since the model addendum, it
-  also carries one resource (`resource:order-cache`) and three behaviors:
-  `behavior:order-placed-v2` supersedes — and composes, through an
-  observation's `at` — the older `behavior:order-placed`, whose observations
-  between them exercise `must`, `must_not`, `should` and both timings; and
-  `behavior:catalog-browsable` keeps `requirement:browse-catalog` realized
-  by an active behavior, the state the addendum's requirement-needs-behavior
-  warning asks of every requirement.
+  every requirement is implemented by a component and realized by a behavior,
+  every goal is measured and served, every element `specified` and `reviewed`.
+  `ab check` reports one `info` line and nothing else — the advisory count,
+  which exists precisely so a `should` observation stays visible. It carries
+  the C4 nesting chain (`component:acme` system, two containers, one
+  component), one interface with operations, two resources — a store and a
+  stream, so `effective_timing` has both defaults to answer with — and three
+  behaviors: `behavior:order-placed-v2` supersedes and composes the older
+  `behavior:order-placed`, whose observations between them exercise `must`,
+  `must_not` and `should`.
 - **`brownfield/`** — an honest reading of a legacy system: `observed`
-  elements without rationale, one `unknown` requirement with no owner (the gap
-  `ab gaps` exists to surface), the orphaned `data:audit-log` nothing points
-  at (`component:shadow-report` lost its orphan status when the observed
-  behavior below began watching it — an observation is a reference), two open
-  questions — one past its `due_on` and blocking the not-yet-committed
-  `milestone:reconcile-mvp`, one still inside its (far-future) due date — one
-  external whose assumptions expired in the past (`external:payment-api`, the
-  counterpart to `composite/`'s current one and the fixture `ab gaps
-  --overdue`, `--blocking` and the `external-expired` reason run against),
-  and one `observed` behavior (`behavior:reconciliation-fires`, what an import
-  of a brownfield system produces). Loads without errors; the findings it
-  should produce are policy *warnings* for `ab check`, not load failures —
-  `observed` being unexplained is the honest brownfield default.
-- **`broken/`** — one clearly-named file per failure family, so a later
-  `ab check` task can point `--rule X` at exactly the case that trips it.
-  Three files fail at load time, on purpose: `requirements/garbage.md` is not
-  valid YAML; `stories/bad-anchor.md` carries a criterion anchored to
-  another story — rejected by `Story`'s own validator at parse time; and
-  `behaviors/bad-timing.md` carries a `must_not` observation with a
-  `timing` — rejected by `Observation`'s own validator the same way. Those
-  families are exercised at the load/codec layer and can never reach the
-  check layer. The rest parse fine and are deliberately invalid only at the
-  *check* layer:
+  elements with no rationale, one `unknown` requirement with no owner (the gap
+  `ab gaps` exists to surface, and the one thing here `ab check` grades an
+  error), the orphaned `data:audit-log` nothing points at, two open questions
+  — one blocking `milestone:reconcile-mvp`, one blocking nothing — one
+  external service whose assumptions lapsed (`external:payment-api`, the
+  counterpart to `composite/`'s current one), one `observed` behavior
+  (`behavior:reconciliation-fires`, what an import of an undocumented system
+  produces), and one note in the inbox. It loads without errors: `observed`
+  being unexplained is the honest brownfield default, not a broken file.
+- **`broken/`** — one clearly-named file per failure family, so a test can
+  point `--rule X` at exactly the case that trips it. Three files fail at load
+  time, on purpose, and can never reach the graph layer:
+  `requirements/garbage.md` is not valid YAML (`store/yaml-syntax`);
+  `behaviors/bad-anchor.md` carries an observation anchored to another
+  behavior and `behaviors/bad-timing.md` a `must_not` that says when — both
+  refused by the records' own validators (`store/validation`). The rest parse
+  fine and are invalid only at the check layer:
 
-  - `components/dangling.md` — `contains` names `component:ghost`, which
-    does not exist (`integrity/dangling-ref`).
-  - `components/loop-a.md` + `components/loop-b.md` — each `contains` the
-    other: one cycle for the integrity layer to find, not one finding per
-    edge.
-  - `behaviors/dangling-observation.md` — an observation whose `at` names
-    `resource:ghost-store`, which does not exist: the generic
-    `integrity/dangling-ref` walk covers observation refs, so the finding
-    lands on the behavior that carries the observation.
-  - `behaviors/observation-at-decision.md` — an observation whose `at`
-    resolves, but to a decision: the wrong kind of target
-    (`integrity/observation-at-wrong-kind`).
-  - `behaviors/supersede-a.md` + `behaviors/supersede-b.md` — each
-    `supersedes` the other: a supersession cycle
-    (`integrity/supersession-cycle`), the same shape as the `contains` one
-    above.
-  - `behaviors/compose-loop-a.md` + `behaviors/compose-loop-b.md` — each
-    carries an observation whose `at` is the other: a composition cycle
-    (addendum §4.2), one finding for the one loop, like every cycle rule.
-  - `behaviors/no-observations.md` — a behavior with no observations
-    (`policy/behavior-needs-observations`).
-  - `behaviors/superseded-flow.md` + `milestones/superseded-slice.md` — a
-    superseded behavior named in a milestone's must-satisfy set
-    (`policy/superseded-in-must-satisfy`); the behavior itself is
-    well-formed, the defect is the milestone selecting it.
-  - `requirements/no-behavior.md` — realized by a component but by no
-    behavior (`policy/requirement-needs-behavior`, the addendum's one
-    warning; the component keeps `policy/requirement-needs-realizer`
-    quiet so the file trips exactly one rule).
-  - `seams/legacy-cache.md` — a seam whose `provider` is
-    `resource:audit-store`: resources do not participate in seams (addendum
-    §1.4; `integrity/seam-references-resource`). `resources/audit-store.md`
-    itself is a well-formed element, so the seam's ref resolves — the defect
-    is the kind it points at, not a dangling target.
-  - `questions/unowned-unknown.md` — `state: unknown`, no owner
-    (`policy/unknown-needs-owner`).
-  - `decisions/one-way-no-why.md` — `one_way` with an empty body
-    (`policy/one-way-needs-rationale`).
-  - `externals/expired.md` — `expires_on` in the past
-    (`policy/external-assumptions-expired`).
+  - `components/dangling.md` — an `implements` edge onto `req:ghost`
+    (`integrity/dangling-ref`), the same rule an observation's dangling `at`
+    trips through `behaviors/dangling-observation.md`.
+  - `components/loop-a.md` + `components/loop-b.md` — each nested in the
+    other: one `integrity/cycle` for the one loop, plus the level rule each
+    file breaks on its own.
+  - `components/wrong-repo.md` — `implemented_by` names a repository
+    `design.yaml` does not declare (`integrity/repository-unknown`).
+  - `components/bad-edge.md` — a `calls` edge onto a resource
+    (`integrity/edge-kinds`).
+  - `interfaces/legacy-cache.md` — declared by a resource, which takes part
+    in no contract (`integrity/interface-on-resource`). The ref resolves —
+    the defect is the kind it points at.
+  - `behaviors/observation-at-decision.md` — an `at` that resolves, to
+    something nobody can watch (`integrity/observation-target`).
+  - `behaviors/supersede-a.md` + `behaviors/supersede-b.md` — each replaces
+    the other (`integrity/cycle`), and `behaviors/compose-loop-a.md` + `-b.md`
+    the same shape through composition.
+  - `behaviors/no-observations.md` — says something happens and never says
+    what (`policy/behavior-unobserved`).
+  - `requirements/no-behavior.md` — implemented by `component:audits` and
+    realized by nothing (`policy/requirement-unrealized`), so it trips
+    exactly one rule.
+  - `goals/unserved.md` — no measure (`policy/goal-unmeasured`); the
+    requirement above derives from it, which keeps `policy/goal-unserved`
+    quiet.
+  - `questions/unowned-unknown.md` — `unknown`, nobody to ask
+    (`policy/unknown-unowned`).
+  - `decisions/one-way-no-why.md` — `constrained` with no `reversibility`
+    (`policy/agency-undeclared`).
+  - `external_services/expired.md` — `expires_on` in the past
+    (`policy/external-assumption-expired`).
+  - `milestones/unscoped.md` — no `scope` (`policy/milestone-unscoped`, and
+    `packet/empty-scope` for anyone assembling from it).
 
-  Every other element in `broken/` — including `system.yaml` and
-  `stories/minimal-story.md`, the story next to the broken one that proves
-  the walk continues — is explicitly `specified`, so the unowned unknown
-  above is the only thing in this store that can trip an unknown-state
-  policy rule. Load must not flag any of the check-layer files; `ab check`
-  must flag each under its own rule.
-- **`composite/`** — one design over two units: a `system.yaml` with two
-  `units`, a seam whose provider and consumer sit in different units, one
-  external assumption that is verified and current (the counterpart to
-  `broken/`'s expired one). Both sides of the seam name a `repo#path`
-  (`acme/orders#api`, `acme/billing#worker`), so unit membership is
-  derivable the way the multi-repo path `status`, `verify --repo` and the
-  marker commands will need.
+  Everything else here is `specified` and owned, so each file above trips its
+  own rule and nothing else's.
+- **`composite/`** — one design over two repositories: `design.yaml` declares
+  both, `component:orders-api` is implemented in one and
+  `component:billing-worker` in the other, and the interface between them is
+  declared on one side and called from the other. It also carries the one
+  external service that is verified and current. Repository membership is
+  derivable from `implemented_by` alone, the way `status`, `verify --repo` and
+  the marker commands need it.

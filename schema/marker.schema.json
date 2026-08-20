@@ -1,16 +1,18 @@
 {
   "$defs": {
-    "UnitWatermark": {
+    "Watermark": {
       "additionalProperties": false,
-      "description": "From a repo's `.absicht` marker. A hint, not a proof.\n\nTends to over-claim: a merge stamps it whether or not the work was finished.",
+      "description": "How far one component's code in this repository has come.",
       "properties": {
         "id": {
+          "description": "The component. `Design.repositories` says which repository this is.",
           "pattern": "^[a-z]+:[a-z0-9][a-z0-9-]*$",
           "title": "Id",
           "type": "string"
         },
         "path": {
           "default": ".",
+          "description": "Where inside the repository, matching the component's `implemented_by`.",
           "title": "Path",
           "type": "string"
         },
@@ -25,6 +27,7 @@
             }
           ],
           "default": null,
+          "description": "The last milestone landed here.",
           "title": "At"
         },
         "design_rev": {
@@ -37,27 +40,29 @@
             }
           ],
           "default": null,
+          "description": "The design store's head when it landed.",
           "title": "Design Rev"
         }
       },
       "required": [
         "id"
       ],
-      "title": "UnitWatermark",
+      "title": "Watermark",
       "type": "object"
     }
   },
   "additionalProperties": false,
-  "description": "A repo's `.absicht` file. Discovery hint; the store stays authoritative.",
+  "description": "The `.absicht` file itself.",
   "properties": {
     "design": {
+      "description": "Path or URL of the store. Spelled by whoever wrote the marker.",
       "title": "Design",
       "type": "string"
     },
     "units": {
       "default": [],
       "items": {
-        "$ref": "#/$defs/UnitWatermark"
+        "$ref": "#/$defs/Watermark"
       },
       "title": "Units",
       "type": "array"

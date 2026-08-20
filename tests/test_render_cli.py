@@ -16,8 +16,9 @@ What these tests pin, per ``docs/tasks/26-render-site.md`` (the site half),
   both ways, and a superseded behavior is visibly badged with links to its
   replacements — the replacement's page cross-links back;
 - traceability is not only the paths page: requirement pages list their
-  realizing behaviors, and component/resource/seam pages list the behaviors
-  whose observations touch them — the must-not-break question, visually;
+  realizing behaviors, and component/resource/interface pages list the
+  behaviors whose observations touch them — the must-not-break question,
+  visually;
 - the gaps page joins behaviors and resources exactly as ``ab gaps`` does —
   by state, plus the zero-observations line;
 - the site is internally link-consistent — every ``href`` a generated page
@@ -36,7 +37,7 @@ What these tests pin, per ``docs/tasks/26-render-site.md`` (the site half),
   flags, which write their files once rather than being watched;
 - an unknown ``--scope`` ref is ``USAGE``, the lookup miss ``show`` and
   ``trace`` already map there;
-- ``--json`` is the ``schema_version`` envelope of ``00-conventions.md``.
+- ``--json`` is the ``format_version`` envelope of ``00-conventions.md``.
 """
 
 from __future__ import annotations
@@ -54,7 +55,7 @@ from typer.testing import CliRunner
 
 from absicht.cli import app, query
 from absicht.cli._common import ExitCode
-from absicht.models import SCHEMA_VERSION
+from absicht.models.design import FORMAT_VERSION
 
 runner = CliRunner()
 
@@ -62,26 +63,34 @@ FIXTURES = Path(__file__).parent / "fixtures" / "systems"
 CLEAN = FIXTURES / "clean"
 BROWNFIELD = FIXTURES / "brownfield"
 
-# clean/'s fifteen elements plus the four whole-store views. A page's path is
-# its id with the kind as a directory — one directory per kind, like the store.
+# clean/'s twenty-two elements plus the four whole-store views. A page's path
+# is its id with the kind as a directory — one directory per kind, like the
+# store.
 CLEAN_PAGES = {
     "index.html",
     "gaps.html",
     "trace.html",
     "notes.html",
-    "elements/system/acme.html",
-    "elements/requirement/browse-catalog.html",
-    "elements/requirement/cancel-orders.html",
-    "elements/story/cancel-order.html",
+    "elements/term/order.html",
+    "elements/actor/customer.html",
+    "elements/goal/cheap-orders.html",
+    "elements/req/browse-catalog.html",
+    "elements/req/cancel-orders.html",
+    "elements/quality/cancel-latency.html",
+    "elements/constraint/gdpr-erasure.html",
+    "elements/behavior/catalog-browsable.html",
+    "elements/behavior/order-cancelled.html",
+    "elements/behavior/order-placed.html",
+    "elements/behavior/order-placed-v2.html",
+    "elements/component/acme.html",
     "elements/component/cancellation.html",
     "elements/component/catalog.html",
     "elements/component/orders.html",
-    "elements/seam/order-events.html",
+    "elements/interface/order-events.html",
     "elements/data/order.html",
     "elements/resource/order-cache.html",
-    "elements/behavior/catalog-browsable.html",
-    "elements/behavior/order-placed-v2.html",
-    "elements/behavior/order-placed.html",
+    "elements/resource/order-stream.html",
+    "elements/library/pydantic.html",
     "elements/decision/event-log.html",
     "elements/milestone/m1.html",
 }
@@ -90,14 +99,18 @@ CLEAN_PAGES = {
 # kinds arrive in, which is the grouping `ab list` implies by walking one kind
 # at a time.
 KIND_ORDER = [
-    "system",
-    "requirement",
-    "story",
+    "term",
+    "actor",
+    "goal",
+    "req",
+    "quality",
+    "constraint",
+    "behavior",
     "component",
-    "seam",
+    "interface",
     "data",
     "resource",
-    "behavior",
+    "library",
     "decision",
     "milestone",
 ]
@@ -167,9 +180,7 @@ def test_an_element_page_is_the_show_view_with_links(tmp_path: Path) -> None:
     assert "<h1>Orders</h1>" in page
     assert "<code>component:orders</code>" in page
     assert "responsibility: Take orders and record what happened to them." in page
-    assert (
-        '<a href="../../elements/component/catalog.html">component:catalog</a> — contains' in page
-    )
+    assert '<a href="../../elements/component/acme.html">component:acme</a> — parent' in page
     assert (
         '<a href="../../elements/decision/event-log.html">decision:event-log</a> — applies_to'
         in page
@@ -179,15 +190,27 @@ def test_an_element_page_is_the_show_view_with_links(tmp_path: Path) -> None:
 def test_an_element_page_carries_the_prose_body(tmp_path: Path) -> None:
     """`body` is never parsed, only carried — on a page it becomes headings
     and paragraphs, the subset the store's prose actually uses."""
-    result = _render(CLEAN, tmp_path)
+    # No body in `clean/` writes a heading, so one is appended to a private
+    # copy: the heading half of that subset needs prose that has one.
+    store = tmp_path / "store"
+    shutil.copytree(CLEAN, store)
+    decision = store / "decisions" / "event-log.md"
+    decision.write_text(
+        decision.read_text(encoding="utf-8") + "\n## Context\n\nOrders asked for it.\n",
+        encoding="utf-8",
+    )
+    out = tmp_path / "out"
+
+    result = _render(store, out)
 
     assert result.exit_code == ExitCode.OK
-    requirement = (tmp_path / "elements" / "requirement" / "cancel-orders.html").read_text(
-        encoding="utf-8"
+    behavior = (out / "elements" / "behavior" / "order-placed.html").read_text(encoding="utf-8")
+    assert (
+        "<p>Kept because it is the record of what was expected before. It is not how the\n"
+        "system works any more.</p>" in behavior
     )
-    assert "<p>A customer may cancel an order while it can still be refunded.</p>" in requirement
-    decision = (tmp_path / "elements" / "decision" / "event-log.html").read_text(encoding="utf-8")
-    assert "<h2>Context</h2>" in decision
+    decision_page = (out / "elements" / "decision" / "event-log.html").read_text(encoding="utf-8")
+    assert "<h2>Context</h2>" in decision_page
 
 
 def _page(out: Path, *parts: str) -> str:
@@ -203,27 +226,33 @@ def test_a_behavior_page_spells_the_observation_table(tmp_path: Path) -> None:
     result = _render(CLEAN, tmp_path)
 
     assert result.exit_code == ExitCode.OK
-    page = _page(tmp_path, "elements", "behavior", "order-placed-v2.html")
+    page = _page(tmp_path, "elements", "behavior", "order-cancelled.html")
     assert "<h2>Observations</h2>" in page
     assert "<tr><th>statement</th><th>at</th><th>outcome</th><th>effective timing</th></tr>" in page
-    # obs-1 authored `immediate`; obs-2 authored `eventual` — both carry their
-    # authored values, and the `at` cell links to the page it names.
+    # obs-1 authored `immediate`: the cell carries the authored value.
     assert (
-        "<tr><td>The order appears in the order cache</td>"
-        '<td><a href="../../elements/resource/order-cache.html">resource:order-cache</a></td>'
+        "<tr><td>The order reads cancelled.</td>"
+        '<td><a href="../../elements/component/orders.html">component:orders</a></td>'
         "<td>must</td><td>immediate</td></tr>"
     ) in page
-    assert (
-        "<tr><td>The order shows in the customer&#x27;s order list</td>"
-        '<td><a href="../../elements/component/orders.html">component:orders</a></td>'
-        "<td>must</td><td>eventual</td></tr>"
-    ) in page
     # `must_not` means at no point: the timing cell stays empty of a when.
-    assert "<tr><td>No order is cached before payment clears</td>" in page
+    assert "<tr><td>No entry for the order remains in the cache.</td>" in page
     assert "<td>must_not</td><td>—</td></tr>" in page
-    # obs-5 says nothing about timing: the effective one follows its `at`, a
-    # component — immediate.
-    assert "<td>should</td><td>immediate</td></tr>" in page
+    # obs-3 says nothing about timing: the effective one follows its `at`, a
+    # stream — eventual.
+    assert (
+        "<tr><td>An OrderCancelled event carries the reason the customer gave.</td>"
+        '<td><a href="../../elements/resource/order-stream.html">resource:order-stream</a></td>'
+        "<td>should</td><td>eventual</td></tr>"
+    ) in page
+    # The other half of that default: an unauthored observation on a component
+    # is immediate.
+    browsable = _page(tmp_path, "elements", "behavior", "catalog-browsable.html")
+    assert (
+        "<tr><td>The catalog answers with the items that are for sale.</td>"
+        '<td><a href="../../elements/component/catalog.html">component:catalog</a></td>'
+        "<td>must</td><td>immediate</td></tr>"
+    ) in browsable
     assert '"statement"' not in page
 
 
@@ -249,7 +278,7 @@ def test_a_superseded_behavior_page_badges_itself_and_cross_links_its_replacemen
         in replacement
     )
     # The index names it as no longer current too, the way `ab list`'s rows do.
-    assert "Order placed [superseded]" in _page(tmp_path, "index.html")
+    assert "Placing an order (the first cut) [superseded]" in _page(tmp_path, "index.html")
 
 
 def test_a_behavior_page_carries_scope_realizes_and_composition_both_ways(
@@ -257,29 +286,33 @@ def test_a_behavior_page_carries_scope_realizes_and_composition_both_ways(
 ) -> None:
     """The addendum's derived facts, computed and never stored, additive on
     the page: the §4.1 scope (a component-only behavior is `local`, the
-    cache-and-component one is `system`), the `realizes` links, and §4.2's
+    stream-and-behavior one is `system`), the `realizes` links, and §4.2's
     composition edges in both directions."""
     result = _render(CLEAN, tmp_path)
 
     assert result.exit_code == ExitCode.OK
     page = _page(tmp_path, "elements", "behavior", "order-placed-v2.html")
     assert "<li>scope: system</li>" in page
-    assert "<h2>Realizes</h2>" in page
-    assert (
-        '<li><a href="../../elements/requirement/cancel-orders.html">'
-        "requirement:cancel-orders</a></li>" in page
-    )
     assert "<li>composes: " in page
     assert (
         'composes: <a href="../../elements/behavior/order-placed.html">behavior:order-placed</a>'
         in page
     )
     superseded = _page(tmp_path, "elements", "behavior", "order-placed.html")
-    assert "<li>scope: system</li>" in superseded
+    assert "<li>scope: local</li>" in superseded
     assert (
         "composed by: "
         '<a href="../../elements/behavior/order-placed-v2.html">behavior:order-placed-v2</a>'
         in superseded
+    )
+    # `realizes` is a relationship the behavior carries onto the requirement it
+    # is the how of, so the links sit on the behavior that has the edge.
+    realizing = _page(tmp_path, "elements", "behavior", "order-cancelled.html")
+    assert "<li>scope: system</li>" in realizing
+    assert "<h2>Realizes</h2>" in realizing
+    assert (
+        '<li><a href="../../elements/req/cancel-orders.html">req:cancel-orders</a></li>'
+        in realizing
     )
     local = _page(tmp_path, "elements", "behavior", "catalog-browsable.html")
     assert "<li>scope: local</li>" in local
@@ -316,20 +349,15 @@ def test_the_behavior_page_is_snapshotted(tmp_path: Path, snapshot: SnapshotAsse
 def test_a_resource_page_lists_the_behaviors_observing_it(tmp_path: Path) -> None:
     """A resource is what its observations give meaning (§1.4): its page lists
     the behaviors whose observations touch it — the site-side reading of the
-    reverse refs, the must-not-break question — with a superseded one marked
-    so it cannot read as current."""
+    reverse refs, the must-not-break question."""
     result = _render(CLEAN, tmp_path)
 
     assert result.exit_code == ExitCode.OK
     page = _page(tmp_path, "elements", "resource", "order-cache.html")
     assert "<h2>Observing behaviors</h2>" in page
     assert (
-        '<li><a href="../../elements/behavior/order-placed-v2.html">behavior:order-placed-v2</a>'
-        " — Order placed through checkout</li>" in page
-    )
-    assert (
-        '<li><a href="../../elements/behavior/order-placed.html">behavior:order-placed</a>'
-        " [superseded] — Order placed</li>" in page
+        '<li><a href="../../elements/behavior/order-cancelled.html">behavior:order-cancelled</a>'
+        " — Cancelling an unshipped order</li>" in page
     )
 
 
@@ -343,31 +371,35 @@ def test_the_resource_page_is_snapshotted(tmp_path: Path, snapshot: SnapshotAsse
 
 def test_a_requirement_page_lists_its_realizing_behaviors(tmp_path: Path) -> None:
     """Traceability on the page the requirement owns: the behaviors whose
-    `realizes` names it, not only the components `realized_by` carries."""
+    `realizes` names it, not only the components that implement it."""
     result = _render(CLEAN, tmp_path)
 
     assert result.exit_code == ExitCode.OK
-    page = _page(tmp_path, "elements", "requirement", "cancel-orders.html")
+    page = _page(tmp_path, "elements", "req", "cancel-orders.html")
     assert "<h2>Realizing behaviors</h2>" in page
-    assert "behavior:order-placed-v2" in page
-    assert "behavior:order-placed" in page
-    browse = _page(tmp_path, "elements", "requirement", "browse-catalog.html")
+    assert "behavior:order-cancelled" in page
+    browse = _page(tmp_path, "elements", "req", "browse-catalog.html")
     assert '<a href="../../elements/behavior/catalog-browsable.html">' in browse
 
 
 def test_a_component_page_lists_the_behaviors_observing_it(tmp_path: Path) -> None:
-    """The seam/component side of the same reading: `component:orders` is
-    touched by `order-placed-v2`'s eventual observation, and its page says
+    """The interface/component side of the same reading: `component:orders` is
+    touched by `order-cancelled`'s immediate observation, and its page says
     so — what a packet's must-not-break list is derived from, visible where
-    the work happens."""
+    the work happens — with a superseded observer marked so it cannot read as
+    current."""
     result = _render(CLEAN, tmp_path)
 
     assert result.exit_code == ExitCode.OK
     page = _page(tmp_path, "elements", "component", "orders.html")
     assert "<h2>Observing behaviors</h2>" in page
     assert (
-        '<a href="../../elements/behavior/order-placed-v2.html">behavior:order-placed-v2</a>'
+        '<a href="../../elements/behavior/order-cancelled.html">behavior:order-cancelled</a>'
         in page
+    )
+    assert (
+        '<li><a href="../../elements/behavior/order-placed.html">behavior:order-placed</a>'
+        " [superseded] — Placing an order (the first cut)</li>" in page
     )
 
 
@@ -380,7 +412,8 @@ def test_the_traceability_page_links_requirements_to_what_realizes_them(
 
     assert result.exit_code == ExitCode.OK
     page = (tmp_path / "trace.html").read_text(encoding="utf-8")
-    assert "—realized_by→" in page
+    assert "←realizes—" in page
+    assert "—satisfies→" in page
     assert "←satisfies—" in page
     assert 'href="elements/component/cancellation.html">component:cancellation</a>' in page
 
@@ -391,8 +424,8 @@ def test_the_gaps_page_is_the_worklist(tmp_path: Path) -> None:
     assert result.exit_code == ExitCode.OK
     page = (tmp_path / "gaps.html").read_text(encoding="utf-8")
     assert "external:payment-api" in page
-    assert "external-expired (expired 2026-01-01)" in page
-    assert "question-overdue (due 2026-01-10)" in page
+    assert "external-expired (expired 2025-01-15)" in page
+    assert "question-blocking (milestone:reconcile-mvp)" in page
 
 
 def test_a_complete_store_has_an_empty_gaps_page(tmp_path: Path) -> None:
@@ -444,8 +477,8 @@ def test_the_site_carries_the_note_inbox_from_the_store(tmp_path: Path) -> None:
     created = date.today() - timedelta(days=90)
     (store / "notes").mkdir()
     (store / "notes" / "old0001.md").write_text(
-        f"---\nid: note:old0001\ncreated: {created.isoformat()}\n"
-        "ref: resource:order-cache\n---\n\nThe cache needs a TTL.\n",
+        f"---\nid: note:old0001\ncreated_on: {created.isoformat()}\n"
+        "about:\n- resource:order-cache\n---\n\nThe cache needs a TTL.\n",
         encoding="utf-8",
     )
 
@@ -460,9 +493,10 @@ def test_the_site_carries_the_note_inbox_from_the_store(tmp_path: Path) -> None:
 
 
 def test_scope_renders_only_the_subtree(tmp_path: Path) -> None:
-    """`component:catalog` points at nothing, so its subtree is itself alone:
-    the smallest site that is still a site, provable by which pages exist."""
-    result = _render(CLEAN, tmp_path, "--scope", "component:catalog")
+    """`resource:order-cache` points at nothing, so its subtree is itself
+    alone: the smallest site that is still a site, provable by which pages
+    exist."""
+    result = _render(CLEAN, tmp_path, "--scope", "resource:order-cache")
 
     assert result.exit_code == ExitCode.OK
     assert _pages(tmp_path) == {
@@ -470,18 +504,18 @@ def test_scope_renders_only_the_subtree(tmp_path: Path) -> None:
         "gaps.html",
         "trace.html",
         "notes.html",
-        "elements/component/catalog.html",
+        "elements/resource/order-cache.html",
     }
 
 
 def test_refs_outside_the_scope_stay_plain_text(tmp_path: Path) -> None:
-    """`component:orders` contains `component:catalog` but has no page in the
-    catalog-only scope: the ref is still named — the mini-site must not
+    """`component:orders` depends on `resource:order-cache` but has no page in
+    the cache-only scope: the ref is still named — the mini-site must not
     pretend the rest of the design does not exist — it just does not link."""
-    result = _render(CLEAN, tmp_path, "--scope", "component:catalog")
+    result = _render(CLEAN, tmp_path, "--scope", "resource:order-cache")
 
     assert result.exit_code == ExitCode.OK
-    page = (tmp_path / "elements" / "component" / "catalog.html").read_text(encoding="utf-8")
+    page = (tmp_path / "elements" / "resource" / "order-cache.html").read_text(encoding="utf-8")
     assert "component:orders" in page
     assert 'href="../../elements/component/orders.html"' not in page
 
@@ -575,7 +609,7 @@ def test_json_envelopes_the_diagram_run(laid_out: Path, tmp_path: Path) -> None:
 
     assert result.exit_code == ExitCode.OK
     document = json.loads(result.stdout)
-    assert document["schema_version"] == SCHEMA_VERSION
+    assert document["format_version"] == FORMAT_VERSION
     assert document["out"] == str(out)
     assert document["diagrams"] == ["diagram.svg"]
 
@@ -615,7 +649,7 @@ def test_json_envelopes_the_run(tmp_path: Path) -> None:
 
     assert result.exit_code == ExitCode.OK
     document = json.loads(result.stdout)
-    assert document["schema_version"] == SCHEMA_VERSION
+    assert document["format_version"] == FORMAT_VERSION
     assert document["out"] == str(tmp_path)
     assert document["pages"] == len(CLEAN_PAGES)
 

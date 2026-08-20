@@ -1,6 +1,6 @@
 """``ab migrate``: the harness, with nothing to migrate through it yet.
 
-Schema version 1 is the only version that has ever existed, so what these
+Format version 1 is the only version that has ever existed, so what these
 tests pin is the seam (docs/tasks/17-migrate.md): a store the binary can read
 is already current and stays byte-identical — dry-run or not, since there is
 no migration to run — and a target with no registered migration path is a
@@ -24,7 +24,7 @@ from typer.testing import CliRunner
 import absicht.migrate
 from absicht.cli import app
 from absicht.cli._common import ExitCode
-from absicht.models import SCHEMA_VERSION
+from absicht.models.design import FORMAT_VERSION
 
 runner = CliRunner()
 
@@ -47,7 +47,7 @@ def snapshot(root: Path) -> dict[Path, bytes]:
     }
 
 
-def test_a_store_at_the_running_schema_version_is_already_current(tmp_path: Path) -> None:
+def test_a_store_at_the_running_format_version_is_already_current(tmp_path: Path) -> None:
     result = runner.invoke(app, ["--store", str(store(tmp_path)), "migrate"])
 
     assert result.exit_code == ExitCode.OK
@@ -70,7 +70,7 @@ def test_a_target_with_no_registered_path_is_a_usage_error(tmp_path: Path) -> No
     result = runner.invoke(app, ["--store", str(store(tmp_path)), "migrate", "--to", "99"])
 
     assert result.exit_code == ExitCode.USAGE
-    assert f"don't know how to migrate from {SCHEMA_VERSION}" in result.stderr
+    assert f"don't know how to migrate from {FORMAT_VERSION}" in result.stderr
     assert result.stdout == ""
 
 
@@ -96,9 +96,9 @@ def test_json_output_reports_the_versions_it_moved_between(tmp_path: Path) -> No
 
     assert result.exit_code == ExitCode.OK
     assert json.loads(result.stdout) == {
-        "schema_version": SCHEMA_VERSION,
-        "from": SCHEMA_VERSION,
-        "to": SCHEMA_VERSION,
+        "format_version": FORMAT_VERSION,
+        "from": FORMAT_VERSION,
+        "to": FORMAT_VERSION,
     }
 
 
@@ -113,8 +113,8 @@ def test_json_is_accepted_on_either_side_of_the_command(tmp_path: Path) -> None:
 
     assert ahead.exit_code == ExitCode.OK
     assert behind.exit_code == ExitCode.OK
-    assert json.loads(ahead.stdout)["to"] == SCHEMA_VERSION
-    assert json.loads(behind.stdout)["to"] == SCHEMA_VERSION
+    assert json.loads(ahead.stdout)["to"] == FORMAT_VERSION
+    assert json.loads(behind.stdout)["to"] == FORMAT_VERSION
 
 
 def test_a_fully_registered_path_refuses_loudly_rather_than_no_op(
@@ -126,7 +126,7 @@ def test_a_fully_registered_path_refuses_loudly_rather_than_no_op(
     a bug in ``ab`` itself, so ``INTERNAL``, never a quiet success that moved
     nothing.
     """
-    monkeypatch.setattr(absicht.migrate, "MIGRATIONS", {SCHEMA_VERSION: lambda record: record})
+    monkeypatch.setattr(absicht.migrate, "MIGRATIONS", {FORMAT_VERSION: lambda record: record})
 
     result = runner.invoke(app, ["--store", str(store(tmp_path)), "migrate", "--to", "2"])
 

@@ -7,21 +7,19 @@ and writes it into the store, refusing to overwrite anything, the same line
 ``ab init`` holds.
 
 Never-overwrite has two halves, because a store and its files can drift: the
-id check goes through ``load`` + ``resolve`` (``Index.by_id``), the file check
-through the filesystem. A renamed file still holding the old id fails the
-first, an unparsable file no index ever saw fails the second.
+id check goes through ``load`` + ``resolve``, the file check through the
+filesystem. A renamed file still holding the old id fails the first, an
+unparsable file no index ever saw fails the second.
 
-Models with required fields no default exists for (``Seam.style``,
-``NonFunctional.attribute``, ``External.external_kind``, and the addendum's
-``Resource.resource_kind``/``Resource.technology`` and ``Behavior.trigger``)
+Models with required fields no default exists for (``Interface.style``,
+``QualityRequirement.attribute``, ``Resource.resource_kind`` and the rest)
 are scaffolded rather than refused: ``ab new`` fills each with a placeholder
 — the enum's first declared member where an enum is involved, an obviously
-replaceable string where the field is free text — and says so in a comment
-in the body, never a value that would pass ``check`` unreviewed. The behavior
-template additionally carries the addendum's worked observation example,
-commented out in the body: the file is where an author first meets the
-format, and observation ids are authored inline, never generated here (the
-same boundary criteria have since docs/tasks/00-conventions.md).
+replaceable string where the field is free text — and says so in a comment in
+the body, never a value that would pass ``check`` unreviewed. The behavior
+template additionally carries a worked observation example, commented out in
+the body: the file is where an author first meets the format, and observation
+ids are authored inline, never generated here.
 
 ``--edit`` shells out to ``$EDITOR`` on the written file. A command that says
 it will open an editor and does not is worse than one that says why it
@@ -38,28 +36,34 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
-from absicht.codec import dump_element
+from absicht.codec import DIRECTORIES, dump_element
 from absicht.load import StoreResolutionError, load_store, resolve_store
-from absicht.models import (
+from absicht.models.design import (
+    Actor,
+    Assumption,
     Behavior,
     Component,
+    ComponentLevel,
+    Constraint,
+    ConstraintKind,
     DataEntity,
     Decision,
     Element,
-    External,
-    ExternalKind,
+    ExternalService,
+    Goal,
+    Interface,
+    InterfaceStyle,
+    Library,
     Milestone,
-    NonFunctional,
     QualityAttribute,
+    QualityRequirement,
     Question,
     Rejection,
     Requirement,
     Resource,
     ResourceKind,
-    Seam,
-    SeamStyle,
     State,
-    Story,
+    Term,
 )
 from absicht.resolve import Index, ResolveError, resolve
 
@@ -70,27 +74,34 @@ class NewError(Exception):
 
 # The kind a caller names — a `Kind` value from the CLI surface, spelled as a
 # plain string here because `absicht.cli` sits above this layer in the import
-# stack — mapped to the model it scaffolds and the directory `absicht.load`
-# reads it back from: the layout pinned in docs/tasks/00-conventions.md and
-# extended by 50-addendum-conventions.md, one directory per kind. `load`
-# spells the same pairs inline in `load_store`; the round-trip test over
-# every `Kind` keeps the two in step, because an element written to a
-# directory `load` does not read is one nobody loaded.
-_KINDS: dict[str, tuple[type[Element], str]] = {
-    "component": (Component, "components"),
-    "seam": (Seam, "seams"),
-    "data": (DataEntity, "data"),
-    "requirement": (Requirement, "requirements"),
-    "nfr": (NonFunctional, "non_functionals"),
-    "story": (Story, "stories"),
-    "decision": (Decision, "decisions"),
-    "rejection": (Rejection, "rejections"),
-    "question": (Question, "questions"),
-    "milestone": (Milestone, "milestones"),
-    "external": (External, "externals"),
-    "resource": (Resource, "resources"),
-    "behavior": (Behavior, "behaviors"),
+# stack — mapped to the model it scaffolds. Which directory that model is
+# written to comes from `absicht.codec`'s `DIRECTORIES`, which is the store
+# layout itself, so an element can never land in a directory `load` does not
+# read.
+_KINDS: dict[str, type[Element]] = {
+    "term": Term,
+    "actor": Actor,
+    "goal": Goal,
+    "req": Requirement,
+    "quality": QualityRequirement,
+    "constraint": Constraint,
+    "behavior": Behavior,
+    "component": Component,
+    "interface": Interface,
+    "data": DataEntity,
+    "resource": Resource,
+    "library": Library,
+    "external": ExternalService,
+    "assumption": Assumption,
+    "decision": Decision,
+    "question": Question,
+    "rejection": Rejection,
+    "milestone": Milestone,
 }
+
+_DIRECTORY_OF: dict[type[object], str] = {model: name for name, model in DIRECTORIES.items()}
+
+_PLACEHOLDER = "replace me"
 
 # The kinds whose model has required fields no default exists for, and the
 # placeholders `ab new` fills them with: the enum's first declared member —
@@ -99,11 +110,22 @@ _KINDS: dict[str, tuple[type[Element], str]] = {
 # trigger anyone would ship). `_placeholder_note` names every field in the
 # body, so the file itself says what to replace.
 _PLACEHOLDERS: dict[str, tuple[tuple[str, object], ...]] = {
-    "seam": (("style", SeamStyle.CALL),),
-    "nfr": (("attribute", QualityAttribute.LATENCY),),
-    "external": (("external_kind", ExternalKind.SERVICE),),
-    "resource": (("resource_kind", ResourceKind.STORE), ("technology", "replace me")),
-    "behavior": (("trigger", "replace me"),),
+    "term": (("definition", _PLACEHOLDER),),
+    "goal": (("outcome", _PLACEHOLDER),),
+    "req": (("statement", _PLACEHOLDER),),
+    "quality": (("attribute", QualityAttribute.LATENCY),),
+    "constraint": (
+        ("statement", _PLACEHOLDER),
+        ("constraint_kind", ConstraintKind.REGULATORY),
+    ),
+    "behavior": (("trigger", _PLACEHOLDER),),
+    "component": (("level", ComponentLevel.SYSTEM),),
+    "interface": (("style", InterfaceStyle.CALL),),
+    "resource": (("resource_kind", ResourceKind.STORE), ("technology", _PLACEHOLDER)),
+    "library": (("package", _PLACEHOLDER), ("ecosystem", _PLACEHOLDER)),
+    "assumption": (("statement", _PLACEHOLDER),),
+    "decision": (("choice", _PLACEHOLDER),),
+    "question": (("question", _PLACEHOLDER),),
 }
 
 
@@ -125,7 +147,7 @@ def scaffold(
     per the identity rules in docs/tasks/00-conventions.md.
     """
     try:
-        model, _ = _KINDS[kind]
+        model = _KINDS[kind]
     except KeyError:
         raise NewError(f"unknown kind {kind!r}: not one of {', '.join(_KINDS)}") from None
     fields: dict[str, object] = {
@@ -160,15 +182,14 @@ def _placeholder_note(fields: tuple[tuple[str, object], ...]) -> str:
 
 
 def _observation_example(behavior_id: str) -> str:
-    """The worked example from the addendum (§3.3), commented out in the
-    template's body: `#obs-1`'s anchoring to this behavior — plus `outcome`
-    and `timing`, which a `must_not` omits — reads easier as a filled-in
-    example than as a rule, and the ids stay authored, never generated."""
+    """A worked observation, commented out in the template's body: `#obs-1`'s
+    anchoring to this behavior — plus `outcome` and `timing`, which a
+    `must_not` omits — reads easier as a filled-in example than as a rule,
+    and the ids stay authored, never generated."""
     return (
         "<!--\n"
         "Observations are authored inline in the front matter above, anchored to\n"
-        "this behavior exactly as a criterion anchors to its story; `ab new` never\n"
-        "generates them. The worked example from the model addendum, commented:\n"
+        "this behavior by id; `ab new` never generates them:\n"
         "\n"
         "    observations:\n"
         f"      - id: {behavior_id}#obs-1\n"
@@ -187,12 +208,12 @@ def create(store: Path, element: Element, *, edit: bool = False) -> Path:
     a `.absicht` marker in reference mode — resolved the one way
     `absicht.load` resolves stores, so a marker names the store written to.
     """
-    kind, slug = element.id.split(":", 1)
+    slug = element.id.split(":", 1)[1]
     try:
         root = resolve_store(store)
     except StoreResolutionError as exc:
         raise NewError(str(exc)) from exc
-    path = root / _KINDS[kind][1] / f"{slug}.md"
+    path = root / _DIRECTORY_OF[type(element)] / f"{slug}.md"
     if element.id in _ids(root):
         raise NewError(f"{element.id} already exists in the store at {root}")
     if path.exists():
@@ -213,7 +234,7 @@ def _ids(root: Path) -> dict[str, Element]:
         design = resolve(load_store(root))
     except ResolveError as exc:
         raise NewError(f"{exc}; run ab init to scaffold one") from exc
-    return Index.from_design(design).by_id
+    return Index(design).local
 
 
 def editor_argv(edit: bool) -> list[str]:

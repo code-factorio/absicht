@@ -29,7 +29,7 @@ from pathlib import Path
 
 from absicht.git import list_files_at_rev, read_file_at_rev, repo_root, resolve_rev
 from absicht.load import LoadedStore, load_store
-from absicht.models import Design, Note
+from absicht.models.design import Design
 from absicht.resolve import resolve
 
 
@@ -71,28 +71,18 @@ def build(store: Path, *, rev: str | None = None) -> Design:
     return resolve(_loaded(store, rev=rev))
 
 
-def build_with_notes(store: Path, *, rev: str | None = None) -> tuple[Design, tuple[Note, ...]]:
-    """`build`, carrying the loaded notes beside the artifact.
-
-    The one caller that needs both is `ab render`'s site: notes are store
-    contents the `Design` never folds in (addendum §6), and its inbox page
-    reads them. The walk parses them either way — this just refuses to drop
-    them — so the same `BuildError` refusal covers both halves."""
-    loaded = _loaded(store, rev=rev)
-    return resolve(loaded), loaded.notes
-
-
 def design_json(design: Design) -> str:
     """The artifact's one spelling of the bytes.
 
-    `model_dump_json` walks fields in declaration order, so `models.py` alone
-    decides the document's shape. Indented, because `--check` diffing a stale
-    artifact against a fresh one is read by humans too; the trailing newline
-    is the one git's fixers want. The key order is pinned by test — it is the
-    load-bearing half of "byte-identical", and nothing in the serializer
-    forces it.
+    `model_dump_json` walks fields in declaration order, so `models/design.py`
+    alone decides the document's shape. Indented, because `--check` diffing a
+    stale artifact against a fresh one is read by humans too; the trailing
+    newline is the one git's fixers want. The key order is pinned by test — it
+    is the load-bearing half of "byte-identical", and nothing in the
+    serializer forces it.
     """
-    return design.model_dump_json(indent=2) + "\n"
+    document: str = design.model_dump_json(indent=2)
+    return document + "\n"
 
 
 class _AtRevision:

@@ -15,9 +15,7 @@ scope:
 - component:git
 must_hold:
 - decision:layer-stack-import-contracts
-depends_on: []
 ---
-
 Tasks 00 through 06, tickets jfg0qy, 9zf3xj, an2ncs, m1npgk, b43rng and
 pfkxrx. models.py itself predates the ticket system — the tasks README's
 own snapshot says "models done, CLI scaffolded, nothing behind it yet" —

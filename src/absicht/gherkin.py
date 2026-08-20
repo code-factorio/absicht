@@ -1,54 +1,53 @@
-"""Gherkin ``.feature`` rendering of a story's behavioural criteria.
+"""Gherkin ``.feature`` rendering of a behavior and its observations.
 
-One direction only: criteria in, Gherkin out, never parsed back. The output
-is generated, never authored (``docs/spec/cli.md``'s features milestone), so
-everything here is deterministic — the same story and criteria always render
-the same bytes, which is what ``ab features --check`` diffs against and what
-``ab packet --seal``'s ``scenarios_digest`` seals. Built once here so
-``32-packet-cli.md``'s ``--features`` and ``33-features.md`` neither
-reimplements Gherkin syntax.
+One direction only: behaviors in, Gherkin out, never parsed back. The output
+is generated, never authored, so everything here is deterministic — the same
+behavior always renders the same bytes, which is what ``ab features --check``
+diffs against and what ``ab packet --seal``'s digest seals.
 
-This module takes a resolved story and its criteria. Which milestone's
-criteria they are is the caller's walk (``Milestone.done_when`` and the
-in-scope stories' acceptance), not this layer's knowledge. Criteria render in
-the order given, which acceptance order already makes criterion-id order
-(``#ac-1``, ``#ac-2``, …).
+The mapping is the model's own shape, not a translation: a behavior's
+``trigger`` is what happened, so it is the ``When``; an observation is one
+expectation about the result, so it is a ``Then`` and gets a scenario of its
+own. Each scenario is named by the observation's id, which is the id a step
+definition binds to and the id that survives every rewording.
+
+``outcome`` and the effective ``timing`` ride as tags, because they change
+what a runner does with a scenario and a tag is the one thing a runner can
+filter on. A ``must_not`` carries no timing tag: it means at no point.
+
+Which behaviors are rendered is the caller's walk (a milestone's ``satisfy``,
+or the whole design), not this layer's knowledge.
 """
 
 from __future__ import annotations
 
 import hashlib
 
-from absicht.models import Criterion, CriterionKind, Story
+from absicht.models.design import Behavior, Observation
+from absicht.resolve import Index, effective_timing
 
 
-def render_feature(story: Story, criteria: tuple[Criterion, ...]) -> str:
-    """One ``.feature`` document for ``story``: a ``Feature:`` header whose
-    description maps the story's own fields onto Gherkin's As a/I want/So
-    that framing, then one ``Scenario:`` per behavioural criterion with
-    ``Given``/``When``/``Then`` lines from the criterion's fields.
+def render_feature(behavior: Behavior, index: Index) -> str:
+    """One ``.feature`` document for ``behavior``.
 
-    Structural and measured criteria are skipped — they are ``ab verify``'s
-    and the benchmark's concern (``docs/tasks/41-verify-rules.md``), not
-    Gherkin's. A criterion with no ``given`` simply starts at ``When``, the
-    way the model already lets a behavioural criterion omit it.
+    A ``Feature:`` header whose description is the trigger, then one
+    ``Scenario:`` per observation, in the order the behavior states them —
+    which is observation-id order (``#obs-1``, ``#obs-2``, …) in any file
+    somebody has not shuffled.
     """
-    lines = [f"Feature: {story.title}"]
-    lines += _narrative(story)
-    for criterion in criteria:
-        if criterion.kind is not CriterionKind.BEHAVIOURAL:
-            continue
-        lines += ["", f"  Scenario: {criterion.id}"]
-        lines += _steps("Given", criterion.given)
-        lines += [f"    When {criterion.when}"]
-        lines += _steps("Then", criterion.then)
+    lines = [f"Feature: {behavior.title}", "", f"  {behavior.trigger}"]
+    for observation in behavior.observations:
+        lines += ["", f"  {_tags(observation, index)}", f"  Scenario: {observation.id}"]
+        lines += [f"    # at {observation.at}"]
+        lines += [f"    When {behavior.trigger}"]
+        lines += [f"    Then {observation.statement}"]
     return "\n".join(lines) + "\n"
 
 
-def scenario_digest(features: dict[str, str]) -> str:
+def observations_digest(features: dict[str, str]) -> str:
     """A stable hash over a set of rendered ``.feature`` files — what
-    ``Packet.scenarios_digest`` stores and ``ab verify`` re-computes to catch
-    scenario drift.
+    ``PacketLock.observations_digest`` stores and ``ab verify`` re-computes to
+    catch drift between what was handed over and what is being verified.
 
     Files fold in sorted-by-filename order, so dict insertion order cannot
     move the digest. Each file's *name* is hashed with its content — a rename
@@ -63,28 +62,13 @@ def scenario_digest(features: dict[str, str]) -> str:
     return digest.hexdigest()
 
 
-def _narrative(story: Story) -> list[str]:
-    """The description block under the ``Feature:`` line: the classic user
-    story as Gherkin narrative, one line per field the story actually
-    carries — a story with no actor renders no ``As a`` line rather than an
-    empty one. The title is the want; story titles read as imperatives
-    ("Cancel an order"), and Gherkin wants the infinitive."""
-    lines: list[str] = []
-    if story.actor:
-        lines.append(f"As a {story.actor}")
-    lines.append(f"I want to {_lower_first(story.title)}")
-    if story.outcome:
-        lines.append(f"So that {story.outcome}")
-    return ["", *(f"  {line}" for line in lines)]
+def _tags(observation: Observation, index: Index) -> str:
+    """The scenario's tags: what the outcome demands, and when it holds.
 
-
-def _steps(keyword: str, lines: tuple[str, ...]) -> list[str]:
-    """A step section: the first line carries the keyword, the rest continue
-    with ``And`` — Gherkin's spelling of a list inside one section."""
-    if not lines:
-        return []
-    return [f"    {keyword} {lines[0]}", *(f"    And {line}" for line in lines[1:])]
-
-
-def _lower_first(text: str) -> str:
-    return text[:1].lower() + text[1:]
+    A runner filters on these — ``@should`` never fails a build, ``@eventual``
+    needs a wait — so they are tags rather than prose nobody can select on.
+    """
+    tags = [f"@{observation.outcome.value}"]
+    if (timing := effective_timing(observation, index)) is not None:
+        tags.append(f"@{timing.value}")
+    return " ".join(tags)

@@ -18,7 +18,8 @@ from typing import Annotated
 
 import typer
 
-from absicht.build import BuildError, build_with_notes, design_json
+from absicht.build import BuildError, design_json
+from absicht.build import build as build_design
 from absicht.cli._app import app
 from absicht.cli._common import (
     DEFAULT_DESIGN_OUT,
@@ -49,22 +50,20 @@ from absicht.layout import (
     write_layout,
 )
 from absicht.load import StoreResolutionError, resolve_store
-from absicht.models import (
-    SCHEMA_VERSION,
+from absicht.models.design import (
+    FORMAT_VERSION,
     Behavior,
     Confidence,
     Design,
     Element,
     Lifecycle,
     Milestone,
-    Note,
     Question,
     Ref,
-    Scope,
     State,
 )
 from absicht.render import (
-    QUESTION_OVERDUE,
+    QUESTION_BLOCKING,
     Gap,
     SiteServer,
     UnknownRefError,
@@ -76,7 +75,7 @@ from absicht.render import (
     trace_paths,
     worklist,
 )
-from absicht.resolve import Index, inherited_owners, scope_of
+from absicht.resolve import Index, Scope, inherited_owners, scope_of
 
 PANEL = "Step 2 — build, query, look at it"
 """Where these commands appear in `ab --help`."""
@@ -94,24 +93,16 @@ def _design(opts: GlobalOptions) -> tuple[Path, Design]:
     `build`'s `FINDINGS`-level refusal — a partial artifact is not an answer
     to a query either (docs/tasks/21-show.md's reuse rule).
     """
-    root, design, _notes = _design_and_notes(opts)
-    return root, design
-
-
-def _design_and_notes(opts: GlobalOptions) -> tuple[Path, Design, tuple[Note, ...]]:
-    """`_design`, carrying the loaded notes: `render`'s inbox page reads them,
-    and no other command in this group has a use for them (addendum §6 —
-    notes are nobody's input but the inbox's)."""
     try:
         root = resolve_store(opts.store)
-        design, notes = build_with_notes(root, rev=opts.rev)
+        design = build_design(root, rev=opts.rev)
     except (StoreResolutionError, GitError, ValueError) as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(ExitCode.USAGE) from exc
     except BuildError as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(ExitCode.FINDINGS) from exc
-    return root, design, notes
+    return root, design
 
 
 @app.command(rich_help_panel=PANEL)
@@ -145,7 +136,7 @@ def build(
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(text, encoding="utf-8")
     if opts.json_output:
-        typer.echo(json.dumps({"schema_version": SCHEMA_VERSION, "out": str(out)}))
+        typer.echo(json.dumps({"format_version": FORMAT_VERSION, "out": str(out)}))
     else:
         typer.echo(f"wrote {out}")
 
@@ -162,7 +153,7 @@ def _check_artifact(out: Path, text: str, *, json_output: bool, verdict_stderr: 
     fresh = out.is_file() and out.read_bytes() == text.encode("utf-8")
     if json_output:
         typer.echo(
-            json.dumps({"schema_version": SCHEMA_VERSION, "out": str(out), "stale": not fresh}),
+            json.dumps({"format_version": FORMAT_VERSION, "out": str(out), "stale": not fresh}),
             err=verdict_stderr,
         )
     elif fresh:
@@ -212,23 +203,29 @@ def show(
 
 
 _KIND_FIELDS: dict[Kind, str] = {
-    Kind.COMPONENT: "components",
-    Kind.SEAM: "seams",
-    Kind.DATA: "data",
-    Kind.REQUIREMENT: "requirements",
-    Kind.NFR: "non_functionals",
-    Kind.STORY: "stories",
-    Kind.DECISION: "decisions",
-    Kind.REJECTION: "rejections",
-    Kind.QUESTION: "questions",
-    Kind.MILESTONE: "milestones",
-    Kind.EXTERNAL: "externals",
-    Kind.RESOURCE: "resources",
+    Kind.TERM: "glossary",
+    Kind.ACTOR: "actors",
+    Kind.GOAL: "goals",
+    Kind.REQ: "requirements",
+    Kind.QUALITY: "qualities",
+    Kind.CONSTRAINT: "constraints",
     Kind.BEHAVIOR: "behaviors",
+    Kind.COMPONENT: "components",
+    Kind.INTERFACE: "interfaces",
+    Kind.DATA: "data_entities",
+    Kind.RESOURCE: "resources",
+    Kind.LIBRARY: "libraries",
+    Kind.EXTERNAL: "external_services",
+    Kind.ASSUMPTION: "assumptions",
+    Kind.DECISION: "decisions",
+    Kind.QUESTION: "questions",
+    Kind.REJECTION: "rejections",
+    Kind.MILESTONE: "milestones",
 }
-"""The `Design` field each kind's elements live in: the kind's value plus an
-`s`, except `data` (already collective) and `nfr` (`Design` spells it
-`non_functionals`) — the two mismatches that make a derived plural a trap."""
+"""The `Design` field each kind's elements live in. Spelled out rather than
+derived: a kind's ref prefix and its collection name agree often enough to
+look like a rule (`term`/`glossary`, `req`/`requirements`) and never enough
+to be one."""
 
 
 def _milestone_scope(design: Design, ref: str | None) -> frozenset[Ref] | None:
@@ -297,9 +294,9 @@ def list_elements(
     milestone_scope = _milestone_scope(design, milestone)
     states = frozenset(state) if state else None
     tags = frozenset(tag) if tag else None
-    index = Index.from_design(design)
+    index = Index(design)
     orphans = frozenset(index.orphaned(kind.value)) if orphaned else None
-    # §7's inheritance joins the owner filters: an unowned `unknown` with
+    # Owner inheritance joins the owner filters: an unowned `unknown` with
     # exactly one referencing owner answers to that owner, so it groups under
     # `--owner` and leaves `--unowned`. One map, the same one `ab gaps` reads.
     inherited = inherited_owners(index)
@@ -326,7 +323,7 @@ def list_elements(
         typer.echo(
             json.dumps(
                 {
-                    "schema_version": SCHEMA_VERSION,
+                    "format_version": FORMAT_VERSION,
                     "kind": kind.value,
                     "elements": [_element_json(element) for element in selected],
                 }
@@ -344,8 +341,9 @@ def list_elements(
 
 def _element_json(element: Element) -> dict[str, object]:
     """One listed element as json: the element itself, plus — for a behavior,
-    beside its own fields — the §4.1 classification the `--scope` filter keyed
-    on (derived values appear in `--json`, never in a file an author edits)."""
+    beside its own fields — the derived classification the `--scope` filter
+    keyed on (derived values appear in `--json`, never in a file an author
+    edits)."""
     dump: dict[str, object] = element.model_dump(mode="json")
     if isinstance(element, Behavior):
         dump["scope"] = scope_of(element).value
@@ -353,9 +351,9 @@ def _element_json(element: Element) -> dict[str, object]:
 
 
 def _row(element: Element, *, width: int) -> str:
-    """One `list` row: id, state, then — for a behavior, the §4.1 scope the
-    column exists to triage by — then the title, marked when §5 says the
-    element is no longer how the system works."""
+    """One `list` row: id, state, then — for a behavior, the derived scope the
+    column exists to triage by — then the title, marked when the element is no
+    longer how the system works."""
     columns = [element.id.ljust(width), element.state]
     if isinstance(element, Behavior):
         columns.append(scope_of(element).value)
@@ -383,9 +381,9 @@ def _gap_json(gap: Gap) -> dict[str, object]:
     return {
         "ref": gap.element.id,
         "reasons": list(gap.reasons),
-        "due_on": gap.due_on.isoformat() if gap.due_on is not None else None,
+        "blocks": list(gap.blocks),
         "expires_on": gap.expires_on.isoformat() if gap.expires_on is not None else None,
-        # §7's derived owner, additive per the envelope rules: null unless the
+        # The derived owner, additive per the envelope rules: null unless the
         # entry is an unowned `unknown` with exactly one referencing owner.
         "owner_inherited": gap.owner_inherited,
         "element": gap.element.model_dump(mode="json"),
@@ -397,7 +395,10 @@ def gaps(
     ctx: typer.Context,
     kind: Annotated[Kind | None, typer.Option("--kind")] = None,
     owner: Annotated[str | None, typer.Option("--owner", metavar="WHO")] = None,
-    overdue: Annotated[bool, typer.Option("--overdue")] = False,
+    blocks_something: Annotated[
+        bool,
+        typer.Option("--blocking-only", help="Only questions something waits on."),
+    ] = False,
     blocking: Annotated[
         str | None,
         typer.Option(
@@ -410,21 +411,21 @@ def gaps(
     """Everything unfinished, as a worklist.
 
     `unknown`, `observed` and `delegated` elements, open questions, unowned
-    elements, expired external assumptions, and behaviors with no
-    observations. An unowned `unknown` with exactly one referencing owner
-    reports that owner, marked inherited.
+    elements, expired external services, and behaviors with no observations.
+    An unowned `unknown` with exactly one referencing owner reports that
+    owner, marked inherited.
     """
     opts = options(ctx)
     _, design = _design(opts)
     target: Element | None = None
     if blocking is not None:
-        target = Index.from_design(design).by_id.get(blocking)
+        target = Index(design).get(blocking)
         if target is None:
             typer.echo(f"--blocking {blocking!r}: no element in this store has that id", err=True)
             raise typer.Exit(ExitCode.USAGE)
     # Every filter is a predicate AND over the unioned worklist, applied in
     # the id order `worklist` produces — the same stable answer `list` gives.
-    # `--owner` matches §7's inherited owner too, like `list`'s: an unowned
+    # `--owner` matches the inherited owner too, like `list`'s: an unowned
     # `unknown` that answers to its single referencing owner is platform's
     # gap as much as qa's owned one is qa's.
     selected = [
@@ -432,14 +433,14 @@ def gaps(
         for gap in worklist(design, today=date.today())
         if (kind is None or gap.element.id.startswith(f"{kind.value}:"))
         and (owner is None or gap.element.owner == owner or gap.owner_inherited == owner)
-        and (not overdue or QUESTION_OVERDUE in gap.reasons)
+        and (not blocks_something or QUESTION_BLOCKING in gap.reasons)
         and (target is None or _blocks(gap.element, target))
     ]
     output = effective_format(ctx, output_format, opts.json_output, json_member=PlainFormat.JSON)
     if output is PlainFormat.JSON:
         typer.echo(
             json.dumps(
-                {"schema_version": SCHEMA_VERSION, "gaps": [_gap_json(gap) for gap in selected]}
+                {"format_version": FORMAT_VERSION, "gaps": [_gap_json(gap) for gap in selected]}
             )
         )
     elif selected:
@@ -538,18 +539,18 @@ def render(
         # diagram files would promise rebuilds that never happen.
         typer.echo("--serve previews the site; diagrams are written once, not watched", err=True)
         raise typer.Exit(ExitCode.USAGE)
-    root, design, notes = _design_and_notes(opts)
+    root, design = _design(opts)
     if wants_diagram:
         _render_diagrams(opts, root, design, out, output_format, overlay or (), scope)
         return
     try:
-        pages = generate_site(design, out, today=date.today(), scope=scope, notes=notes)
+        pages = generate_site(design, out, today=date.today(), scope=scope, notes=design.notes)
     except UnknownRefError as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(ExitCode.USAGE) from exc
     if opts.json_output:
         typer.echo(
-            json.dumps({"schema_version": SCHEMA_VERSION, "out": str(out), "pages": len(pages)})
+            json.dumps({"format_version": FORMAT_VERSION, "out": str(out), "pages": len(pages)})
         )
     else:
         typer.echo(f"wrote {out} ({len(pages)} pages)")
@@ -561,8 +562,8 @@ def render(
     # not watched: editing the working tree under a pinned revision would
     # trigger rebuilds that cannot change anything.
     def rebuild() -> None:
-        fresh, fresh_notes = build_with_notes(root, rev=opts.rev)
-        generate_site(fresh, out, today=date.today(), scope=scope, notes=fresh_notes)
+        fresh = build_design(root, rev=opts.rev)
+        generate_site(fresh, out, today=date.today(), scope=scope, notes=fresh.notes)
 
     server = SiteServer(out, port, watch=None if opts.rev is not None else root, rebuild=rebuild)
     typer.echo(f"serving {out} at http://127.0.0.1:{port} (Ctrl-C to stop)", err=True)
@@ -616,7 +617,7 @@ def _render_diagrams(
         written.append(name)
     if opts.json_output:
         typer.echo(
-            json.dumps({"schema_version": SCHEMA_VERSION, "out": str(out), "diagrams": written})
+            json.dumps({"format_version": FORMAT_VERSION, "out": str(out), "diagrams": written})
         )
     else:
         typer.echo("\n".join(f"wrote {out / name}" for name in written))
@@ -666,7 +667,7 @@ def layout(
     if check_positions:
         lacking = missing(design, pinned)
         if opts.json_output:
-            typer.echo(json.dumps({"schema_version": SCHEMA_VERSION, "missing": list(lacking)}))
+            typer.echo(json.dumps({"format_version": FORMAT_VERSION, "missing": list(lacking)}))
         elif lacking:
             typer.echo("\n".join(f"no position for {ref}" for ref in lacking))
         else:
@@ -683,7 +684,7 @@ def layout(
         typer.echo(
             json.dumps(
                 {
-                    "schema_version": SCHEMA_VERSION,
+                    "format_version": FORMAT_VERSION,
                     "out": str(path),
                     "added": added,
                     "total": len(result.positions),

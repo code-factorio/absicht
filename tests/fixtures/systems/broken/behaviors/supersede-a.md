@@ -1,13 +1,17 @@
 ---
 id: behavior:supersede-a
-title: Supersession cycle, first side
+title: Replaced by supersede-b
 state: specified
-trigger: A file exercises one side of a supersession cycle.
+confidence: reviewed
+owner: dana
 supersedes:
 - behavior:supersede-b
+trigger: Something happens.
 observations:
 - id: behavior:supersede-a#obs-1
-  statement: The first side of the cycle is observable
-  at: component:dangling
+  statement: A row lands in the store.
+  at: resource:audit-store
   outcome: must
 ---
+`integrity/cycle`: each of the pair replaces the other, which leaves
+`replaces` undefined.

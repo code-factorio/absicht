@@ -1,9 +1,11 @@
 ---
-# One half of the contains cycle: this component contains loop-b, and
-# loop-b contains this one back — one cycle to find, not two findings.
 id: component:loop-a
-title: Loop A
+title: Nested in loop-b
 state: specified
-contains:
-- component:loop-b
+confidence: reviewed
+owner: dana
+level: container
+parent: component:loop-b
 ---
+`integrity/cycle` and `integrity/component-level`: each of the pair is nested
+in the other, so `inside` is undefined and neither parent is a system.

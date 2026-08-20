@@ -16,17 +16,18 @@ a clock:
   owns and ``show`` deliberately does not (``docs/tasks/21-show.md`` left the
   choice open; this is the one it made, and the command's ``--help`` says so);
 - expansion stops when the budget runs out, not when a walk revisits a node —
-  a seam's provider provides that seam right back, and the view of a cyclic
-  graph is a bounded tree, not a search;
+  a quality requirement scopes the very component that satisfies it right
+  back, and the view of a cyclic graph is a bounded tree, not a search;
 - a dangling ref resolves to no neighbour on either side, the same policy
   ``Index.referenced_by`` already holds: reporting dangling refs is ``ab
   check``'s job. ``broken/`` cannot reach this through the CLI (its two
   unreadable files are ``build``'s refusal), so the policy is pinned here on
   the folded design;
-- the gaps worklist's date boundaries — the ones no fixture holds, because a
-  fixture pinned to "today" would rot: a question turns overdue strictly after
-  its due date, an external expires strictly after its expiry date, and a
-  question a decision has already resolved leaves the worklist;
+- the gaps worklist's boundaries no fixture holds, because a fixture pinned to
+  "today" would rot: an external service expires strictly after its expiry
+  date, a question a decision has already resolved leaves the worklist, and a
+  question's urgency is read from what waits on the answer rather than from a
+  date somebody guessed;
 - the trace walk's cycle guard: a hop onto an element already on the current
   path is declined rather than followed, so a cyclic graph answers a bounded
   set of simple paths and says the guard fired instead of hanging;
@@ -47,33 +48,31 @@ import pytest
 from syrupy.assertion import SnapshotAssertion
 
 from absicht.load import load_store
-from absicht.models import (
-    SCHEMA_VERSION,
+from absicht.models.design import (
+    FORMAT_VERSION,
     Behavior,
     Component,
-    Criterion,
-    CriterionKind,
+    ComponentLevel,
     DataEntity,
     Design,
-    External,
-    ExternalKind,
-    Fidelity,
+    ExternalService,
+    Interface,
+    InterfaceStyle,
     Note,
     Observation,
     Outcome,
-    Packet,
-    PacketElement,
+    QualityAttribute,
+    QualityRequirement,
     Question,
+    Relationship,
+    RelationshipType,
     Requirement,
     Resource,
     ResourceKind,
-    Seam,
-    SeamStyle,
     State,
-    Story,
-    System,
     Timing,
 )
+from absicht.models.packet import Fidelity, Packet, PacketElement
 from absicht.render import (
     SiteServer,
     UnknownRefError,
@@ -105,23 +104,30 @@ def test_an_unknown_ref_raises_rather_than_answering_empty(clean: Design) -> Non
 
 
 def test_the_outgoing_side_expands_to_the_asked_depth_and_no_further(clean: Design) -> None:
-    view = neighbourhood(clean, "seam:order-events", depth=2)
+    view = neighbourhood(clean, "component:cancellation", depth=2)
 
     assert [(hop.field, hop.other.id) for hop in view.outgoing] == [
-        ("provider", "component:orders"),
-        ("consumers", "component:cancellation"),
-        ("carries", "data:order"),
+        ("parent", "component:orders"),
+        ("calls", "interface:order-events"),
+        ("satisfies", "quality:cancel-latency"),
     ]
     orders = view.outgoing[0]
     assert [(hop.field, hop.other.id) for hop in orders.deeper] == [
-        ("contains", "component:catalog"),
-        ("provides", "seam:order-events"),
-        ("owns_data", "data:order"),
+        ("parent", "component:acme"),
+        ("implements", "req:cancel-orders"),
+        ("constrained_by", "constraint:gdpr-erasure"),
+        ("depends_on", "library:pydantic"),
+        ("depends_on", "resource:order-cache"),
+        ("depends_on", "resource:order-stream"),
     ]
-    # Depth 2 stops at the fringe: `orders` provides this very seam right
-    # back — the cycle the budget must bound, not chase — and every hop at the
-    # fringe is a leaf. Expanding those again is depth 3's job.
-    assert all(hop.deeper == () for hop in orders.deeper)
+    quality = view.outgoing[2]
+    assert [(hop.field, hop.other.id) for hop in quality.deeper] == [
+        ("scope", "component:cancellation"),
+    ]
+    # Depth 2 stops at the fringe: `quality:cancel-latency` scopes this very
+    # component right back — the cycle the budget must bound, not chase — and
+    # every hop at the fringe is a leaf. Expanding those again is depth 3's job.
+    assert all(hop.deeper == () for hop in (*orders.deeper, *quality.deeper))
 
 
 def test_depth_zero_leaves_the_outgoing_side_unfollowed(clean: Design) -> None:
@@ -136,33 +142,37 @@ def test_depth_zero_leaves_the_outgoing_side_unfollowed(clean: Design) -> None:
 
 
 def test_depth_three_reaches_a_third_hop(clean: Design) -> None:
-    """The budget decrements once per level, not once per two: the seam that
-    `orders` provides right back gets its own outgoing edges at the third
-    hop. The cycle makes this the sharp end of the depth arithmetic — one
-    level early or late and the fringe moves."""
+    """The budget decrements once per level, not once per two: the component
+    that `quality:cancel-latency` scopes right back gets its own outgoing
+    edges at the third hop. The cycle makes this the sharp end of the depth
+    arithmetic — one level early or late and the fringe moves."""
 
-    view = neighbourhood(clean, "seam:order-events", depth=3)
+    view = neighbourhood(clean, "component:cancellation", depth=3)
 
-    provides = view.outgoing[0].deeper[1]
-    assert (provides.field, provides.other.id) == ("provides", "seam:order-events")
-    assert [hop.other.id for hop in provides.deeper] == [
+    scoped = view.outgoing[2].deeper[0]
+    assert (scoped.field, scoped.other.id) == ("scope", "component:cancellation")
+    assert [hop.other.id for hop in scoped.deeper] == [
         "component:orders",
-        "component:cancellation",
-        "data:order",
+        "interface:order-events",
+        "quality:cancel-latency",
     ]
 
 
 def test_the_inbound_side_stays_one_hop_at_any_depth(clean: Design) -> None:
     """A depth that deep would find more if the inbound side expanded too —
-    `story:cancel-order` is satisfied by nothing here, but `seam:order-events`
-    is pointed at by three elements whose own refs go further out."""
+    `component:orders` is pointed at by seven elements whose own refs go
+    further out, and none of those refs joins the view."""
 
-    view = neighbourhood(clean, "seam:order-events", depth=5)
+    view = neighbourhood(clean, "component:orders", depth=5)
 
     assert [(link.field, link.other.id) for link in view.incoming] == [
-        ("touches", "story:cancel-order"),
-        ("consumes", "component:cancellation"),
-        ("provides", "component:orders"),
+        ("at", "behavior:order-cancelled"),
+        ("at", "behavior:order-placed"),
+        ("parent", "component:cancellation"),
+        ("declared_by", "interface:order-events"),
+        ("owner_component", "data:order"),
+        ("applies_to", "decision:event-log"),
+        ("scope", "milestone:m1"),
     ]
 
 
@@ -171,37 +181,43 @@ def test_a_dangling_ref_resolves_to_no_neighbour() -> None:
 
     view = neighbourhood(design, "component:dangling", depth=2)
 
-    # `dangling`'s one ref is `contains: component:ghost`, which no file
-    # defines: it must not appear as a neighbour, and the empty view is still
-    # a successful one — `ab show` reports neighbourhoods, `ab check` reports
-    # the ghost.
-    assert view.outgoing == ()
+    # `dangling`'s two refs are `parent: component:root`, which resolves, and
+    # an `implements` edge onto `req:ghost`, which no file defines: the ghost
+    # must not appear as a neighbour, and the view is still a successful one —
+    # `ab show` reports neighbourhoods, `ab check` reports the ghost.
+    assert [(hop.field, hop.other.id) for hop in view.outgoing] == [
+        ("parent", "component:root"),
+    ]
 
 
 def test_json_carries_the_full_view_and_the_body_flag(clean: Design) -> None:
-    view = neighbourhood(clean, "requirement:cancel-orders", depth=2)
+    view = neighbourhood(clean, "behavior:order-placed", depth=2)
 
     with_body = view.render_json(include_body=True)
     without_body = view.render_json(include_body=False)
 
-    assert with_body["schema_version"] == SCHEMA_VERSION
-    assert with_body["element"]["body"].startswith("A customer may cancel")
+    assert with_body["format_version"] == FORMAT_VERSION
+    assert with_body["element"]["body"].startswith("Kept because it is the record")
     assert "body" not in without_body["element"]
     hop = with_body["points_at"][0]
-    assert hop["field"] == "realized_by"
-    assert hop["target"]["id"] == "component:cancellation"
+    assert hop["field"] == "at"
+    assert hop["target"]["id"] == "component:orders"
     # Neighbours carry their fields but never prose or provenance: the body is
     # the focus element's, and where a neighbour lives is `source`'s story.
     assert "body" not in hop["target"]
     assert "source" not in hop["target"]
     assert [(deeper["field"], deeper["target"]["id"]) for deeper in hop["deeper"]] == [
-        ("consumes", "seam:order-events")
+        ("parent", "component:acme"),
+        ("implements", "req:cancel-orders"),
+        ("constrained_by", "constraint:gdpr-erasure"),
+        ("depends_on", "library:pydantic"),
+        ("depends_on", "resource:order-cache"),
+        ("depends_on", "resource:order-stream"),
     ]
     assert hop["deeper"][0]["deeper"] == []
     assert [(link["field"], link["source"]["id"]) for link in with_body["referenced_by"]] == [
-        ("satisfies", "story:cancel-order"),
-        ("realizes", "behavior:order-placed-v2"),
-        ("realizes", "behavior:order-placed"),
+        ("supersedes", "behavior:order-placed-v2"),
+        ("at", "behavior:order-placed-v2"),
     ]
 
 
@@ -218,9 +234,16 @@ def test_worklist_marks_delegated_elements_unfinished() -> None:
     decided-elsewhere is still unfinished, and without an owner the element is
     on the list twice over."""
     design = Design(
-        system=System(id="system:tiny", title="Tiny", state=State.SPECIFIED, owner="a"),
+        id="design:tiny",
+        title="Tiny",
+        version="0.1.0",
         components=(
-            Component(id="component:outsourced", title="Outsourced", state=State.DELEGATED),
+            Component(
+                id="component:outsourced",
+                title="Outsourced",
+                level=ComponentLevel.CONTAINER,
+                state=State.DELEGATED,
+            ),
         ),
     )
 
@@ -230,27 +253,41 @@ def test_worklist_marks_delegated_elements_unfinished() -> None:
     assert only.reasons == ("state=delegated", "unowned")
 
 
-def test_worklist_questions_turn_overdue_strictly_after_their_due_date() -> None:
-    """A question due today is still open — the day itself is inside the ask,
-    the same strict comparison `check` spells for expiry — and a question a
-    decision has already resolved is nobody's worklist entry, whatever its
-    state says."""
+def test_worklist_reads_a_questions_urgency_from_what_waits_on_the_answer() -> None:
+    """The whole kind is a gap by construction, and what separates one entry
+    from the next is what blocks on it — urgency read from the graph, never
+    from a date somebody guessed and nobody revisits. A question a decision
+    has already resolved is nobody's worklist entry, whatever its state
+    says."""
     design = Design(
-        system=System(id="system:tiny", title="Tiny", state=State.SPECIFIED, owner="a"),
-        questions=(
-            Question(id="question:today", title="Today", owner="a", due_on=TODAY),
-            Question(
-                id="question:yesterday",
-                title="Yesterday",
+        id="design:tiny",
+        title="Tiny",
+        version="0.1.0",
+        components=(
+            Component(
+                id="component:waiting",
+                title="Waiting",
+                level=ComponentLevel.CONTAINER,
+                state=State.SPECIFIED,
                 owner="a",
-                due_on=TODAY - timedelta(days=1),
+            ),
+        ),
+        questions=(
+            Question(id="question:open", title="Open", owner="a", question="How long?"),
+            Question(
+                id="question:blocking",
+                title="Blocking",
+                owner="a",
+                question="Which way round?",
+                blocks=("component:waiting",),
             ),
             Question(
                 id="question:closed",
                 title="Closed",
                 owner="a",
                 state=State.SPECIFIED,
-                due_on=TODAY - timedelta(days=1),
+                question="Settled already.",
+                blocks=("component:waiting",),
                 resolved_by="decision:done",
             ),
         ),
@@ -258,36 +295,37 @@ def test_worklist_questions_turn_overdue_strictly_after_their_due_date() -> None
 
     by_id = {gap.element.id: gap for gap in worklist(design, today=TODAY)}
 
-    assert by_id["question:today"].reasons == ("state=unknown", "question-open")
-    assert by_id["question:yesterday"].reasons == ("state=unknown", "question-overdue")
-    # The date the reason hangs on travels with the entry, past or not.
-    assert by_id["question:today"].due_on == TODAY
-    assert by_id["question:yesterday"].due_on == TODAY - timedelta(days=1)
+    assert by_id["question:open"].reasons == ("state=unknown", "question-open")
+    assert by_id["question:blocking"].reasons == ("state=unknown", "question-blocking")
+    # What waits on the answer travels with the entry, so a consumer can
+    # prioritize without re-reading the element.
+    assert by_id["question:open"].blocks == ()
+    assert by_id["question:blocking"].blocks == ("component:waiting",)
     assert "question:closed" not in by_id
 
 
-def test_worklist_expires_an_external_strictly_after_its_expiry_date() -> None:
+def test_worklist_expires_an_external_service_strictly_after_its_expiry_date() -> None:
     """`expires_on` means "after this, re-check": the day itself is still
     trusted — `absicht.check`'s reading, and necessarily this one's too,
     because the worklist reuses that module's one spelling of "expired"
     rather than re-deriving the comparison."""
     design = Design(
-        system=System(id="system:tiny", title="Tiny", state=State.SPECIFIED, owner="a"),
-        externals=(
-            External(
+        id="design:tiny",
+        title="Tiny",
+        version="0.1.0",
+        external_services=(
+            ExternalService(
                 id="external:today",
                 title="Today",
                 state=State.SPECIFIED,
                 owner="ops",
-                external_kind=ExternalKind.SERVICE,
                 expires_on=TODAY,
             ),
-            External(
+            ExternalService(
                 id="external:yesterday",
                 title="Yesterday",
                 state=State.SPECIFIED,
                 owner="ops",
-                external_kind=ExternalKind.SERVICE,
                 expires_on=TODAY - timedelta(days=1),
             ),
         ),
@@ -301,11 +339,13 @@ def test_worklist_expires_an_external_strictly_after_its_expiry_date() -> None:
 
 
 def test_worklist_gaps_a_behavior_with_no_observations() -> None:
-    """The query-side twin of `policy/behavior-needs-observations`: the
-    expectation with nothing observable is unfinished whatever its state —
-    a `specified` behavior lands on the worklist for that reason alone."""
+    """The query-side twin of `policy/behavior-unobserved`: the expectation
+    with nothing observable is unfinished whatever its state — a `specified`
+    behavior lands on the worklist for that reason alone."""
     design = Design(
-        system=System(id="system:tiny", title="Tiny", state=State.SPECIFIED, owner="a"),
+        id="design:tiny",
+        title="Tiny",
+        version="0.1.0",
         behaviors=(
             Behavior(
                 id="behavior:bare",
@@ -327,56 +367,88 @@ def test_worklist_inherits_the_single_referencing_owner() -> None:
     """§7 in the worklist: an unowned `unknown` with exactly one referencing
     owner answers to it — carried on the entry, never stored — and stops
     being `unowned`; an own owner, a second referencing owner, or an
-    ownerless referencer means it does not. `component:deep`'s only referencer
-    is the ownerless `requirement:mid`, whose own inherited owner (platform,
-    via `story:top`) is never chained on: one level, no deeper."""
+    ownerless referencer means it does not. `req:deep`'s only referencer is
+    the ownerless `component:mid`, whose own inherited owner (platform, via
+    `quality:top`) is never chained on: one level, no deeper."""
     design = Design(
-        system=System(id="system:tiny", title="Tiny", state=State.SPECIFIED, owner="a"),
+        id="design:tiny",
+        title="Tiny",
+        version="0.1.0",
         components=(
-            Component(id="component:watched", title="Watched"),
-            Component(id="component:owned", title="Owned", owner="qa"),
-            Component(id="component:contested", title="Contested"),
-            Component(id="component:deep", title="Deep"),
-        ),
-        requirements=(
-            Requirement(
-                id="requirement:carrier",
+            Component(
+                id="component:carrier",
                 title="Carrier",
+                level=ComponentLevel.CONTAINER,
                 state=State.SPECIFIED,
                 owner="platform",
-                realized_by=("component:watched", "component:owned", "component:contested"),
             ),
-            Requirement(
-                id="requirement:rival",
+            Component(
+                id="component:rival",
                 title="Rival",
+                level=ComponentLevel.CONTAINER,
                 state=State.SPECIFIED,
                 owner="rival-team",
-                realized_by=("component:contested",),
             ),
-            Requirement(id="requirement:mid", title="Mid", realized_by=("component:deep",)),
+            Component(id="component:mid", title="Mid", level=ComponentLevel.CONTAINER),
         ),
-        stories=(
-            Story(
-                id="story:top",
+        requirements=(
+            Requirement(id="req:watched", title="Watched", statement="Something must happen."),
+            Requirement(
+                id="req:owned", title="Owned", statement="Something must happen.", owner="qa"
+            ),
+            Requirement(id="req:contested", title="Contested", statement="Something must happen."),
+            Requirement(id="req:deep", title="Deep", statement="Something must happen."),
+        ),
+        qualities=(
+            QualityRequirement(
+                id="quality:top",
                 title="Top",
                 state=State.SPECIFIED,
                 owner="platform",
-                satisfies=("requirement:mid",),
+                attribute=QualityAttribute.LATENCY,
+                scope=("component:mid",),
+            ),
+        ),
+        relationships=(
+            Relationship(
+                source_id="component:carrier",
+                target_id="req:watched",
+                type=RelationshipType.IMPLEMENTS,
+            ),
+            Relationship(
+                source_id="component:carrier",
+                target_id="req:owned",
+                type=RelationshipType.IMPLEMENTS,
+            ),
+            Relationship(
+                source_id="component:carrier",
+                target_id="req:contested",
+                type=RelationshipType.IMPLEMENTS,
+            ),
+            Relationship(
+                source_id="component:rival",
+                target_id="req:contested",
+                type=RelationshipType.IMPLEMENTS,
+            ),
+            Relationship(
+                source_id="component:mid",
+                target_id="req:deep",
+                type=RelationshipType.IMPLEMENTS,
             ),
         ),
     )
 
     by_id = {gap.element.id: gap for gap in worklist(design, today=TODAY)}
 
-    assert by_id["component:watched"].owner_inherited == "platform"
-    assert by_id["component:watched"].reasons == ("state=unknown",)
-    assert by_id["component:owned"].owner_inherited is None
-    assert by_id["component:owned"].reasons == ("state=unknown",)
-    assert by_id["component:contested"].owner_inherited is None
-    assert by_id["component:contested"].reasons == ("state=unknown", "unowned")
-    assert by_id["requirement:mid"].owner_inherited == "platform"
-    assert by_id["component:deep"].owner_inherited is None
-    assert by_id["component:deep"].reasons == ("state=unknown", "unowned")
+    assert by_id["req:watched"].owner_inherited == "platform"
+    assert by_id["req:watched"].reasons == ("state=unknown",)
+    assert by_id["req:owned"].owner_inherited is None
+    assert by_id["req:owned"].reasons == ("state=unknown",)
+    assert by_id["req:contested"].owner_inherited is None
+    assert by_id["req:contested"].reasons == ("state=unknown", "unowned")
+    assert by_id["component:mid"].owner_inherited == "platform"
+    assert by_id["req:deep"].owner_inherited is None
+    assert by_id["req:deep"].reasons == ("state=unknown", "unowned")
 
 
 # --- observations in the show view ----------------------------------------------
@@ -388,8 +460,18 @@ def test_the_effective_timing_follows_the_resource_kind_when_unsaid() -> None:
     everything else immediate — and `must_not` has no timing to render, at
     no point having no when."""
     design = Design(
-        system=System(id="system:tiny", title="Tiny", state=State.SPECIFIED, owner="a"),
-        components=(Component(id="component:c", title="C", state=State.SPECIFIED, owner="a"),),
+        id="design:tiny",
+        title="Tiny",
+        version="0.1.0",
+        components=(
+            Component(
+                id="component:c",
+                title="C",
+                level=ComponentLevel.CONTAINER,
+                state=State.SPECIFIED,
+                owner="a",
+            ),
+        ),
         resources=(
             Resource(
                 id="resource:events",
@@ -452,7 +534,7 @@ def test_the_effective_timing_follows_the_resource_kind_when_unsaid() -> None:
 
 
 def test_a_cycle_ends_the_walk_and_says_so() -> None:
-    """`broken/`'s `contains` cycle is the input the walk must survive: the
+    """`broken/`'s `parent` cycle is the input the walk must survive: the
     guard is the simple-path invariant — a hop onto an element already on the
     current path is declined — so the answer is a bounded set of paths plus
     `cycle_hit`, not a hang. Exactly the two one-hop paths exist (down
@@ -465,8 +547,8 @@ def test_a_cycle_ends_the_walk_and_says_so() -> None:
     result = trace_paths(design, "component:loop-a")
 
     assert [tuple((step.field, step.up, step.ref) for step in path) for path in result.paths] == [
-        (("contains", False, "component:loop-b"),),
-        (("contains", True, "component:loop-b"),),
+        (("parent", False, "component:loop-b"),),
+        (("parent", True, "component:loop-b"),),
     ]
     assert result.cycle_hit is True
 
@@ -475,51 +557,65 @@ def test_an_unknown_to_ref_raises_rather_than_answering_empty(clean: Design) -> 
     """`ab trace` maps this to `USAGE`: "no path to a nonexistent element" is
     not an answer anyone should be able to mistake for a route check."""
     with pytest.raises(UnknownRefError, match="decision:never"):
-        trace_paths(clean, "requirement:cancel-orders", to="decision:never-made")
+        trace_paths(clean, "req:cancel-orders", to="decision:never-made")
 
 
 def _dense() -> Design:
-    """A three-layer fan — one requirement, four components, four seams, four
-    data entities, every layer fully cross-linked — the smallest shape whose
-    simple-path count (80 from the requirement, downward alone) says what a
-    realistically dense store says: the complete enumeration `trace_paths`
-    promises is exponential, and a real store (absicht's own, 121 elements)
-    reaches millions of paths for a single start.
+    """A three-layer fan — one requirement, four components, four interfaces,
+    four data entities, every layer fully cross-linked — the smallest shape
+    whose simple-path count says what a realistically dense store says: the
+    complete enumeration `trace_paths` promises is exponential, and a real
+    store (absicht's own, 121 elements) reaches millions of paths for a single
+    start.
 
     Built rather than loaded because no fixture should carry a shape whose
     purpose is to be too big to walk.
     """
     width = 4
     components = tuple(
-        Component(
-            id=f"component:c{i}",
-            title=f"C{i}",
-            provides=tuple(f"seam:s{j}" for j in range(width)),
-        )
+        Component(id=f"component:c{i}", title=f"C{i}", level=ComponentLevel.CONTAINER)
         for i in range(width)
     )
-    seams = tuple(
-        Seam(
-            id=f"seam:s{j}",
-            title=f"S{j}",
-            style=SeamStyle.SCHEMA,
-            carries=tuple(f"data:d{k}" for k in range(width)),
-        )
+    interfaces = tuple(
+        Interface(id=f"interface:s{j}", title=f"S{j}", style=InterfaceStyle.EVENT)
         for j in range(width)
     )
     data = tuple(DataEntity(id=f"data:d{k}", title=f"D{k}") for k in range(width))
     return Design(
-        system=System(id="system:dense", title="Dense"),
-        requirements=(
-            Requirement(
-                id="requirement:r",
-                title="R",
-                realized_by=tuple(component.id for component in components),
+        id="design:dense",
+        title="Dense",
+        version="0.1.0",
+        requirements=(Requirement(id="req:r", title="R", statement="Something must happen."),),
+        components=components,
+        interfaces=interfaces,
+        data_entities=data,
+        # Every edge lives in `relationships` now, which is what lets each
+        # layer be complete against the next: a single-owner field could only
+        # ever spell one of the sixteen.
+        relationships=(
+            *(
+                Relationship(
+                    source_id=component.id, target_id="req:r", type=RelationshipType.IMPLEMENTS
+                )
+                for component in components
+            ),
+            *(
+                Relationship(
+                    source_id=component.id,
+                    target_id=interface.id,
+                    type=RelationshipType.IMPLEMENTS,
+                )
+                for component in components
+                for interface in interfaces
+            ),
+            *(
+                Relationship(
+                    source_id=interface.id, target_id=entity.id, type=RelationshipType.RELATES_TO
+                )
+                for interface in interfaces
+                for entity in data
             ),
         ),
-        components=components,
-        seams=seams,
-        data=data,
     )
 
 
@@ -529,14 +625,14 @@ def test_the_walk_stops_at_the_path_limit_and_says_so() -> None:
     cut short rather than complete, and the paths that did come back are the
     first `limit` of the uncapped enumeration — the same walk, stopped
     earlier, never a different order."""
-    full = trace_paths(_dense(), "requirement:r", limit=None)
+    full = trace_paths(_dense(), "req:r", limit=None)
     # Both directions by default, so the reverse edges multiply too: this
     # three-layer fan of four holds 127,476 simple paths from one start —
     # the explosion in miniature, and the count the fixture is built to pin.
     assert len(full.paths) == 127_476
     assert full.truncated is False
 
-    capped = trace_paths(_dense(), "requirement:r", limit=10)
+    capped = trace_paths(_dense(), "req:r", limit=10)
 
     assert len(capped.paths) == 10
     assert capped.paths == full.paths[:10]
@@ -547,7 +643,7 @@ def test_the_limit_reached_note_renders_in_every_format() -> None:
     """A truncated trace must not read as exhaustive in any of the three
     formats — the same discipline `cycle_hit` already follows, one spelling
     per format, additive in `--json`."""
-    capped = trace_paths(_dense(), "requirement:r", limit=1)
+    capped = trace_paths(_dense(), "req:r", limit=1)
 
     assert "path limit" in capped.render_text()
     assert capped.render_json()["truncated"] is True
@@ -559,7 +655,7 @@ def test_the_limit_reached_note_renders_in_every_format() -> None:
 def _packet_document() -> str:
     """One packet exercising everything `clean/`'s milestone leaves empty: two
     scope blocks (one with prose), a ring element, every obligation list
-    carrying content, and a criterion with a two-line `given`.
+    carrying content, and a done-when list pointing at the rendered features.
 
     Built by hand rather than assembled, because what is under test is the
     rendering of the model, not the selection that fills it — and a packet that
@@ -568,6 +664,7 @@ def _packet_document() -> str:
     return packet_markdown(
         Packet(
             milestone="milestone:m",
+            design="design:tiny",
             outcome="The thing works.",
             elements=(
                 PacketElement(
@@ -594,26 +691,16 @@ def _packet_document() -> str:
                     element={"id": "component:side", "title": "Side", "body": ""},
                 ),
                 PacketElement(
-                    ref="seam:edge",
+                    ref="interface:edge",
                     fidelity=Fidelity.CONTRACT,
-                    element={"id": "seam:edge", "title": "Edge"},
+                    element={"id": "interface:edge", "title": "Edge"},
                 ),
             ),
-            must_hold=("decision:adr", "nfr:latency"),
+            must_hold=("decision:adr", "quality:latency"),
             may_decide=("the retry policy",),
             unresolved=("question:q",),
             rejections=("rejection:big-bang",),
-            criteria=(
-                Criterion(
-                    id="story:s#ac-1",
-                    given=("a user", "an order"),
-                    when="the user cancels",
-                    then=("it works",),
-                ),
-                Criterion(
-                    id="story:s#ac-2", kind=CriterionKind.STRUCTURAL, statement="one seam only"
-                ),
-            ),
+            done_when=("behavior:cancel#obs-1", "behavior:cancel#obs-2"),
         ),
         features_dir="features",
     )
@@ -632,7 +719,7 @@ def test_packet_markdown_carries_every_obligation_and_each_scope_block() -> None
     for absent in ("- tags:", "- owner:", "- body:", "- id:", "- title:", "- state:"):
         assert absent not in document
     # The ring stays summarized to one line, never a block of its own.
-    assert "- `seam:edge` — Edge" in document
+    assert "- `interface:edge` — Edge" in document
     assert "### Edge" not in document
     # Every obligation section lists what it carries, not `(none)` — checked
     # per section, because the behavior sections legitimately spell an empty
@@ -646,10 +733,11 @@ def test_packet_markdown_carries_every_obligation_and_each_scope_block() -> None
         section = document.split(heading, 1)[1].split("\n## ", 1)[0]
         assert carried in section
         assert "(none)" not in section
-    # A two-line given joins with ", "; a structural criterion carries its
-    # statement under its kind.
-    assert "given a user, an order; when the user cancels; then it works" in document
-    assert "(structural) — one seam only" in document
+    # Done-when is the observation ids themselves, and the pointer to where
+    # the full Gherkin landed as the caller spelled it.
+    done_when = document.split("## Done when", 1)[1]
+    assert "- `behavior:cancel#obs-1`\n- `behavior:cancel#obs-2`" in done_when
+    assert "Full Gherkin: the `.feature` files under `features/`." in done_when
 
 
 def test_packet_markdown_drops_the_dash_when_the_outcome_is_empty() -> None:
@@ -658,6 +746,7 @@ def test_packet_markdown_drops_the_dash_when_the_outcome_is_empty() -> None:
     document = packet_markdown(
         Packet(
             milestone="milestone:m",
+            design="design:tiny",
             elements=(
                 PacketElement(
                     ref="milestone:m",
@@ -711,6 +800,7 @@ def _behavior_packet() -> Packet:
 
     return Packet(
         milestone="milestone:m",
+        design="design:tiny",
         outcome="The thing keeps working.",
         elements=(
             PacketElement(
@@ -861,7 +951,7 @@ def test_the_site_is_byte_identical_across_runs(clean: Design, tmp_path: Path) -
 
     first = _site_bytes(tmp_path / "first")
     assert first == _site_bytes(tmp_path / "second")
-    assert len(first) == 19  # fifteen element pages, index, traceability, gaps, inbox
+    assert len(first) == 26  # twenty-two element pages, index, traceability, gaps, inbox
 
 
 # --- the note inbox page ----------------------------------------------------------
@@ -871,14 +961,20 @@ def _note(
     note_id: str,
     created: date,
     *,
-    body: str = "A thought.",
-    ref: str | None = None,
+    text: str = "A thought.",
+    about: str | None = None,
     promoted_to: str | None = None,
 ) -> Note:
     """One note as the loader would deliver it, with the clock already folded
     into `created` — the page's ages hang on the injected `today`, never on a
     wall clock."""
-    return Note(id=note_id, created=created, ref=ref, promoted_to=promoted_to, body=body)
+    return Note(
+        id=note_id,
+        created_on=created,
+        about=(about,) if about else (),
+        promoted_to=promoted_to,
+        text=text,
+    )
 
 
 def test_the_inbox_page_headlines_the_age_and_runs_oldest_first(
@@ -890,8 +986,8 @@ def test_the_inbox_page_headlines_the_age_and_runs_oldest_first(
     list` prints (the headline and the ages are that command's spellings,
     shared, not a second humanizer)."""
     notes = (
-        _note("note:newer1", TODAY, body="Fresh."),
-        _note("note:older1", TODAY - timedelta(days=90), body="Old."),
+        _note("note:newer1", TODAY, text="Fresh."),
+        _note("note:older1", TODAY - timedelta(days=90), text="Old."),
     )
 
     generate_site(clean, tmp_path, today=TODAY, notes=notes)
@@ -905,29 +1001,29 @@ def test_the_inbox_page_headlines_the_age_and_runs_oldest_first(
 def test_the_inbox_page_renders_bodies_anchors_and_the_promotion_archive(
     clean: Design, tmp_path: Path
 ) -> None:
-    """The inbox at reading width: each body rendered as prose, the anchor
+    """The inbox at reading width: each text rendered as prose, the anchor
     linked when the site holds its page and plain text when nothing defines it
-    (a dangling `ref` is `ab check`'s finding, not a dead link), and promoted
+    (a dangling `about` is `ab check`'s finding, not a dead link), and promoted
     notes archived under what they became — the record of what became what is
     part of the design story, so promotion leaves the inbox, never the store."""
     notes = (
         _note(
             "note:free01",
             TODAY - timedelta(days=45),
-            body="Look at cancellation.\n\nTwice.",
-            ref="component:cancellation",
+            text="Look at cancellation.\n\nTwice.",
+            about="component:cancellation",
         ),
         _note(
             "note:lost01",
             TODAY - timedelta(days=3),
-            body="Points nowhere yet.",
-            ref="component:ghost",
+            text="Points nowhere yet.",
+            about="component:ghost",
         ),
         _note(
             "note:gone01",
             TODAY - timedelta(days=60),
-            body="Became a requirement.",
-            promoted_to="requirement:cancel-orders",
+            text="Became a requirement.",
+            promoted_to="req:cancel-orders",
         ),
     )
 
@@ -944,7 +1040,7 @@ def test_the_inbox_page_renders_bodies_anchors_and_the_promotion_archive(
     assert "<code>component:ghost</code>" in page
     archived = page.index("<h2>Promoted</h2>")
     assert archived < page.index("note:gone01")
-    assert 'became <a href="elements/requirement/cancel-orders.html">' in page
+    assert 'became <a href="elements/req/cancel-orders.html">' in page
 
 
 def test_an_empty_inbox_still_has_its_page(clean: Design, tmp_path: Path) -> None:
@@ -977,15 +1073,15 @@ def test_the_inbox_page_is_snapshotted(
         _note(
             "note:anchr1",
             TODAY - timedelta(days=45),
-            body="The order cache needs a TTL.\n\nMeasure before deciding.",
-            ref="resource:order-cache",
+            text="The order cache needs a TTL.\n\nMeasure before deciding.",
+            about="resource:order-cache",
         ),
-        _note("note:plain01", TODAY - timedelta(days=3), body="Ask finance about refunds."),
+        _note("note:plain01", TODAY - timedelta(days=3), text="Ask finance about refunds."),
         _note(
             "note:gone01",
             TODAY - timedelta(days=60),
-            body="Became a requirement.",
-            promoted_to="requirement:cancel-orders",
+            text="Became a requirement.",
+            promoted_to="req:cancel-orders",
         ),
     )
 
@@ -1002,7 +1098,7 @@ def test_the_change_detection_notices_edits_additions_and_removals(tmp_path: Pat
     store = tmp_path / "store"
     (store / "requirements").mkdir(parents=True)
     element = store / "requirements" / "r.md"
-    element.write_text("---\nid: requirement:r\n---\n", encoding="utf-8")
+    element.write_text("---\nid: req:r\n---\n", encoding="utf-8")
 
     before = store_snapshot(store)
     assert not store_changed(store, before)
@@ -1012,7 +1108,7 @@ def test_the_change_detection_notices_edits_additions_and_removals(tmp_path: Pat
     os.utime(element, ns=(2**40, 2**40))
     assert store_changed(store, before)
 
-    (store / "system.yaml").write_text("id: system:s\n", encoding="utf-8")
+    (store / "design.yaml").write_text("id: design:s\n", encoding="utf-8")
     assert store_changed(store, before)
 
     after = store_snapshot(store)

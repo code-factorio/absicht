@@ -1,10 +1,11 @@
 """Walk a store on disk into raw per-kind tuples, tolerant of bad files.
 
-`load` is the only layer that knows a store is a directory layout (pinned in
-`docs/tasks/00-conventions.md`, extended by `docs/tasks/50-addendum-conventions.md`
-with `resources/`, `behaviors/` and `notes/`): `system.yaml` plus one
-directory per kind, one `<slug>.md` file per element. Everything above it —
-`check`, `build`, `packet` — reads a `LoadedStore` and never a `Path`.
+`load` is the only layer that knows a store is a directory layout:
+`design.yaml` plus one directory per kind, one `<slug>.md` file per element.
+Which directory holds what is `absicht.codec`'s `DIRECTORIES` — the layout is
+part of the on-disk format, not a second table here. Everything above this
+module — `check`, `build`, `packet` — reads a `LoadedStore` and never a
+`Path`.
 
 Tolerance is the contract: one broken file is one `LoadError` and the walk
 continues, so a store with a single typo still yields everything else and
@@ -13,51 +14,57 @@ knows nothing of `absicht.findings` severities — `check` translates; `build`
 and `packet` just want the data plus a list of what went wrong.
 
 `layout.yaml` stays outside `LoadedStore`: it is not an element collection
-but positions pinned by `ab layout` (`docs/tasks/25-layout.md`), and
-`absicht.layout` owns reading and writing it through the same codec.
-`locate_store` lands the store-location modes from `cli.md`'s global
-flags table (`resolve_store` is its root-only view) — the CLI maps the
-failure to `ExitCode.USAGE`.
+but positions pinned by `ab layout`, and `absicht.layout` owns reading and
+writing it through the same codec. `locate_store` lands the store-location
+modes from `cli.md`'s global flags table (`resolve_store` is its root-only
+view) — the CLI maps the failure to `ExitCode.USAGE`.
 """
 
 from __future__ import annotations
 
 import os
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
-from typing import Protocol
+from typing import Protocol, cast
 
 from absicht.codec import (
+    DIRECTORIES,
     CodecError,
     CodecValidationError,
     parse_element,
     parse_singleton,
 )
-from absicht.models import (
+from absicht.models.design import (
+    Actor,
+    Assumption,
     Behavior,
     Component,
+    Constraint,
     DataEntity,
     Decision,
-    External,
-    Marker,
+    Design,
+    ExternalService,
+    Goal,
+    Interface,
+    Library,
     Milestone,
-    NonFunctional,
     Note,
+    QualityRequirement,
     Question,
     Record,
     Rejection,
+    Relationship,
     Requirement,
     Resource,
-    Seam,
-    Story,
-    System,
+    Term,
 )
+from absicht.models.marker import Marker
 
-_SYSTEM = "system.yaml"
+_DESIGN = "design.yaml"
 
-_SYSTEM_MISSING = f"{_SYSTEM} is missing: a store needs exactly one System element"
+_DESIGN_MISSING = f"{_DESIGN} is missing: a store is a design, and a design has an id"
 
 
 class LoadErrorReason(StrEnum):
@@ -71,8 +78,8 @@ class LoadErrorReason(StrEnum):
     """The codec could not read the file as the format at all."""
     VALIDATION = "validation"
     """The file parsed, but its fields did not validate."""
-    MISSING_SYSTEM = "missing-system"
-    """No `system.yaml`: a store needs exactly one System element."""
+    MISSING_DESIGN = "missing-design"
+    """No `design.yaml`: nothing says which design this store is."""
     IO = "io"
     """The file could not be read, never mind parsed."""
 
@@ -99,32 +106,37 @@ class LoadError:
 class LoadedStore:
     """A store as raw per-kind tuples: parsed, sorted, unresolved.
 
-    Mirrors `Design`'s fields minus `system`, which is optional here because a
-    store without a `system.yaml` still has elements worth reporting on.
-    Refusing to fold a systemless store is `build`'s job, one layer up.
+    Mirrors `Design`'s fields, with the header optional because a store
+    without a `design.yaml` still has elements worth reporting on. Refusing
+    to fold a headerless store is `resolve`'s job, one layer up.
 
-    `notes` is the one deliberate asymmetry: notes are store contents but not
-    elements (addendum §6), so they are carried beside the kind tuples and
-    never folded into a `Design` — `ab note` and the single note check rule
-    are their readers, and nothing else ever sees them.
+    `relationships` is the one collection no directory holds: each element's
+    file owns its outgoing edges, and the walk collects them here in the
+    order the elements were read.
     """
 
-    system: System | None
-    externals: tuple[External, ...] = ()
+    header: Design | None = None
+    glossary: tuple[Term, ...] = ()
+    actors: tuple[Actor, ...] = ()
+    goals: tuple[Goal, ...] = ()
     requirements: tuple[Requirement, ...] = ()
-    non_functionals: tuple[NonFunctional, ...] = ()
-    stories: tuple[Story, ...] = ()
-    components: tuple[Component, ...] = ()
-    seams: tuple[Seam, ...] = ()
-    data: tuple[DataEntity, ...] = ()
-    resources: tuple[Resource, ...] = ()
+    qualities: tuple[QualityRequirement, ...] = ()
+    constraints: tuple[Constraint, ...] = ()
     behaviors: tuple[Behavior, ...] = ()
+    components: tuple[Component, ...] = ()
+    interfaces: tuple[Interface, ...] = ()
+    data_entities: tuple[DataEntity, ...] = ()
+    resources: tuple[Resource, ...] = ()
+    libraries: tuple[Library, ...] = ()
+    external_services: tuple[ExternalService, ...] = ()
+    assumptions: tuple[Assumption, ...] = ()
     decisions: tuple[Decision, ...] = ()
-    rejections: tuple[Rejection, ...] = ()
     questions: tuple[Question, ...] = ()
+    rejections: tuple[Rejection, ...] = ()
     milestones: tuple[Milestone, ...] = ()
     notes: tuple[Note, ...] = ()
-    errors: tuple[LoadError, ...] = ()
+    relationships: tuple[Relationship, ...] = ()
+    errors: tuple[LoadError, ...] = field(default=())
 
 
 class FileSource(Protocol):
@@ -161,65 +173,84 @@ class WorkingTree:
 def load_store(root: Path, *, source: FileSource | None = None) -> LoadedStore:
     """Walk one store root into a `LoadedStore`, in a stable order.
 
-    `system.yaml` first, then one kind directory at a time in `Design`'s field
+    `design.yaml` first, then one kind directory at a time in `Design`'s field
     order, files within a kind sorted by name — determinism downstream
     (`build` is byte-stable) starts here. A missing kind directory is an empty
     tuple and a bad file a `LoadError`; neither stops the walk.
     """
     src = source if source is not None else WorkingTree()
     errors: list[LoadError] = []
+    edges: list[Relationship] = []
+
+    def walk[R: Record](directory: str) -> tuple[R, ...]:
+        model = cast("type[R]", DIRECTORIES[directory])
+        return _load_kind(root, src, directory, model, errors, edges)
+
     return LoadedStore(
-        system=_load_system(root, src, errors),
-        externals=_load_kind(root, src, "externals", External, errors),
-        requirements=_load_kind(root, src, "requirements", Requirement, errors),
-        non_functionals=_load_kind(root, src, "non_functionals", NonFunctional, errors),
-        stories=_load_kind(root, src, "stories", Story, errors),
-        components=_load_kind(root, src, "components", Component, errors),
-        seams=_load_kind(root, src, "seams", Seam, errors),
-        data=_load_kind(root, src, "data", DataEntity, errors),
-        resources=_load_kind(root, src, "resources", Resource, errors),
-        behaviors=_load_kind(root, src, "behaviors", Behavior, errors),
-        decisions=_load_kind(root, src, "decisions", Decision, errors),
-        rejections=_load_kind(root, src, "rejections", Rejection, errors),
-        questions=_load_kind(root, src, "questions", Question, errors),
-        milestones=_load_kind(root, src, "milestones", Milestone, errors),
-        # Walked last, into the collection the Design never sees: a note file
-        # is store contents like any other, and its parse failures are
-        # findings like any other, but nothing past this layer folds it in.
-        notes=_load_kind(root, src, "notes", Note, errors),
+        header=_load_header(root, src, errors),
+        glossary=walk("glossary"),
+        actors=walk("actors"),
+        goals=walk("goals"),
+        requirements=walk("requirements"),
+        qualities=walk("qualities"),
+        constraints=walk("constraints"),
+        behaviors=walk("behaviors"),
+        components=walk("components"),
+        interfaces=walk("interfaces"),
+        data_entities=walk("data_entities"),
+        resources=walk("resources"),
+        libraries=walk("libraries"),
+        external_services=walk("external_services"),
+        assumptions=walk("assumptions"),
+        decisions=walk("decisions"),
+        questions=walk("questions"),
+        rejections=walk("rejections"),
+        milestones=walk("milestones"),
+        notes=walk("notes"),
+        relationships=tuple(edges),
         errors=tuple(errors),
     )
 
 
-def _load_system(root: Path, source: FileSource, errors: list[LoadError]) -> System | None:
-    path = root / _SYSTEM
+def _load_header(root: Path, source: FileSource, errors: list[LoadError]) -> Design | None:
+    path = root / _DESIGN
     if not source.exists(path):
         errors.append(
-            LoadError(path=_SYSTEM, message=_SYSTEM_MISSING, reason=LoadErrorReason.MISSING_SYSTEM)
+            LoadError(path=_DESIGN, message=_DESIGN_MISSING, reason=LoadErrorReason.MISSING_DESIGN)
         )
         return None
     try:
-        return parse_singleton(source.read_text(path), model=System)
+        return parse_singleton(source.read_text(path), model=Design)
     except (CodecError, OSError) as exc:
-        errors.append(LoadError(path=_SYSTEM, message=str(exc), reason=_reason(exc)))
+        errors.append(LoadError(path=_DESIGN, message=str(exc), reason=_reason(exc)))
         return None
 
 
-def _load_kind[E: Record](
-    root: Path, source: FileSource, directory: str, model: type[E], errors: list[LoadError]
-) -> tuple[E, ...]:
+def _load_kind[R: Record](
+    root: Path,
+    source: FileSource,
+    directory: str,
+    model: type[R],
+    errors: list[LoadError],
+    edges: list[Relationship],
+) -> tuple[R, ...]:
     kind_dir = root / directory
     if not source.exists(kind_dir):
         return ()
-    loaded: list[E] = []
+    loaded: list[R] = []
     for path in source.list_files(kind_dir):
         if path.suffix != ".md":
             continue  # only `<slug>.md` files are elements; a .gitkeep is neither
         source_path = path.relative_to(root).as_posix()
         try:
-            loaded.append(parse_element(source.read_text(path), model=model, source=source_path))
+            record, outgoing = parse_element(
+                source.read_text(path), model=model, source=source_path
+            )
         except (CodecError, OSError) as exc:
             errors.append(LoadError(path=source_path, message=str(exc), reason=_reason(exc)))
+            continue
+        loaded.append(record)
+        edges.extend(outgoing)
     return tuple(loaded)
 
 

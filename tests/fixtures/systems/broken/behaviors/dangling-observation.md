@@ -1,11 +1,15 @@
 ---
 id: behavior:dangling-observation
-title: Observation pointing at nothing
+title: Watches a ghost
 state: specified
-trigger: A file exercises an observation whose at resolves to no element.
+confidence: reviewed
+owner: dana
+trigger: Something happens.
 observations:
 - id: behavior:dangling-observation#obs-1
-  statement: The observation points at a resource the store does not define
+  statement: A row lands in the store.
   at: resource:ghost-store
   outcome: must
 ---
+`integrity/dangling-ref`: the generic ref walk covers an observation's `at`,
+so the finding lands on the behavior that carries it.

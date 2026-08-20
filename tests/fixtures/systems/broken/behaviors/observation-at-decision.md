@@ -1,11 +1,15 @@
 ---
 id: behavior:observation-at-decision
-title: Observation pointing at a decision
+title: Watches a decision
 state: specified
-trigger: A file exercises an observation whose at is the wrong kind.
+confidence: reviewed
+owner: dana
+trigger: Something happens.
 observations:
 - id: behavior:observation-at-decision#obs-1
-  statement: The observation points at a decision, which no observation may do
+  statement: The decision is honoured.
   at: decision:one-way-no-why
   outcome: must
 ---
+`integrity/observation-target`: the ref resolves, but a decision cannot be
+watched. A component, an interface, a resource or another behavior can.

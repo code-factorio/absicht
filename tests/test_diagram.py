@@ -4,11 +4,12 @@ The command contract — exit codes, flags, the files on disk — lives in
 ``tests/test_render_cli.py``. What is pinned here is the picture itself, per
 ``docs/tasks/27-render-diagrams.md``:
 
-- the node set is the one ``ab layout`` positions (components, seams,
-  externals, and — per docs/tasks/60-addendum-render.md — resources, outside
-  the design boundary) and the edges are ``contains``/``consumes``/``provides``,
-  in a deterministic order — the property the CI determinism job cross-checks from
-  a clean checkout is tested here as two runs spelling byte-identical SVG;
+- the node set is the one ``ab layout`` positions (components, interfaces,
+  external services, and — per docs/tasks/60-addendum-render.md — resources,
+  outside the design boundary) and the edges are nesting, who declares an
+  interface, and the design's own ``relationships``, in a deterministic order
+  — the property the CI determinism job cross-checks from a clean checkout is
+  tested here as two runs spelling byte-identical SVG;
 - each format is syntactically plausible for its DSL: SVG parses as XML,
   mermaid starts with a diagram keyword, d2 spells boxes and edges;
 - a store without pinned positions is refused with a pointer at ``ab layout``
@@ -36,7 +37,8 @@ from syrupy.assertion import SnapshotAssertion
 from absicht.diagram import Diagram, build, overlay_colours
 from absicht.layout import LayoutError, compute, write_layout
 from absicht.load import load_store
-from absicht.models import Design, Layout, Position
+from absicht.models.design import Design
+from absicht.models.layout import Layout, Position
 from absicht.render import UnknownRefError
 from absicht.resolve import resolve
 
@@ -45,15 +47,17 @@ CLEAN = FIXTURES / "clean"
 COMPOSITE = FIXTURES / "composite"
 
 CLEAN_NODES = {
+    "component:acme",
     "component:cancellation",
     "component:catalog",
     "component:orders",
-    "seam:order-events",
+    "interface:order-events",
     "resource:order-cache",
+    "resource:order-stream",
 }
-"""Every diagram node in ``clean/``: three components, one seam, one resource.
-No externals, and the prose kinds are not diagram nodes — that boundary is
-itself under test."""
+"""Every diagram node in ``clean/``: four components, one interface, two
+resources. No external services, and the prose kinds are not diagram nodes —
+that boundary is itself under test."""
 
 # The renderers, keyed the way the snapshot parametrization spells the format.
 RENDERERS = {
@@ -81,20 +85,26 @@ def _picture(design: Design, root: Path, *, scope: str | None = None) -> Diagram
 # --- the picture itself ---------------------------------------------------------
 
 
-def test_edges_are_contains_consumes_and_provides_between_diagram_nodes(
+def test_edges_are_nesting_declarations_and_relationships_between_diagram_nodes(
     tmp_path: Path,
 ) -> None:
-    """Components in id order, each field's refs in authored order: the whole
-    edge set of ``clean/`` in the order every renderer spells it."""
+    """The two field-borne links first — nesting, then who declares an
+    interface, each in component and interface id order — then the design's
+    own relationships in the order the store assembled them: the whole edge
+    set of ``clean/`` in the order every renderer spells it."""
     design = _laid_out(CLEAN, tmp_path / "store")
 
     picture = _picture(design, tmp_path / "store")
 
     assert [element.id for element in picture.nodes] == sorted(CLEAN_NODES)
     assert picture.edges == (
-        ("component:cancellation", "consumes", "seam:order-events"),
-        ("component:orders", "contains", "component:catalog"),
-        ("component:orders", "provides", "seam:order-events"),
+        ("component:orders", "contains", "component:cancellation"),
+        ("component:acme", "contains", "component:catalog"),
+        ("component:acme", "contains", "component:orders"),
+        ("component:orders", "declares", "interface:order-events"),
+        ("component:cancellation", "calls", "interface:order-events"),
+        ("component:orders", "depends_on", "resource:order-cache"),
+        ("component:orders", "depends_on", "resource:order-stream"),
     )
     assert {position.ref for position in picture.positions.values()} == CLEAN_NODES
 
@@ -153,26 +163,26 @@ def test_mermaid_starts_with_the_diagram_keyword_and_spells_the_edges(
     text = _picture(design, tmp_path / "store").render_mermaid()
 
     assert text.startswith("graph TD")
-    assert "component_orders -->|contains| component_catalog" in text
-    assert "component_orders -->|provides| seam_order_events" in text
-    assert "component_cancellation -->|consumes| seam_order_events" in text
+    assert "component_acme -->|contains| component_orders" in text
+    assert "component_orders -->|declares| interface_order_events" in text
+    assert "component_cancellation -->|calls| interface_order_events" in text
 
 
 def test_mermaid_with_an_overlay_styles_by_class(tmp_path: Path) -> None:
     """The shared emitter still spells nodes and edges; the overlay adds
     ``classDef``/``class`` lines grouping the nodes by their class."""
-    design = _laid_out(CLEAN, tmp_path / "store")
+    design = _laid_out(COMPOSITE, tmp_path / "store")
 
     text = _picture(design, tmp_path / "store").render_mermaid(overlay_colours("state", design))
 
-    assert "classDef constrained fill:#" in text
+    assert "classDef delegated fill:#" in text
     assert "classDef specified fill:#" in text
-    assert "class component_cancellation constrained" in text
-    # The resource wears the same specified class — an element like any other
-    # under an overlay — in the members' id order.
+    assert "class external_payment_provider delegated" in text
+    # The interface wears the same specified class as the components — an
+    # element like any other under an overlay — in the members' id order.
     assert (
-        "class component_catalog,component_orders,resource_order_cache,seam_order_events specified"
-        in text
+        "class component_acme,component_billing_worker,component_orders_api,"
+        "interface_invoice_events specified" in text
     )
 
 
@@ -183,17 +193,17 @@ def test_d2_spells_boxes_and_edges(tmp_path: Path) -> None:
 
     assert text.startswith("direction: right")
     assert 'component_orders: "Orders" {' in text
-    assert "component_orders -> component_catalog: contains" in text
-    assert "component_cancellation -> seam_order_events: consumes" in text
+    assert "component_acme -> component_orders: contains" in text
+    assert "component_cancellation -> interface_order_events: calls" in text
 
 
 def test_d2_with_an_overlay_styles_by_fill(tmp_path: Path) -> None:
-    design = _laid_out(CLEAN, tmp_path / "store")
+    design = _laid_out(COMPOSITE, tmp_path / "store")
 
     text = _picture(design, tmp_path / "store").render_d2(overlay_colours("state", design))
 
-    assert 'component_cancellation.style.fill: "#eb6834"' in text
-    assert 'component_cancellation.style.font-color: "#0b0b0b"' in text
+    assert 'external_payment_provider.style.fill: "#1baf7a"' in text
+    assert 'external_payment_provider.style.font-color: "#0b0b0b"' in text
 
 
 @pytest.mark.parametrize("fixture", ["clean", "brownfield", "composite"])
@@ -227,10 +237,12 @@ def test_a_missing_position_is_refused_rather_than_autolaid_out(tmp_path: Path) 
     shutil.copytree(CLEAN, store)
     design = resolve(load_store(store))
     full = compute(design)
-    unpinned = Layout(positions=tuple(p for p in full.positions if p.ref != "seam:order-events"))
+    unpinned = Layout(
+        positions=tuple(p for p in full.positions if p.ref != "interface:order-events")
+    )
     write_layout(store, unpinned)
 
-    with pytest.raises(LayoutError, match=r"seam:order-events.*ab layout"):
+    with pytest.raises(LayoutError, match=r"interface:order-events.*ab layout"):
         _picture(design, store)
 
 
@@ -238,39 +250,43 @@ def test_a_missing_position_is_refused_rather_than_autolaid_out(tmp_path: Path) 
 
 
 def test_state_overlay_colours_by_element_state(tmp_path: Path) -> None:
-    """``clean/`` holds a ``constrained`` component next to ``specified``
-    ones: their fills must differ, and the class is spelled on the box."""
-    design = _laid_out(CLEAN, tmp_path / "store")
+    """``composite/`` holds a ``delegated`` external service next to
+    ``specified`` components: their fills must differ, and the class is
+    spelled on the box."""
+    design = _laid_out(COMPOSITE, tmp_path / "store")
 
     colouring = overlay_colours("state", design)
 
-    assert colouring.caption["component:cancellation"] == "constrained"
-    assert colouring.caption["component:orders"] == "specified"
-    assert colouring.fill["component:cancellation"] != colouring.fill["component:orders"]
+    assert colouring.caption["external:payment-provider"] == "delegated"
+    assert colouring.caption["component:orders-api"] == "specified"
+    assert colouring.fill["external:payment-provider"] != colouring.fill["component:orders-api"]
 
 
 def test_milestone_overlay_colours_scope_membership(tmp_path: Path) -> None:
-    """``milestone:m1`` scopes exactly ``component:cancellation``: a member
-    wears the milestone's colour, everything else stays neutral."""
+    """``milestone:m1`` scopes ``component:cancellation`` and
+    ``component:orders``: a member wears the milestone's colour, everything
+    else stays neutral."""
     design = _laid_out(CLEAN, tmp_path / "store")
 
     colouring = overlay_colours("milestone", design)
 
     assert colouring.caption["component:cancellation"] == "milestone:m1"
-    assert colouring.caption["component:orders"] == "in no milestone"
-    assert colouring.fill["component:cancellation"] != colouring.fill["component:orders"]
+    assert colouring.caption["component:catalog"] == "in no milestone"
+    assert colouring.fill["component:cancellation"] != colouring.fill["component:catalog"]
 
 
 def test_coverage_overlay_colours_implemented_elements(tmp_path: Path) -> None:
     """``composite/`` is the fixture with an implementation side: both
-    components carry ``implemented_by``, the seam carries no ``verified_by``."""
+    containers and the interface carry ``implemented_by``, while the external
+    service is somebody else's and is never ours to implement."""
     design = _laid_out(COMPOSITE, tmp_path / "store")
 
     colouring = overlay_colours("coverage", design)
 
     assert colouring.caption["component:billing-worker"] == "covered"
-    assert colouring.caption["seam:invoice-events"] == "not covered"
-    assert colouring.fill["component:billing-worker"] != colouring.fill["seam:invoice-events"]
+    assert colouring.caption["interface:invoice-events"] == "covered"
+    assert colouring.caption["external:payment-provider"] == "not covered"
+    assert colouring.fill["component:billing-worker"] != colouring.fill["external:payment-provider"]
 
 
 def _git(repo: Path, *args: str) -> None:
@@ -284,10 +300,14 @@ def test_churn_overlay_reads_the_enclosing_repository_history(tmp_path: Path) ->
     repo = tmp_path / "repo"
     store = repo / ".absicht"
     (store / "components").mkdir(parents=True)
-    (store / "system.yaml").write_text("id: system:churn\ntitle: Churn\n", encoding="utf-8")
+    (store / "design.yaml").write_text(
+        "format_version: 1\nid: design:churn\ntitle: Churn\nversion: 0.1.0\n", encoding="utf-8"
+    )
 
     def component(slug: str) -> str:
-        return f"---\nid: component:{slug}\ntitle: {slug}\nstate: specified\n---\n"
+        return (
+            f"---\nid: component:{slug}\ntitle: {slug}\nstate: specified\nlevel: container\n---\n"
+        )
 
     stable = store / "components" / "stable.md"
     fresh = store / "components" / "fresh.md"
@@ -337,13 +357,13 @@ def test_an_unknown_overlay_name_is_a_programming_error(tmp_path: Path) -> None:
 
 
 def test_scope_limits_nodes_and_edges_to_the_subtree(tmp_path: Path) -> None:
-    """``component:catalog`` points at nothing: the smallest diagram that is
-    still a diagram — one box, no arrows."""
+    """``resource:order-cache`` points at nothing: the smallest diagram that
+    is still a diagram — one box, no arrows."""
     design = _laid_out(CLEAN, tmp_path / "store")
 
-    picture = _picture(design, tmp_path / "store", scope="component:catalog")
+    picture = _picture(design, tmp_path / "store", scope="resource:order-cache")
 
-    assert [element.id for element in picture.nodes] == ["component:catalog"]
+    assert [element.id for element in picture.nodes] == ["resource:order-cache"]
     assert picture.edges == ()
 
 
@@ -353,12 +373,12 @@ def test_scope_does_not_demand_positions_for_out_of_scope_nodes(tmp_path: Path) 
     design = resolve(load_store(store))
     write_layout(
         store,
-        Layout(positions=(Position(ref="component:catalog", x=0.0, y=0.0),)),
+        Layout(positions=(Position(ref="resource:order-cache", x=0.0, y=0.0),)),
     )
 
-    picture = _picture(design, store, scope="component:catalog")
+    picture = _picture(design, store, scope="resource:order-cache")
 
-    assert picture.positions["component:catalog"].x == 0.0
+    assert picture.positions["resource:order-cache"].x == 0.0
 
 
 def test_an_unknown_scope_ref_raises_rather_than_scoping_everything(

@@ -3,9 +3,10 @@ id: question:evidence-for-stable
 title: What evidence promotes an element to stable?
 state: unknown
 owner: vfeenstr
+question: What counts as verification for a design element rather than for code?
 method: ask
-due_on: 2026-08-01
+blocks:
+- req:model-elements
 ---
-
 Confidence has assumed, reviewed and verified, but nothing pins what counts
 as verification for a design element rather than for code.

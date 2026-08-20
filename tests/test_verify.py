@@ -29,7 +29,8 @@ satisfy and must-not-break sets has something referencing it. The three
 outcomes the addendum's §9 table names are pinned per observation —
 ``checked`` with evidence, ``no_check`` as the finding, ``advisory`` for a
 ``should``, reported in the summary and never in the exit code — and every
-observation lands in the run store beside the criteria.
+observation lands in the run store. A ``done_when`` entry is an observation id
+now, so it rides in that same walk rather than a criterion row of its own.
 """
 
 from __future__ import annotations
@@ -49,31 +50,27 @@ from typer.testing import CliRunner
 
 from absicht import runstore, verify
 from absicht.cli import app
-from absicht.cli._common import DEFAULT_PACKET_DIR, ExitCode
+from absicht.cli._common import DEFAULT_PACKET_DIR, STORE_ENVVAR, ExitCode
 from absicht.findings import RULES, Finding, Severity, finding
-from absicht.gherkin import scenario_digest
+from absicht.gherkin import observations_digest
 from absicht.git import current_rev
-from absicht.models import (
-    SCHEMA_VERSION,
+from absicht.models.design import (
+    FORMAT_VERSION,
     Behavior,
     Component,
-    Criterion,
+    ComponentLevel,
     Decision,
-    DecisionStatus,
     Element,
-    Fidelity,
+    Interface,
+    InterfaceStyle,
     Observation,
     Outcome,
-    Packet,
-    PacketElement,
-    PacketLock,
     Resource,
     ResourceKind,
-    Seam,
-    SeamStyle,
     State,
     Timing,
 )
+from absicht.models.packet import Fidelity, Packet, PacketElement, PacketLock
 from absicht.runstore import RunResult
 
 runner = CliRunner()
@@ -82,8 +79,17 @@ CLEAN = FIXTURES / "clean"
 
 # Hand-built stand-ins for a sealed pair: the plumbing under test needs the
 # models' shapes, not a real seal.
-_PACKET = Packet(milestone="milestone:m1")
-_LOCK = PacketLock(design_rev="0" * 40, scenarios_digest="deadbeef")
+_PACKET = Packet(milestone="milestone:m1", design="design:acme")
+_LOCK = PacketLock(design_rev="0" * 40, observations_digest="deadbeef")
+
+# `clean/`'s one in-scope behavior carries a `should` observation, so every run
+# over the sealed clean packet ends with the advisory summary — and the store
+# itself, handed to --repo as a stand-in, names every observation id in its own
+# behavior file, which is what checks that `should`.
+_CLEAN_ADVISORY = [
+    "advisory behavior:order-cancelled#obs-3 (should, eventual): "
+    "checked by behaviors/order-cancelled.md"
+]
 
 
 def _git(repo: Path, *args: str, env: dict[str, str] | None = None) -> str:
@@ -148,6 +154,18 @@ def _seal(tmp_path: Path, *flags: str, out: Path | None = None) -> tuple[Path, P
     built = runner.invoke(app, argv)
     assert built.exit_code == ExitCode.OK
     return store, out if out is not None else DEFAULT_PACKET_DIR / "m1"
+
+
+@pytest.fixture(autouse=True)
+def _ambient_store(
+    tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Where a run with no ``--store`` records: a directory the test session
+    owns, never the repository absicht is run from. Verification is offline and
+    reaches for a store only to leave history, so an unnamed one must not be
+    the developer's own — a test that wrote there would be reading a machine
+    instead of a fixture."""
+    monkeypatch.setenv(STORE_ENVVAR, str(tmp_path_factory.mktemp("ambient")))
 
 
 @pytest.fixture
@@ -215,10 +233,16 @@ def test_load_sealed_packet_round_trips_a_cli_sealed_packet(sealed: tuple[Path, 
     body = lock_path.parent / "packet.json"
     assert packet == Packet.model_validate_json(body.read_text(encoding="utf-8"))
     assert packet.milestone == "milestone:m1"
+    # The digest is not a packet field: it is over the .feature files sealed
+    # beside it, so re-hashing those is what a round trip has to agree with.
+    rendered = {
+        path.name: path.read_text(encoding="utf-8")
+        for path in sorted((lock_path.parent / "features").iterdir())
+    }
     assert lock == PacketLock(
-        schema_version=SCHEMA_VERSION,
+        format_version=FORMAT_VERSION,
         design_rev=current_rev(repo),
-        scenarios_digest=packet.scenarios_digest,
+        observations_digest=observations_digest(rendered),
     )
 
 
@@ -305,12 +329,15 @@ def test_a_diff_base_that_does_not_resolve_is_a_usage_error(tmp_path: Path) -> N
 # ----------------------------------------------------------------- the command
 
 
-def test_an_empty_report_is_an_empty_pass(sealed: tuple[Path, Path], tmp_path: Path) -> None:
+def test_an_empty_report_is_an_empty_pass(tmp_path: Path) -> None:
     """A run with nothing to say still has to answer OK, stay silent on stdout
     in text — the pass signal a human greps for — and honour --report even for
     an empty rendering. One rule selected, one that has nothing to say over the
     empty diff: the rules are real now, so the emptiness has to be earned."""
-    repo, lock = sealed
+    repo = _repo(tmp_path, "code", {"app.py": "one\n"})
+    lock = _seal_pair(
+        tmp_path, Packet(milestone="milestone:m", design="design:acme"), scenarios=None
+    )
     written = tmp_path / "reported.txt"
 
     plain = _verify(lock, repo, "--rule", "verify/scope", "--report", str(written))
@@ -322,7 +349,7 @@ def test_an_empty_report_is_an_empty_pass(sealed: tuple[Path, Path], tmp_path: P
     # The observation summary rides in every verify envelope, empty or not:
     # an additive field, so the machine shape is stable run to run.
     assert json.loads(as_json.stdout) == {
-        "schema_version": SCHEMA_VERSION,
+        "format_version": FORMAT_VERSION,
         "findings": [],
         "summary": {"unchecked_should": 0, "advisories": []},
     }
@@ -341,9 +368,10 @@ def test_rule_and_exclude_rule_select_which_rules_run(
     assert both.exit_code == ExitCode.FINDINGS  # fake/one is an error
     assert "error fake/one: one fired" in both.stdout
     assert "warn fake/two: two fired" in both.stdout
-    # A warning alone passes; --strict is what promotes it.
+    # A warning alone passes; --strict is what promotes it. The advisory
+    # summary is not a rule's output, so no --rule selection can suppress it.
     assert only_warn.exit_code == ExitCode.OK
-    assert only_warn.stdout == "warn fake/two: two fired\n"
+    assert only_warn.stdout.splitlines() == ["warn fake/two: two fired", *_CLEAN_ADVISORY]
     assert without_error.exit_code == ExitCode.OK
     assert "fake/one" not in without_error.stdout
     assert "fake/two" in without_error.stdout
@@ -397,7 +425,7 @@ def test_sarif_flows_through_the_same_pipeline(sealed: tuple[Path, Path], fake_r
 def test_the_default_packet_is_discovered_from_the_build_dir(tmp_path: Path) -> None:
     """Discovery is what this pins, so the run narrows to one rule with nothing
     to say over the empty diff — the store is not an implementing repo and the
-    criteria rules would rightly complain about it."""
+    observation rules would rightly complain about it."""
     with _cwd(tmp_path / "cwd") as cwd:
         store, out = _seal(tmp_path, "--format", "json")
 
@@ -406,7 +434,7 @@ def test_the_default_packet_is_discovered_from_the_build_dir(tmp_path: Path) -> 
         )
 
     assert result.exit_code == ExitCode.OK
-    assert result.stdout == ""
+    assert result.stdout.splitlines() == _CLEAN_ADVISORY
     assert (cwd / out / "packet.lock").is_file()
 
 
@@ -447,29 +475,33 @@ _CORE = Component(
     id="component:core",
     title="Core",
     state=State.SPECIFIED,
+    level=ComponentLevel.COMPONENT,
     implemented_by=("code#src/core",),
 )
 _RISKY = Component(
     id="component:risky",
     title="Risky",
     state=State.UNKNOWN,
+    level=ComponentLevel.COMPONENT,
     implemented_by=("code#src/risky",),
 )
-_CRITERION = Criterion(id="story:thing#ac-1", when="the thing runs", then=("it works",))
+_DONE_WHEN = "behavior:thing#obs-1"
+"""What a milestone's done_when names now: an observation id, not a criterion
+record of its own."""
 
 _CLEAN_STEPS = '''"""Step definitions for milestone:m1's scenarios."""
 
-# story:cancel-order#ac-1
-def test_cancel_refundable():
-    assert cancelled and refund_started
+# behavior:order-cancelled#obs-1
+def test_order_reads_cancelled():
+    assert cancelled
 
-# story:cancel-order#ac-2
-def test_refuse_shipped():
-    assert refused
+# behavior:order-cancelled#obs-2
+def test_nothing_for_the_order_remains_in_the_cache():
+    assert not cached
 
-# story:cancel-order#ac-3
-def test_cancellation_only_consumes_order_events():
-    assert consumes == ("seam:order-events",)
+# behavior:order-cancelled#obs-3
+def test_the_event_carries_the_reason():
+    assert reason
 '''
 
 
@@ -485,7 +517,7 @@ def _seal_pair(tmp_path: Path, packet: Packet, *, scenarios: dict[str, str] | No
     out = tmp_path / "packet"
     out.mkdir()
     (out / "packet.json").write_text(packet.model_dump_json(indent=2) + "\n", encoding="utf-8")
-    lock = PacketLock(design_rev="0" * 40, scenarios_digest=scenario_digest(scenarios or {}))
+    lock = PacketLock(design_rev="0" * 40, observations_digest=observations_digest(scenarios or {}))
     (out / "packet.lock").write_text(lock.model_dump_json(indent=2) + "\n", encoding="utf-8")
     return out / "packet.lock"
 
@@ -530,7 +562,7 @@ def test_the_eight_rules_are_registered_with_explanations() -> None:
         "verify/scope",
         "verify/out-of-scope",
         "verify/unknown-basis",
-        "verify/contract-tests",
+        "verify/interface-code",
         "verify/done-when",
         "verify/scenarios-unmodified",
         "verify/step-assertions",
@@ -545,7 +577,7 @@ def test_the_eight_rules_are_registered_with_explanations() -> None:
 def test_a_changed_file_outside_every_in_scope_component_is_a_finding(
     tmp_path: Path,
 ) -> None:
-    packet = Packet(milestone="milestone:m", elements=(_full(_CORE),))
+    packet = Packet(milestone="milestone:m", design="design:acme", elements=(_full(_CORE),))
     repo = _diff_repo(tmp_path, "code", {"src/core/api.py": "one\n"}, {"README.md": "words\n"})
 
     findings = _rule(
@@ -569,9 +601,10 @@ def test_an_implementation_in_another_repo_does_not_cover_a_changed_file(
         id="component:core",
         title="Core",
         state=State.SPECIFIED,
+        level=ComponentLevel.COMPONENT,
         implemented_by=("acme/core#src/core",),
     )
-    packet = Packet(milestone="milestone:m", elements=(_full(acme),))
+    packet = Packet(milestone="milestone:m", design="design:acme", elements=(_full(acme),))
     core = _diff_repo(
         tmp_path, "acme/core", {"src/core/api.py": "one\n"}, {"src/core/api.py": "two\n"}
     )
@@ -591,9 +624,13 @@ def test_a_bare_implementation_path_applies_to_every_repo(tmp_path: Path) -> Non
     """``implemented_by`` with no ``#`` names no repo: the single-repo
     spelling, where ``src/core`` is already unambiguous."""
     bare = Component(
-        id="component:core", title="Core", state=State.SPECIFIED, implemented_by=("src/core",)
+        id="component:core",
+        title="Core",
+        state=State.SPECIFIED,
+        level=ComponentLevel.COMPONENT,
+        implemented_by=("src/core",),
     )
-    packet = Packet(milestone="milestone:m", elements=(_full(bare),))
+    packet = Packet(milestone="milestone:m", design="design:acme", elements=(_full(bare),))
     repo = _diff_repo(
         tmp_path,
         "code",
@@ -619,9 +656,12 @@ def test_building_an_out_of_scope_component_is_a_finding(tmp_path: Path) -> None
         id="component:frozen",
         title="Frozen",
         state=State.OUT_OF_SCOPE,
+        level=ComponentLevel.COMPONENT,
         implemented_by=("code#src/frozen",),
     )
-    packet = Packet(milestone="milestone:m", elements=(_full(_CORE), _full(frozen)))
+    packet = Packet(
+        milestone="milestone:m", design="design:acme", elements=(_full(_CORE), _full(frozen))
+    )
     repo = _diff_repo(
         tmp_path,
         "code",
@@ -645,9 +685,12 @@ def test_a_change_under_the_in_scope_component_leaves_the_frozen_one_alone(
         id="component:frozen",
         title="Frozen",
         state=State.OUT_OF_SCOPE,
+        level=ComponentLevel.COMPONENT,
         implemented_by=("code#src/frozen",),
     )
-    packet = Packet(milestone="milestone:m", elements=(_full(_CORE), _full(frozen)))
+    packet = Packet(
+        milestone="milestone:m", design="design:acme", elements=(_full(_CORE), _full(frozen))
+    )
     repo = _diff_repo(tmp_path, "code", {"src/core/api.py": "one\n"}, {"src/core/api.py": "two\n"})
 
     result = verify.run_rules(_context_for(tmp_path, packet, repos=(repo,), diff_base="HEAD~1"))
@@ -659,7 +702,7 @@ def test_a_change_under_the_in_scope_component_leaves_the_frozen_one_alone(
 
 
 def test_building_on_an_unknown_component_is_a_finding(tmp_path: Path) -> None:
-    packet = Packet(milestone="milestone:m", elements=(_full(_RISKY),))
+    packet = Packet(milestone="milestone:m", design="design:acme", elements=(_full(_RISKY),))
     repo = _diff_repo(tmp_path, "code", {"src/risky/a.py": "one\n"}, {"src/risky/a.py": "two\n"})
 
     findings = _rule(
@@ -675,11 +718,13 @@ def test_a_decision_must_hold_names_covers_the_unknown(tmp_path: Path) -> None:
     answer = Decision(
         id="decision:answer",
         title="Recorded answer",
-        status=DecisionStatus.ACCEPTED,
+        state=State.SPECIFIED,
+        choice="Risky stays as it is, and we live with it.",
         applies_to=("component:risky",),
     )
     packet = Packet(
         milestone="milestone:m",
+        design="design:acme",
         elements=(_full(_RISKY), _full(answer)),
         must_hold=("decision:answer",),
     )
@@ -699,10 +744,13 @@ def test_a_decision_only_carried_is_not_coverage(tmp_path: Path) -> None:
     answer = Decision(
         id="decision:answer",
         title="Recorded answer",
-        status=DecisionStatus.ACCEPTED,
+        state=State.SPECIFIED,
+        choice="Risky stays as it is, and we live with it.",
         applies_to=("component:risky",),
     )
-    packet = Packet(milestone="milestone:m", elements=(_full(_RISKY), _full(answer)))
+    packet = Packet(
+        milestone="milestone:m", design="design:acme", elements=(_full(_RISKY), _full(answer))
+    )
     repo = _diff_repo(tmp_path, "code", {"src/risky/a.py": "one\n"}, {"src/risky/a.py": "two\n"})
 
     findings = _rule(
@@ -712,73 +760,85 @@ def test_a_decision_only_carried_is_not_coverage(tmp_path: Path) -> None:
     assert [f.ref for f in findings] == ["component:risky"]
 
 
-# ------------------------------------------------------ verify/contract-tests
+# ------------------------------------------------------ verify/interface-code
 
 
-def test_a_seam_in_scope_that_names_no_contract_test_is_a_finding(tmp_path: Path) -> None:
+def test_an_interface_in_scope_that_names_no_implementation_is_a_finding(tmp_path: Path) -> None:
     packet = Packet(
         milestone="milestone:m",
-        elements=(_full(Seam(id="seam:sync", title="Sync", style=SeamStyle.CALL)),),
+        design="design:acme",
+        elements=(_full(Interface(id="interface:sync", title="Sync", style=InterfaceStyle.CALL)),),
     )
     repo = _repo(tmp_path, "code", {"src/core/api.py": "one\n"})
 
-    findings = _rule(_context_for(tmp_path, packet, repos=(repo,)), "verify/contract-tests")
+    findings = _rule(_context_for(tmp_path, packet, repos=(repo,)), "verify/interface-code")
 
-    assert [f.ref for f in findings] == ["seam:sync"]
-    assert "verified_by" in findings[0].message
+    assert [f.ref for f in findings] == ["interface:sync"]
+    assert "implemented_by" in findings[0].message
     assert findings[0].severity is Severity.ERROR
 
 
 def test_a_named_contract_test_no_repo_holds_is_a_finding(tmp_path: Path) -> None:
-    seam = Seam(
-        id="seam:sync", title="Sync", style=SeamStyle.CALL, verified_by=("tests/test_sync.py",)
+    interface = Interface(
+        id="interface:sync",
+        title="Sync",
+        style=InterfaceStyle.CALL,
+        implemented_by=("tests/test_sync.py",),
     )
-    packet = Packet(milestone="milestone:m", elements=(_full(seam),))
+    packet = Packet(milestone="milestone:m", design="design:acme", elements=(_full(interface),))
     repo = _repo(tmp_path, "code", {"src/core/api.py": "one\n"})
 
-    findings = _rule(_context_for(tmp_path, packet, repos=(repo,)), "verify/contract-tests")
+    findings = _rule(_context_for(tmp_path, packet, repos=(repo,)), "verify/interface-code")
 
-    assert [f.ref for f in findings] == ["seam:sync"]
+    assert [f.ref for f in findings] == ["interface:sync"]
     assert "tests/test_sync.py" in findings[0].message
 
 
 def test_a_named_file_that_is_not_a_test_is_a_finding(tmp_path: Path) -> None:
-    seam = Seam(
-        id="seam:sync", title="Sync", style=SeamStyle.CALL, verified_by=("tests/test_sync.py",)
+    interface = Interface(
+        id="interface:sync",
+        title="Sync",
+        style=InterfaceStyle.CALL,
+        implemented_by=("tests/test_sync.py",),
     )
-    packet = Packet(milestone="milestone:m", elements=(_full(seam),))
+    packet = Packet(milestone="milestone:m", design="design:acme", elements=(_full(interface),))
     repo = _repo(tmp_path, "code", {"tests/test_sync.py": "# TODO\n"})
 
-    findings = _rule(_context_for(tmp_path, packet, repos=(repo,)), "verify/contract-tests")
+    findings = _rule(_context_for(tmp_path, packet, repos=(repo,)), "verify/interface-code")
 
-    assert [f.ref for f in findings] == ["seam:sync"]
+    assert [f.ref for f in findings] == ["interface:sync"]
     assert "nothing that looks like a test" in findings[0].message
 
 
 def test_an_existing_test_shaped_contract_test_is_quiet(tmp_path: Path) -> None:
-    seam = Seam(
-        id="seam:sync", title="Sync", style=SeamStyle.CALL, verified_by=("tests/test_sync.py",)
+    interface = Interface(
+        id="interface:sync",
+        title="Sync",
+        style=InterfaceStyle.CALL,
+        implemented_by=("tests/test_sync.py",),
     )
-    packet = Packet(milestone="milestone:m", elements=(_full(seam),))
+    packet = Packet(milestone="milestone:m", design="design:acme", elements=(_full(interface),))
     repo = _repo(tmp_path, "code", {"tests/test_sync.py": "def test_sync():\n    assert True\n"})
 
-    findings = _rule(_context_for(tmp_path, packet, repos=(repo,)), "verify/contract-tests")
+    findings = _rule(_context_for(tmp_path, packet, repos=(repo,)), "verify/interface-code")
 
     assert findings == ()
 
 
-def test_a_seam_behind_the_seam_is_not_the_change_to_judge(tmp_path: Path) -> None:
+def test_an_interface_behind_the_seam_is_not_the_change_to_judge(tmp_path: Path) -> None:
     """A contract-fidelity neighbour is the ring around the work, not the work:
-    the rule judges seams the packet carries at full fidelity only."""
+    the rule judges interfaces the packet carries at full fidelity only."""
     neighbour = PacketElement(
-        ref="seam:sync",
+        ref="interface:sync",
         fidelity=Fidelity.CONTRACT,
-        element=Seam(id="seam:sync", title="Sync", style=SeamStyle.CALL).model_dump(mode="json"),
+        element=Interface(id="interface:sync", title="Sync", style=InterfaceStyle.CALL).model_dump(
+            mode="json"
+        ),
     )
-    packet = Packet(milestone="milestone:m", elements=(neighbour,))
+    packet = Packet(milestone="milestone:m", design="design:acme", elements=(neighbour,))
     repo = _repo(tmp_path, "code", {"src/core/api.py": "one\n"})
 
-    findings = _rule(_context_for(tmp_path, packet, repos=(repo,)), "verify/contract-tests")
+    findings = _rule(_context_for(tmp_path, packet, repos=(repo,)), "verify/interface-code")
 
     assert findings == ()
 
@@ -786,28 +846,38 @@ def test_a_seam_behind_the_seam_is_not_the_change_to_judge(tmp_path: Path) -> No
 # ----------------------------------------------------------- verify/done-when
 
 
-def test_a_criterion_nothing_references_is_a_finding(tmp_path: Path) -> None:
-    """The ``.feature`` file names the criterion in its own Scenario header and
+def test_a_done_when_observation_nothing_references_is_a_finding(tmp_path: Path) -> None:
+    """The ``.feature`` file names the observation in its own Scenario header and
     still does not count: scenarios are generated, step definitions are what
     somebody writes."""
-    scenarios = {"thing.feature": "Feature: Thing\n\n  Scenario: story:thing#ac-1\n"}
-    packet = Packet(milestone="milestone:m", elements=(_full(_CORE),), criteria=(_CRITERION,))
+    scenarios = {"thing.feature": f"Feature: Thing\n\n  Scenario: {_DONE_WHEN}\n"}
+    packet = Packet(
+        milestone="milestone:m",
+        design="design:acme",
+        elements=(_full(_CORE),),
+        done_when=(_DONE_WHEN,),
+    )
     repo = _repo(tmp_path, "code", dict(scenarios))
 
     findings = _rule(
         _context_for(tmp_path, packet, repos=(repo,), scenarios=scenarios), "verify/done-when"
     )
 
-    assert [f.ref for f in findings] == ["story:thing"]
-    assert "story:thing#ac-1" in findings[0].message
+    assert [f.ref for f in findings] == ["behavior:thing"]
+    assert _DONE_WHEN in findings[0].message
     assert findings[0].severity is Severity.ERROR
 
 
-def test_a_criterion_a_step_file_references_is_verified(tmp_path: Path) -> None:
+def test_a_done_when_observation_a_step_file_references_is_verified(tmp_path: Path) -> None:
     scenarios = {"thing.feature": "Feature: Thing\n"}
-    packet = Packet(milestone="milestone:m", elements=(_full(_CORE),), criteria=(_CRITERION,))
+    packet = Packet(
+        milestone="milestone:m",
+        design="design:acme",
+        elements=(_full(_CORE),),
+        done_when=(_DONE_WHEN,),
+    )
     repo = _repo(
-        tmp_path, "code", dict(scenarios) | {"steps/steps.py": 'IDS = ("story:thing#ac-1",)\n'}
+        tmp_path, "code", dict(scenarios) | {"steps/steps.py": f'IDS = ("{_DONE_WHEN}",)\n'}
     )
 
     findings = _rule(
@@ -824,7 +894,12 @@ def test_scenario_files_matching_the_sealed_digest_are_not_a_finding(
     tmp_path: Path,
 ) -> None:
     scenarios = {"thing.feature": "Feature: Thing\n"}
-    packet = Packet(milestone="milestone:m", elements=(_full(_CORE),), criteria=(_CRITERION,))
+    packet = Packet(
+        milestone="milestone:m",
+        design="design:acme",
+        elements=(_full(_CORE),),
+        done_when=(_DONE_WHEN,),
+    )
     repo = _repo(tmp_path, "code", dict(scenarios))
 
     findings = _rule(
@@ -837,7 +912,12 @@ def test_scenario_files_matching_the_sealed_digest_are_not_a_finding(
 
 def test_modified_scenario_files_are_a_finding(tmp_path: Path) -> None:
     scenarios = {"thing.feature": "Feature: Thing\n"}
-    packet = Packet(milestone="milestone:m", elements=(_full(_CORE),), criteria=(_CRITERION,))
+    packet = Packet(
+        milestone="milestone:m",
+        design="design:acme",
+        elements=(_full(_CORE),),
+        done_when=(_DONE_WHEN,),
+    )
     repo = _repo(tmp_path, "code", {"thing.feature": "Feature: Thing, edited\n"})
 
     findings = _rule(
@@ -847,8 +927,8 @@ def test_modified_scenario_files_are_a_finding(tmp_path: Path) -> None:
 
     assert [f.rule_id for f in findings] == ["verify/scenarios-unmodified"]
     # The message carries both digests, so a human can tell which side moved.
-    assert scenario_digest({"thing.feature": "Feature: Thing, edited\n"}) in findings[0].message
-    assert scenario_digest(scenarios) in findings[0].message
+    assert observations_digest({"thing.feature": "Feature: Thing, edited\n"}) in findings[0].message
+    assert observations_digest(scenarios) in findings[0].message
     assert findings[0].severity is Severity.ERROR
 
 
@@ -856,8 +936,13 @@ def test_modified_scenario_files_are_a_finding(tmp_path: Path) -> None:
 
 
 def test_a_step_file_without_assertions_is_a_finding(tmp_path: Path) -> None:
-    packet = Packet(milestone="milestone:m", elements=(_full(_CORE),), criteria=(_CRITERION,))
-    repo = _repo(tmp_path, "code", {"steps/steps.py": 'IDS = ("story:thing#ac-1",)\n'})
+    packet = Packet(
+        milestone="milestone:m",
+        design="design:acme",
+        elements=(_full(_CORE),),
+        done_when=(_DONE_WHEN,),
+    )
+    repo = _repo(tmp_path, "code", {"steps/steps.py": f'IDS = ("{_DONE_WHEN}",)\n'})
 
     findings = _rule(_context_for(tmp_path, packet, repos=(repo,)), "verify/step-assertions")
 
@@ -866,8 +951,13 @@ def test_a_step_file_without_assertions_is_a_finding(tmp_path: Path) -> None:
 
 
 def test_a_step_file_with_assertions_is_not_a_finding(tmp_path: Path) -> None:
-    packet = Packet(milestone="milestone:m", elements=(_full(_CORE),), criteria=(_CRITERION,))
-    steps = 'IDS = ("story:thing#ac-1",)\n\n\ndef check():\n    assert IDS\n'
+    packet = Packet(
+        milestone="milestone:m",
+        design="design:acme",
+        elements=(_full(_CORE),),
+        done_when=(_DONE_WHEN,),
+    )
+    steps = f'IDS = ("{_DONE_WHEN}",)\n\n\ndef check():\n    assert IDS\n'
     repo = _repo(tmp_path, "code", {"steps/steps.py": steps})
 
     findings = _rule(_context_for(tmp_path, packet, repos=(repo,)), "verify/step-assertions")
@@ -919,10 +1009,14 @@ _SESSION = Behavior(
 )
 
 _SATISFY = Packet(
-    milestone="milestone:m", elements=(_full(_SESSION),), satisfy=("behavior:new-session",)
+    milestone="milestone:m",
+    design="design:acme",
+    elements=(_full(_SESSION),),
+    satisfy=("behavior:new-session",),
 )
 _GUARDED = Packet(
     milestone="milestone:m",
+    design="design:acme",
     elements=(_full(_SESSION),),
     must_not_break=("behavior:new-session",),
 )
@@ -981,6 +1075,7 @@ def test_a_composed_behavior_is_context_not_a_rule_input(tmp_path: Path) -> None
     )
     packet = Packet(
         milestone="milestone:m",
+        design="design:acme",
         elements=(_full(_SESSION), _full(composed)),
         satisfy=("behavior:new-session",),
     )
@@ -997,7 +1092,7 @@ def test_a_satisfy_ref_the_packet_does_not_carry_is_skipped(tmp_path: Path) -> N
     not carry: there are no observations to verify, and the gap is ``ab
     check``'s dangling-ref finding — not a reason for verification to crash
     or to invent results."""
-    packet = Packet(milestone="milestone:m", satisfy=("behavior:elsewhere",))
+    packet = Packet(milestone="milestone:m", design="design:acme", satisfy=("behavior:elsewhere",))
     repo = _repo(tmp_path, "code", {"app.py": "one\n"})
 
     results = verify.observation_results(_context_for(tmp_path, packet, repos=(repo,)))
@@ -1131,6 +1226,7 @@ def test_effective_timing_comes_sealed_then_from_the_carried_resources(tmp_path:
     carried["observations"][2]["effective_timing"] = "eventual"  # what a real seal writes
     packet = Packet(
         milestone="milestone:m",
+        design="design:acme",
         elements=(
             PacketElement(ref="behavior:new-session", fidelity=Fidelity.FULL, element=carried),
             _full(stream),
@@ -1149,15 +1245,17 @@ def test_effective_timing_comes_sealed_then_from_the_carried_resources(tmp_path:
     ]
 
 
-def test_the_run_records_one_row_per_observation_and_criterion(tmp_path: Path) -> None:
-    """§8's second tuple over the observations too: one row per observation
-    beside the done_when criteria's, ``advisory`` for a ``should`` with its
-    evidence when one exists."""
+def test_the_run_records_one_row_per_observation(tmp_path: Path) -> None:
+    """§8's second tuple over the observations: one row per observation of the
+    packet's behavior sets, ``advisory`` for a ``should`` with its evidence
+    when one exists. A ``done_when`` id is one of those observations now, so it
+    rides in the same row rather than a criterion row beside it."""
     packet = Packet(
         milestone="milestone:m",
+        design="design:acme",
         elements=(_full(_SESSION),),
         satisfy=("behavior:new-session",),
-        criteria=(_CRITERION,),
+        done_when=("behavior:new-session#obs-1",),
     )
     repo = _repo(
         tmp_path,
@@ -1188,18 +1286,17 @@ def test_the_run_records_one_row_per_observation_and_criterion(tmp_path: Path) -
         ],
     )
 
-    assert result.exit_code == ExitCode.FINDINGS  # obs-2, obs-4 and the criterion are unguarded
+    assert result.exit_code == ExitCode.FINDINGS  # obs-2 and obs-4 are unguarded
     (run,) = runstore.runs_for(store, runstore.packet_id(brief.milestone, lock.design_rev))
     assert run.results == (
-        RunResult(criterion="story:thing#ac-1", result="no_check", evidence_ref=None),
         RunResult(
-            criterion="behavior:new-session#obs-1",
+            observation="behavior:new-session#obs-1",
             result="checked",
             evidence_ref="tests/test_session.py",
         ),
-        RunResult(criterion="behavior:new-session#obs-2", result="no_check", evidence_ref=None),
-        RunResult(criterion="behavior:new-session#obs-3", result="advisory", evidence_ref=None),
-        RunResult(criterion="behavior:new-session#obs-4", result="no_check", evidence_ref=None),
+        RunResult(observation="behavior:new-session#obs-2", result="no_check", evidence_ref=None),
+        RunResult(observation="behavior:new-session#obs-3", result="advisory", evidence_ref=None),
+        RunResult(observation="behavior:new-session#obs-4", result="no_check", evidence_ref=None),
     )
 
 
@@ -1208,16 +1305,17 @@ def test_the_run_records_one_row_per_observation_and_criterion(tmp_path: Path) -
 
 def test_a_clean_reconciliation_against_the_clean_fixture_passes(tmp_path: Path) -> None:
     """The spec's end-to-end: a packet sealed for real from ``clean/``'s
-    milestone, and a repo built to satisfy every rule at once — the report is
-    empty and the exit is OK."""
+    milestone, and a repo built to satisfy every rule at once — no rule has
+    anything to say and the exit is OK. The slice's one ``should`` observation
+    still reports as an advisory: that is visibility, never a finding."""
     _, out = _seal(tmp_path, "--format", "json", out=tmp_path / "packet")
-    feature = (out / "features" / "cancel-order.feature").read_text(encoding="utf-8")
+    feature = (out / "features" / "order-cancelled.feature").read_text(encoding="utf-8")
     # The seal must actually have digested this file, or rule 6 would be
     # passing vacuously: pin the fixture before trusting the verdict.
     lock = PacketLock.model_validate_json((out / "packet.lock").read_text(encoding="utf-8"))
-    assert lock.scenarios_digest == scenario_digest({"cancel-order.feature": feature})
+    assert lock.observations_digest == observations_digest({"order-cancelled.feature": feature})
     repo = _repo(
-        tmp_path, "code", {"cancel-order.feature": feature, "steps/test_steps.py": _CLEAN_STEPS}
+        tmp_path, "code", {"order-cancelled.feature": feature, "steps/test_steps.py": _CLEAN_STEPS}
     )
 
     result = runner.invoke(
@@ -1234,7 +1332,9 @@ def test_a_clean_reconciliation_against_the_clean_fixture_passes(tmp_path: Path)
     )
 
     assert result.exit_code == ExitCode.OK
-    assert result.stdout == ""
+    assert result.stdout.splitlines() == [
+        "advisory behavior:order-cancelled#obs-3 (should, eventual): checked by steps/test_steps.py"
+    ]
 
 
 # ------------------------------------------------------------------ the run store
@@ -1245,18 +1345,22 @@ def test_the_run_is_recorded_beside_the_design_store(
 ) -> None:
     """``docs/tasks/58-run-store.md``: every verification run lands in the
     design store's ``build/runs.db`` — the packet id the issuance digest
-    spells, the verified repo's HEAD, one row per criterion: ``checked`` with
+    spells, the verified repo's HEAD, one row per observation: ``checked`` with
     the referencing file as evidence, ``no_check`` without one. Recorded
     whatever the verdict; a run with findings is still a run."""
     store, lock_path = sealed
     packet, lock = verify.load_sealed_packet(lock_path)
-    feature = (lock_path.parent / "features" / "cancel-order.feature").read_text(encoding="utf-8")
+    feature = (lock_path.parent / "features" / "order-cancelled.feature").read_text(
+        encoding="utf-8"
+    )
     repo = _repo(
         tmp_path,
         "impl",
         {
-            "cancel-order.feature": feature,
-            "tests/test_cancel.py": "def test_cancel():\n    assert True  # story:cancel-order#ac-1\n",
+            "order-cancelled.feature": feature,
+            "tests/test_cancel.py": (
+                "def test_cancel():\n    assert True  # behavior:order-cancelled#obs-1\n"
+            ),
         },
     )
 
@@ -1275,19 +1379,23 @@ def test_the_run_is_recorded_beside_the_design_store(
         ],
     )
 
-    # ac-2 and ac-3 have nothing referencing them: the run has findings, and
-    # is recorded anyway.
+    # obs-2 has nothing referencing it: the run has findings, and is recorded
+    # anyway. obs-3 is a `should`, so it lands as an advisory row instead.
     assert result.exit_code == ExitCode.FINDINGS
     (run,) = runstore.runs_for(store, runstore.packet_id(packet.milestone, lock.design_rev))
     assert run.commit_sha == current_rev(repo)
     assert run.results == (
         RunResult(
-            criterion="story:cancel-order#ac-1",
+            observation="behavior:order-cancelled#obs-1",
             result="checked",
             evidence_ref="tests/test_cancel.py",
         ),
-        RunResult(criterion="story:cancel-order#ac-2", result="no_check", evidence_ref=None),
-        RunResult(criterion="story:cancel-order#ac-3", result="no_check", evidence_ref=None),
+        RunResult(
+            observation="behavior:order-cancelled#obs-2", result="no_check", evidence_ref=None
+        ),
+        RunResult(
+            observation="behavior:order-cancelled#obs-3", result="advisory", evidence_ref=None
+        ),
     )
 
 
@@ -1297,7 +1405,7 @@ def test_a_verify_with_nowhere_to_record_still_verifies(
     """Verification is offline: when no design store can be located beside it,
     the run leaves no history — said on stderr, never swallowing the verdict."""
     _, lock_path = sealed
-    repo = _repo(tmp_path, "impl", {"cancel-order.feature": "Feature: x\n"})
+    repo = _repo(tmp_path, "impl", {"order-cancelled.feature": "Feature: x\n"})
 
     result = runner.invoke(
         app,

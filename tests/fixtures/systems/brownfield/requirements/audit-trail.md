@@ -1,7 +1,13 @@
 ---
-id: requirement:audit-trail
-title: Every charge is auditable
-state: unknown
+id: req:audit-trail
+title: Every billing change is auditable
+state: observed
+confidence: assumed
+owner: sam
+statement: Every change to a bill must be reconstructable from the audit log.
+priority: must
+relates:
+- to: goal:trustworthy-books
+  type: derives_from
 ---
-
-Nobody has confirmed this is actually a requirement.
+The code does this. Nobody knows which regulation asked for it.

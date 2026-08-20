@@ -2,9 +2,9 @@
 
 ``ab diff REF_A REF_B`` builds the ``Design`` at each revision through
 ``absicht.build``'s in-memory path (no artifact is written for either side)
-and compares them element by element: decisions added, seams whose contract
-moved, requirements dropped, state transitions. A diff entry is a change, not
-a problem — it borrows findings' "structured result, rendered per
+and compares them element by element: decisions added, interfaces whose
+contract moved, requirements dropped, state transitions. A diff entry is a
+change, not a problem — it borrows findings' "structured result, rendered per
 ``--format``" shape, not its vocabulary: nothing here is a severity and the
 command never exits non-zero for having found changes.
 
@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import assert_never
 
 from absicht.build import build
-from absicht.models import SCHEMA_VERSION, Element, State
+from absicht.models.design import FORMAT_VERSION, Element, State
 from absicht.render import UnknownRefError
 from absicht.resolve import Index, subtree
 
@@ -98,11 +98,11 @@ def diff(
     does not resolve is ``GitError``, a store that does not load cleanly at
     either revision is ``BuildError``.
     """
-    before_index = Index.from_design(build(store, rev=ref_a))
-    after_index = Index.from_design(build(store, rev=ref_b))
+    before_index = Index(build(store, rev=ref_a))
+    after_index = Index(build(store, rev=ref_b))
     scope_set: frozenset[str] | None = None
     if scope is not None:
-        if scope not in before_index.by_id and scope not in after_index.by_id:
+        if scope not in before_index.local and scope not in after_index.local:
             raise UnknownRefError(
                 f"unknown --scope ref {scope!r}: no element in this store has that id"
             )
@@ -145,7 +145,7 @@ def _selected(
     """
     return {
         ref: element
-        for ref, element in index.by_id.items()
+        for ref, element in index.local.items()
         if (kind is None or ref.startswith(f"{kind}:")) and (scope_set is None or ref in scope_set)
     }
 
@@ -167,7 +167,7 @@ class DesignDiff:
     def render_json(self) -> dict[str, object]:
         """The ``--format json`` envelope from docs/tasks/00-conventions.md."""
         return {
-            "schema_version": SCHEMA_VERSION,
+            "format_version": FORMAT_VERSION,
             "from": self.ref_a,
             "to": self.ref_b,
             "changes": [_change_json(change) for change in self.changes],

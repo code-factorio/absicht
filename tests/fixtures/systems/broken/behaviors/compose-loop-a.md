@@ -1,11 +1,15 @@
 ---
 id: behavior:compose-loop-a
-title: Composition cycle, first side
+title: Composes compose-loop-b
 state: specified
-trigger: A file exercises one side of a composition cycle.
+confidence: reviewed
+owner: dana
+trigger: Something happens.
 observations:
 - id: behavior:compose-loop-a#obs-1
-  statement: The other side of the cycle is asserted to occur
+  statement: The other behavior occurs.
   at: behavior:compose-loop-b
   outcome: must
 ---
+The composition half of the cycle family: each behavior asserts that the other
+occurs.

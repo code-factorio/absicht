@@ -1,13 +1,17 @@
 ---
-id: requirement:track-implementation
+id: req:track-implementation
 title: Track where the code stands against the design
 state: specified
 confidence: reviewed
 owner: vfeenstr
-realized_by:
-- component:status
-- component:diff
-- component:markers
+statement: The tool must report where the code stands against the design.
+priority: must
+actors:
+- actor:designer
+- actor:agent
+relates:
+- to: goal:design-is-queryable
+  type: derives_from
 ---
 
 status computes drift from watermarks and implementation refs; diff compares

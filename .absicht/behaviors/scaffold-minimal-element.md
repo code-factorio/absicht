@@ -5,8 +5,6 @@ state: specified
 lifecycle: active
 owner: vfeenstr
 trigger: A designer scaffolds a new element.
-realizes:
-- requirement:author-store
 observations:
 - id: behavior:scaffold-minimal-element#obs-1
   statement: The file exists with the deterministic id from the slug and
@@ -24,4 +22,12 @@ observations:
   statement: Scaffolding overwrites an existing element
   at: component:new
   outcome: must_not
+- id: behavior:scaffold-minimal-element#obs-4
+  statement: An invalid slug is a usage error and writes nothing
+  at: component:cli
+  outcome: must
+  timing: immediate
+relates:
+- to: req:author-store
+  type: realizes
 ---

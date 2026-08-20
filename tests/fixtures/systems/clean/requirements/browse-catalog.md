@@ -1,7 +1,14 @@
 ---
-id: requirement:browse-catalog
-title: The catalog is browsable
+id: req:browse-catalog
+title: Browse the catalog
 state: specified
-realized_by:
-- component:catalog
+confidence: reviewed
+owner: dana
+statement: A customer must be able to browse the catalog without signing in.
+priority: must
+actors:
+- actor:customer
+relates:
+- to: goal:cheap-orders
+  type: derives_from
 ---

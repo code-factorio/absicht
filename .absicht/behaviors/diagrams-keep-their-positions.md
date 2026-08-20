@@ -5,8 +5,6 @@ state: specified
 lifecycle: active
 owner: vfeenstr
 trigger: The site is regenerated against a pinned layout.
-realizes:
-- requirement:render-site
 observations:
 - id: behavior:diagrams-keep-their-positions#obs-1
   statement: The same element sits at the same coordinates as the previous run
@@ -22,4 +20,7 @@ observations:
   statement: Render invents its own positions when layout.yaml is silent
   at: component:render
   outcome: must_not
+relates:
+- to: req:render-site
+  type: realizes
 ---

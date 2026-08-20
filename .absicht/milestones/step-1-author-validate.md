@@ -7,8 +7,8 @@ owner: vfeenstr
 outcome: Schema, file layout and ab check — link integrity, orphans,
   ungoverned elements
 includes:
-- story:author-an-element
-- story:validate-a-store
+- behavior:scaffold-minimal-element
+- behavior:check-flags-broken-store
 scope:
 - component:models
 - component:codec
@@ -27,12 +27,9 @@ must_hold:
 - decision:pydantic-single-schema-source
 - decision:layer-stack-import-contracts
 done_when:
-- story:validate-a-store#ac-1
-- story:validate-a-store#ac-2
-depends_on:
-- milestone:foundations
+- behavior:check-flags-broken-store#obs-1
+- behavior:check-flags-broken-store#obs-2
 ---
-
 Its own tickets run pnqsrz through vwv3z7 (tasks 10-17); the foundations
 wave it stands on is milestone:foundations. Landed before the rest; every
 later step assumes check passed.

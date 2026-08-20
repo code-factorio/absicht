@@ -7,7 +7,9 @@ owner: vfeenstr
 outcome: Hand-written packets for three real slices, and a measurement of
   agent output against them
 includes:
-- story:hand-a-slice-to-an-agent
+- behavior:packet-bounds-the-work
+scope:
+- component:packet
 may_decide:
 - which three slices
 - how agent output is measured
@@ -15,10 +17,9 @@ unresolved:
 - question:smallest-schema
 - question:context-horizon
 done_when:
-- story:hand-a-slice-to-an-agent#ac-1
-- story:hand-a-slice-to-an-agent#ac-3
+- behavior:packet-bounds-the-work#obs-1
+- behavior:packet-bounds-the-work#obs-4
 ---
-
 The falsification. If a hand-written packet does not measurably improve what
 an agent produces, the rest of the project is decoration and should stop
 here. Needs a text editor and nothing else.

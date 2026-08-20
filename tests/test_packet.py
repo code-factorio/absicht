@@ -1,536 +1,285 @@
-"""``absicht.packet``: assemble the brief an agent is handed, per ``docs/tasks/31-packet-assembly.md``.
+"""``absicht.packet``: the brief an agent is handed, assembled from one milestone.
 
-What these tests pin:
+The selection is the whole value of a packet, so what these tests pin is the
+selection and the refusals, never the rendering (``tests/test_packet_cli.py``
+owns that):
 
-- The selection over ``clean/``'s milestone: scope plus the milestone itself
-  at full fidelity, ``--horizon N`` rings of graph neighbours (both edge
-  directions — "consume / are consumed by") at contract fidelity, in the
-  design's own element order so the assembled packet is deterministic.
-- The contract-field cut: a neighbouring component loses the fields that are
-  behind its surface; kinds that are nothing but a contract keep everything.
-- ``--include``/``--exclude`` applied after the horizon: a forced-in element
-  lands at full fidelity, an excluded one is gone, and the same ref in both is
-  a usage error, as is an ``--include`` naming nothing and a ``MILESTONE``
-  argument that does not name a milestone.
-- ``must_hold``/``unresolved``/``rejections`` as the union of the milestone's
-  own field and the derived source, deduplicated — pinned against an inline
-  store whose milestone names half of each list directly and leaves the other
-  half reachable only by intersection, so a missing side cannot hide.
-- The criteria union: ``done_when`` (which may name a story the milestone does
-  not include) plus the acceptance of the included stories, deduplicated.
-- A milestone with no scope is a finding about the design, not a usage error:
-  the milestone exists, it is just unusable as a packet target.
-- The addendum's behavior content (docs/tasks/57-packet-behaviors.md):
-  ``satisfy`` as ``includes`` filtered to behavior refs, ``must_not_break`` as
-  the active behaviors touching scope minus satisfy (superseded never), the
-  one-hop composition expansion, and the effective timing carried beside every
-  observation so an agent never computes a default.
+- the fidelity split. What the agent may touch arrives whole — the milestone,
+  its ``scope``, the behaviors it ``includes``, the obligations in
+  ``must_hold``, the questions left ``unresolved`` and the ``rejections`` —
+  what it will meet at the boundary arrives as a contract, ``horizon`` rings
+  out in *both* edge directions, and everything else does not arrive;
+- what a contract drops: ``implemented_by`` and nothing else. Everything a
+  neighbour else carries is its surface, and ``source`` survives both
+  fidelities so a packet stays traceable to the store it came from;
+- ``satisfy`` as the milestone's ``includes`` filtered to active behaviors,
+  expanded exactly one hop through composition, and ``must_not_break`` as the
+  active behaviors touching scope that are not already the work;
+- a superseded behavior joins nothing — not the work, not the standing
+  expectations, not even the contract ring: it stopped being how the system
+  works, so handing it over asks for the past to be rebuilt;
+- the two refusals and the difference between them: a ref that names no
+  milestone is a broken invocation (``LookupError``), while a milestone that
+  names no scope is a true statement about the design and therefore a
+  ``Finding`` — which is why ``--include``/``--exclude`` are gone too, a
+  hand-narrowed packet verifying against a slice nobody designed;
+- assembly is deterministic from design plus milestone, which is the premise
+  under regenerating a packet rather than storing one.
 """
 
 from __future__ import annotations
 
+from datetime import date
 from pathlib import Path
 
 import pytest
 
 from absicht.findings import Severity
 from absicht.load import load_store
-from absicht.models import (
+from absicht.models.design import (
+    FORMAT_VERSION,
     Behavior,
     Component,
-    Criterion,
-    Decision,
+    ComponentLevel,
     Design,
-    Fidelity,
     Lifecycle,
     Milestone,
-    NonFunctional,
+    Note,
     Observation,
-    Outcome,
-    Packet,
-    QualityAttribute,
-    Question,
     Rejection,
-    Resource,
-    ResourceKind,
-    Seam,
-    SeamStyle,
-    Story,
-    System,
-    Timing,
 )
-from absicht.packet import PacketFindingError, PacketUsageError, assemble
+from absicht.models.packet import Fidelity, Packet
+from absicht.packet import PacketError, assemble, summarise
 from absicht.resolve import Index, resolve
 
-CLEAN = Path(__file__).parent / "fixtures" / "systems" / "clean"
+FIXTURES = Path(__file__).parent / "fixtures" / "systems"
 
 
-def _clean() -> tuple[Design, Index]:
-    """The `clean` fixture as `assemble` consumes it: design plus its index."""
-    design = resolve(load_store(CLEAN))
-    return design, Index.from_design(design)
+def _design(name: str) -> Design:
+    return resolve(load_store(FIXTURES / name))
 
 
-def test_horizon_one_carries_scope_and_milestone_at_full_and_one_ring_at_contract() -> None:
-    design, index = _clean()
+def _fidelities(packet: Packet) -> dict[str, Fidelity]:
+    return {element.ref: element.fidelity for element in packet.elements}
 
-    packet = assemble(
-        design, index, "milestone:m1", horizon=1, include=frozenset(), exclude=frozenset()
-    )
 
-    assert {e.ref: e.fidelity for e in packet.elements} == {
+# ------------------------------------------------------------- the selection
+
+
+def test_horizon_one_is_the_slice_whole_and_one_ring_of_contracts() -> None:
+    """``clean/``'s milestone read end to end. Whole: the milestone, its two
+    scope components, the behavior it includes and the two obligations it
+    names. Contract: one ring out in both directions — ``library:pydantic``,
+    which ``component:orders`` points at, and ``data:order``, which points
+    back at it, because an agent changing a component needs what it calls and
+    what calls it alike."""
+
+    packet = assemble(_design("clean"), "milestone:m1")
+
+    assert _fidelities(packet) == {
         "milestone:m1": Fidelity.FULL,
+        "component:orders": Fidelity.FULL,
         "component:cancellation": Fidelity.FULL,
-        "seam:order-events": Fidelity.CONTRACT,
-        "requirement:cancel-orders": Fidelity.CONTRACT,
+        "behavior:order-cancelled": Fidelity.FULL,
+        "decision:event-log": Fidelity.FULL,
+        "quality:cancel-latency": Fidelity.FULL,
+        "component:acme": Fidelity.CONTRACT,
+        "constraint:gdpr-erasure": Fidelity.CONTRACT,
+        "data:order": Fidelity.CONTRACT,
+        "interface:order-events": Fidelity.CONTRACT,
+        "library:pydantic": Fidelity.CONTRACT,
+        "req:cancel-orders": Fidelity.CONTRACT,
+        "resource:order-cache": Fidelity.CONTRACT,
+        "resource:order-stream": Fidelity.CONTRACT,
     }
-    # Design element order, so the same store assembles to the same packet.
-    assert [e.ref for e in packet.elements] == [
-        "requirement:cancel-orders",
-        "component:cancellation",
-        "seam:order-events",
-        "milestone:m1",
-    ]
+    assert packet.format_version == FORMAT_VERSION
     assert packet.milestone == "milestone:m1"
-    assert packet.outcome == "A customer can cancel a refundable order."
+    assert packet.design == "design:acme"
+    assert packet.outcome == "A customer can cancel an order that has not shipped."
+
+
+def test_horizon_zero_is_the_slice_and_nothing_around_it() -> None:
+    """No ring at all leaves exactly what the milestone itself named — which
+    is what ``ab features`` assembles with, since it wants the behaviors and
+    not the context around them."""
+
+    packet = assemble(_design("clean"), "milestone:m1", horizon=0)
+
+    assert set(_fidelities(packet).values()) == {Fidelity.FULL}
+    assert set(_fidelities(packet)) == {
+        "milestone:m1",
+        "component:orders",
+        "component:cancellation",
+        "behavior:order-cancelled",
+        "decision:event-log",
+        "quality:cancel-latency",
+    }
 
 
 def test_horizon_two_adds_the_second_ring_still_at_contract() -> None:
-    design, index = _clean()
+    """A wider horizon widens the contract half only: what was whole stays
+    whole, and the elements a second hop reaches are context to respect, never
+    something to implement."""
 
-    packet = assemble(
-        design, index, "milestone:m1", horizon=2, include=frozenset(), exclude=frozenset()
-    )
+    packet = assemble(_design("clean"), "milestone:m1", horizon=2)
 
-    assert {e.ref: e.fidelity for e in packet.elements} == {
-        "milestone:m1": Fidelity.FULL,
-        "component:cancellation": Fidelity.FULL,
-        "seam:order-events": Fidelity.CONTRACT,
-        "requirement:cancel-orders": Fidelity.CONTRACT,
-        "component:orders": Fidelity.CONTRACT,
-        "data:order": Fidelity.CONTRACT,
-        "story:cancel-order": Fidelity.CONTRACT,
-        # The behaviors realize the requirement one ring in, so the second
-        # ring carries them at contract fidelity — an agent working the scope
-        # sees the expectations attached to the requirement it serves.
-        "behavior:order-placed-v2": Fidelity.CONTRACT,
-        "behavior:order-placed": Fidelity.CONTRACT,
-    }
-    # The ring does not leak into the brief's obligations: `decision:event-log`
-    # applies to component:orders, which is a neighbour, not scope.
-    assert packet.must_hold == ()
+    fidelities = _fidelities(packet)
+    assert fidelities["behavior:order-cancelled"] is Fidelity.FULL
+    # Two hops out: the goal behind the requirement, the actor who asks for
+    # it, and the sibling container under the same system.
+    assert fidelities["goal:cheap-orders"] is Fidelity.CONTRACT
+    assert fidelities["actor:customer"] is Fidelity.CONTRACT
+    assert fidelities["component:catalog"] is Fidelity.CONTRACT
+    assert set(_fidelities(assemble(_design("clean"), "milestone:m1"))) < set(fidelities)
+
+
+def test_elements_arrive_whole_first_and_ref_ordered_within_each_fidelity() -> None:
+    """Assembly imposes its own order rather than inheriting the store's, so
+    a file rename cannot move a packet's bytes: the whole half first — an
+    agent reads what it may change before what it may not — each half sorted
+    by ref."""
+
+    packet = assemble(_design("clean"), "milestone:m1")
+
+    refs = [element.ref for element in packet.elements]
+    whole = [e.ref for e in packet.elements if e.fidelity is Fidelity.FULL]
+    contract = [e.ref for e in packet.elements if e.fidelity is Fidelity.CONTRACT]
+    assert refs == whole + contract
+    assert whole == sorted(whole)
+    assert contract == sorted(contract)
 
 
 def test_full_fidelity_carries_the_element_exactly_as_built() -> None:
-    design, index = _clean()
+    """Nothing is trimmed on the side the agent may change: the carried dump
+    is the model's own, field for field."""
 
-    packet = assemble(
-        design, index, "milestone:m1", horizon=1, include=frozenset(), exclude=frozenset()
+    index = Index(_design("clean"))
+    packet = assemble(index.design, "milestone:m1")
+
+    by_ref = {element.ref: element.element for element in packet.elements}
+    for ref in ("component:cancellation", "milestone:m1", "behavior:order-cancelled"):
+        assert by_ref[ref] == index.local[ref].model_dump(mode="json")
+
+
+def test_contract_fidelity_drops_only_what_is_behind_the_surface() -> None:
+    """``implemented_by`` is the one typed field that reaches past what a
+    neighbour publishes, so it is the one field a contract loses — on every
+    kind that has one. What stays is the reason to know the neighbour exists:
+    a component's responsibility and its place in the nesting, an interface's
+    operations and how it fails."""
+
+    packet = assemble(_design("clean"), "milestone:m1")
+
+    by_ref = {element.ref: element.element for element in packet.elements}
+    component, interface = by_ref["component:acme"], by_ref["interface:order-events"]
+    assert "implemented_by" not in component
+    assert "implemented_by" not in interface
+    assert component["responsibility"] == "The whole of what we design."
+    assert component["level"] == "system"
+    assert interface["operations"]
+    assert interface["failure_modes"]
+    assert interface["declared_by"] == "component:orders"
+    # `source` survives both fidelities: a packet stays traceable to the store
+    # it was assembled from, whichever side of the cut an element landed on.
+    assert component["source"] == "components/acme.md"
+    assert by_ref["component:orders"]["source"] == "components/orders.md"
+
+
+def test_the_milestones_own_lists_ride_verbatim() -> None:
+    """The envelope an agent works inside is the milestone's, unedited: what
+    must hold, where it is free, what stays open on purpose, and what says the
+    slice is finished. Assembly selects elements; it does not re-derive the
+    author's obligations."""
+
+    milestone = next(m for m in _design("clean").milestones if m.id == "milestone:m1")
+
+    packet = assemble(_design("clean"), "milestone:m1")
+
+    assert (
+        packet.must_hold == milestone.must_hold == ("decision:event-log", "quality:cancel-latency")
     )
-
-    by_ref = {e.ref: e for e in packet.elements}
-    assert by_ref["component:cancellation"].element == index.by_id[
-        "component:cancellation"
-    ].model_dump(mode="json")
-    assert by_ref["milestone:m1"].element == index.by_id["milestone:m1"].model_dump(mode="json")
+    assert packet.may_decide == milestone.may_decide
+    assert packet.unresolved == milestone.unresolved == ()
+    assert packet.done_when == milestone.done_when == ("behavior:order-cancelled#obs-1",)
 
 
-def test_contract_fidelity_keeps_the_surface_and_drops_component_internals() -> None:
-    design, index = _clean()
+def test_every_rejection_the_design_carries_rides_along() -> None:
+    """Rejections are not filtered by scope: a dead idea is dead everywhere,
+    and an agent re-proposing one costs a review cycle whichever slice it is
+    working."""
 
-    packet = assemble(
-        design, index, "milestone:m1", horizon=2, include=frozenset(), exclude=frozenset()
-    )
-
-    by_ref = {e.ref: e.element for e in packet.elements}
-    # A component neighbour contributes its surface; nesting, owned data and
-    # code pointers are what "the seam, nothing behind it" excludes.
-    assert "responsibility" in by_ref["component:orders"]
-    assert "provides" in by_ref["component:orders"]
-    assert "consumes" in by_ref["component:orders"]
-    assert "contains" not in by_ref["component:orders"]
-    assert "owns_data" not in by_ref["component:orders"]
-    assert "implemented_by" not in by_ref["component:orders"]
-    # Kinds that are nothing but a contract keep everything they carry.
-    assert "style" in by_ref["seam:order-events"]
-    assert "failure_modes" in by_ref["seam:order-events"]
-    assert "acceptance" in by_ref["story:cancel-order"]
-    assert by_ref["requirement:cancel-orders"]["body"] == (
-        "A customer may cancel an order while it can still be refunded."
-    )
-
-
-def test_include_forces_full_fidelity_even_outside_the_horizon() -> None:
-    design, index = _clean()
-
-    packet = assemble(
-        design,
-        index,
-        "milestone:m1",
-        horizon=1,
-        include=frozenset({"component:catalog", "seam:order-events"}),
-        exclude=frozenset(),
-    )
-
-    fidelities = {e.ref: e.fidelity for e in packet.elements}
-    assert fidelities["component:catalog"] == Fidelity.FULL  # three rings out, forced in
-    assert fidelities["seam:order-events"] == Fidelity.FULL  # in a ring, promoted
-
-
-def test_exclude_drops_what_the_horizon_would_have_pulled_in() -> None:
-    design, index = _clean()
-
-    packet = assemble(
-        design,
-        index,
-        "milestone:m1",
-        horizon=2,
-        include=frozenset(),
-        exclude=frozenset({"story:cancel-order"}),
-    )
-
-    assert "story:cancel-order" not in {e.ref for e in packet.elements}
-    assert len(packet.elements) == 8  # the horizon-2 packet, minus the story
-
-    # Excluding something the packet never carried is a no-op, not an error:
-    # there is nothing to drop.
-    untouched = assemble(
-        design,
-        index,
-        "milestone:m1",
-        horizon=1,
-        include=frozenset(),
-        exclude=frozenset({"component:catalog"}),
-    )
-    assert "component:catalog" not in {e.ref for e in untouched.elements}
-    assert len(untouched.elements) == 4
-
-
-def test_a_ref_both_included_and_excluded_is_a_usage_error() -> None:
-    design, index = _clean()
-
-    with pytest.raises(PacketUsageError, match=r"component:catalog, seam:order-events"):
-        assemble(
-            design,
-            index,
-            "milestone:m1",
-            horizon=1,
-            include=frozenset({"seam:order-events", "component:catalog"}),
-            exclude=frozenset({"seam:order-events", "component:catalog"}),
-        )
-
-
-def test_an_include_naming_no_element_is_a_usage_error() -> None:
-    design, index = _clean()
-
-    with pytest.raises(PacketUsageError, match=r"component:ghost, seam:ghost"):
-        assemble(
-            design,
-            index,
-            "milestone:m1",
-            horizon=1,
-            include=frozenset({"seam:ghost", "component:ghost"}),
-            exclude=frozenset(),
-        )
-
-
-@pytest.mark.parametrize("ref", ["milestone:nope", "component:catalog"])
-def test_a_milestone_argument_that_is_no_milestone_is_a_usage_error(ref: str) -> None:
-    design, index = _clean()
-
-    with pytest.raises(PacketUsageError, match=rf"{ref}"):
-        assemble(design, index, ref, horizon=1, include=frozenset(), exclude=frozenset())
-
-
-def test_a_milestone_with_no_scope_is_a_finding_not_a_usage_error(tmp_path: Path) -> None:
-    """The milestone exists but names nothing the agent may touch: a true
-    statement about the design (`FINDINGS`), not a broken invocation. Loaded
-    from a store rather than built inline, so the finding can name the file
-    the milestone lives in — where a human goes to fix it."""
-
-    store = tmp_path / "store"
-    (store / "milestones").mkdir(parents=True)
-    (store / "system.yaml").write_text("id: system:empty\ntitle: Empty\n", encoding="utf-8")
-    (store / "milestones" / "empty.md").write_text(
-        "---\nid: milestone:empty\ntitle: Empty\n---\n", encoding="utf-8"
-    )
-    design = resolve(load_store(store))
-
-    with pytest.raises(PacketFindingError) as excinfo:
-        assemble(
-            design,
-            Index.from_design(design),
-            "milestone:empty",
-            horizon=1,
-            include=frozenset(),
-            exclude=frozenset(),
-        )
-
-    assert excinfo.value.finding.rule_id == "packet/empty-scope"
-    assert excinfo.value.finding.severity is Severity.ERROR
-    assert excinfo.value.finding.ref == "milestone:empty"
-    assert excinfo.value.finding.source == "milestones/empty.md"
-    # The exception's own message is the finding's message: the CLI echoes
-    # `str(error)` to stderr, and that must be the sentence worth reading.
-    assert str(excinfo.value) == excinfo.value.finding.message
-
-
-def _union_store() -> Design:
-    """One scope component and a milestone whose ref lists name half their
-    content directly while the other half is reachable only by intersection —
-    the two sources the spec says to union, separated so a missing side cannot
-    hide behind the other. `decision:applies-both` is in both sources, so the
-    dedup is visible too. Every kind also carries one element on the negative
-    side, reachable by neither source, so a union that grabs everything cannot
-    pass as one; and `story:other`'s criterion is named by `done_when` while
-    the story itself is not included, so the criteria union is not just the
-    includes loop."""
-    core = "component:core"
-    elsewhere = "component:elsewhere"
-    return Design(
-        system=System(id="system:union", title="Union"),
-        stories=(
-            Story(
-                id="story:other",
-                title="Other",
-                acceptance=(
-                    Criterion(
-                        id="story:other#ac-1",
-                        when="the other story runs",
-                        then=("it is its own bar",),
-                    ),
-                ),
-            ),
-        ),
-        components=(Component(id=core, title="Core"),),
-        non_functionals=(
-            NonFunctional(
-                id="nfr:named", title="Named by the milestone", attribute=QualityAttribute.LATENCY
-            ),
-            NonFunctional(
-                id="nfr:derived",
-                title="Scoped to the core",
-                attribute=QualityAttribute.COST,
-                scope=(core,),
-            ),
-            NonFunctional(
-                id="nfr:elsewhere",
-                title="Scoped elsewhere",
-                attribute=QualityAttribute.PRIVACY,
-                scope=(elsewhere,),
-            ),
-        ),
-        decisions=(
-            Decision(
-                id="decision:applies-both",
-                title="Named by the milestone and applies to the core",
-                applies_to=(core,),
-            ),
-            Decision(id="decision:derived", title="Applies to the core", applies_to=(core,)),
-            Decision(id="decision:elsewhere", title="Applies elsewhere", applies_to=(elsewhere,)),
-        ),
-        questions=(
-            Question(id="question:named", title="Named by the milestone"),
-            Question(id="question:derived", title="Blocks the core", blocks=(core,)),
-            Question(id="question:elsewhere", title="Blocks elsewhere", blocks=(elsewhere,)),
-        ),
-        rejections=(
-            Rejection(id="rejection:applies", title="Applies to the core", applies_to=(core,)),
-            Rejection(
-                id="rejection:named", title="Rejected in this milestone", milestone="milestone:m"
-            ),
-            Rejection(
-                id="rejection:elsewhere",
-                title="Rejected in another milestone",
-                milestone="milestone:other",
-            ),
-        ),
-        milestones=(
-            Milestone(
-                id="milestone:m",
-                title="M",
-                scope=(core,),
-                must_hold=("decision:applies-both", "nfr:named"),
-                may_decide=("the refund timing",),
-                unresolved=("question:named",),
-                done_when=("story:other#ac-1",),
-            ),
-        ),
-    )
-
-
-def _assembled_union() -> Packet:
-    design = _union_store()
-    return assemble(
-        design,
-        Index.from_design(design),
-        "milestone:m",
-        horizon=1,
-        include=frozenset(),
-        exclude=frozenset(),
-    )
-
-
-def test_must_hold_unions_the_milestones_own_refs_with_intersecting_decisions_and_nfrs() -> None:
-    """The milestone's own naming first, then intersecting decisions and NFRs,
-    deduplicated: `decision:applies-both` is named and intersects, and must
-    not appear twice."""
-
-    assert _assembled_union().must_hold == (
-        "decision:applies-both",
-        "nfr:named",
-        "decision:derived",
-        "nfr:derived",
-    )
-
-
-def test_rejections_come_from_intersection_and_from_the_milestones_own_field() -> None:
-    assert _assembled_union().rejections == ("rejection:applies", "rejection:named")
-
-
-def test_unresolved_unions_the_milestones_own_questions_with_those_blocking_scope() -> None:
-    assert _assembled_union().unresolved == ("question:named", "question:derived")
-
-
-def test_may_decide_is_the_milestones_own_list_verbatim() -> None:
-    assert _assembled_union().may_decide == ("the refund timing",)
-
-
-def test_criteria_union_done_when_and_the_included_stories_acceptance() -> None:
-    design, index = _clean()
-
-    packet = assemble(
-        design, index, "milestone:m1", horizon=1, include=frozenset(), exclude=frozenset()
-    )
-
-    assert [c.id for c in packet.criteria] == [
-        "story:cancel-order#ac-1",
-        "story:cancel-order#ac-2",
-        "story:cancel-order#ac-3",
-    ]
-    assert packet.criteria == design.stories[0].acceptance
-
-
-def test_done_when_can_name_a_criterion_of_a_story_the_milestone_does_not_include() -> None:
-    assert [c.id for c in _assembled_union().criteria] == ["story:other#ac-1"]
-
-
-def test_the_second_ring_grows_through_elements_nothing_points_at() -> None:
-    """Ring 1 over the union store is elements that point at scope and are
-    pointed at by nothing; the second ring grows outward from them without
-    assuming every frontier member has incoming references. It adds nothing —
-    everything they point at is already inside."""
-    design = _union_store()
-
-    packet = assemble(
-        design,
-        Index.from_design(design),
-        "milestone:m",
-        horizon=2,
-        include=frozenset(),
-        exclude=frozenset(),
-    )
-
-    assert {e.ref: e.fidelity for e in packet.elements} == {
-        "milestone:m": Fidelity.FULL,
-        "component:core": Fidelity.FULL,
-        "decision:applies-both": Fidelity.CONTRACT,
-        "decision:derived": Fidelity.CONTRACT,
-        "nfr:derived": Fidelity.CONTRACT,
-        "question:derived": Fidelity.CONTRACT,
-        "rejection:applies": Fidelity.CONTRACT,
-    }
-
-
-def test_a_scope_member_nothing_points_at_still_expands_outward() -> None:
-    """Ring expansion reads both directions and must survive one of them being
-    empty: a scope component with no incoming references still pulls in what it
-    consumes."""
     design = Design(
-        system=System(id="system:solo", title="Solo"),
-        components=(Component(id="component:solo", title="Solo", consumes=("seam:feed",)),),
-        seams=(Seam(id="seam:feed", title="Feed", style=SeamStyle.EVENT),),
-        milestones=(Milestone(id="milestone:m", title="M", scope=("component:solo",)),),
+        id="design:rejected",
+        title="Rejected",
+        version="0.1.0",
+        components=(_component("component:core"),),
+        rejections=(
+            Rejection(id="rejection:polling", title="Poll the table"),
+            Rejection(id="rejection:shared-db", title="Share the database"),
+        ),
+        milestones=(Milestone(id="milestone:m", title="M", scope=("component:core",)),),
     )
 
-    packet = assemble(
-        design,
-        Index.from_design(design),
-        "milestone:m",
-        horizon=1,
-        include=frozenset(),
-        exclude=frozenset(),
-    )
+    packet = assemble(design, "milestone:m")
 
-    assert {e.ref: e.fidelity for e in packet.elements} == {
-        "milestone:m": Fidelity.FULL,
-        "component:solo": Fidelity.FULL,
-        "seam:feed": Fidelity.CONTRACT,
-    }
+    assert packet.rejections == ("rejection:polling", "rejection:shared-db")
+    assert _fidelities(packet)["rejection:polling"] is Fidelity.FULL
 
 
-# --------------------------------------------- behaviors (docs/tasks/57)
+def test_the_design_rev_is_recorded_as_the_caller_spelled_it() -> None:
+    """What makes a packet verifiable offline: the commit it was assembled
+    from travels with it, so a verification can rebuild the same design
+    without the store."""
+
+    packet = assemble(_design("clean"), "milestone:m1", design_rev="c0ffee")
+
+    assert packet.design_rev == "c0ffee"
+    assert assemble(_design("clean"), "milestone:m1").design_rev == ""
 
 
-def _assembled(design: Design, milestone: str) -> Packet:
-    """``assemble`` over an inline design at the default horizon, nothing
-    forced either way — the shape every behavior test below starts from."""
-    return assemble(
-        design,
-        Index.from_design(design),
-        milestone,
-        horizon=1,
-        include=frozenset(),
-        exclude=frozenset(),
+# --------------------------------------------------------------- behaviors
+
+
+def _component(ref: str) -> Component:
+    return Component(
+        id=ref, title=ref.removeprefix("component:").title(), level=ComponentLevel.CONTAINER
     )
 
 
 def _behavior(
-    behavior_id: str,
-    *,
-    at: tuple[str, ...],
-    lifecycle: Lifecycle = Lifecycle.ACTIVE,
-    observations: tuple[Observation, ...] = (),
+    ref: str, *, at: tuple[str, ...], lifecycle: Lifecycle = Lifecycle.ACTIVE
 ) -> Behavior:
-    """One behavior with a generated ``must`` observation per ``at`` ref,
-    ``obs-N`` in the order authored — unless the test spells the observations
-    itself, which the timing tests do because a generated one carries no
-    authored timing to win with."""
+    """One behavior with a ``must`` observation per ``at`` ref, numbered in the
+    order given — enough shape for the selection rules, which read only what a
+    behavior watches and whether it is still how the system works."""
     return Behavior(
-        id=behavior_id,
-        title=behavior_id.removeprefix("behavior:"),
-        trigger=f"{behavior_id.removeprefix('behavior:')} happens.",
+        id=ref,
+        title=ref.removeprefix("behavior:"),
+        trigger=f"{ref.removeprefix('behavior:')} happens.",
         lifecycle=lifecycle,
-        observations=observations
-        or tuple(
-            Observation(
-                id=f"{behavior_id}#obs-{position}",
-                statement=f"observes {target}",
-                at=target,
-            )
+        observations=tuple(
+            Observation(id=f"{ref}#obs-{position}", statement=f"observes {target}", at=target)
             for position, target in enumerate(at, start=1)
         ),
     )
 
 
-def _selection_store() -> Design:
-    """One behavior on each side of the must-not-break rule: an active guard
-    touching scope (in), an active behavior touching only elsewhere (out), a
-    superseded one touching scope (out — §5 says it stops being packet input),
-    and the must-satisfy behavior the milestone names (the work, never
-    repeated as a standing expectation)."""
+def _selection_design() -> Design:
+    """One behavior on each side of every selection rule: the work the
+    milestone names, an active guard watching the scope, an active behavior
+    watching only elsewhere, and a superseded one watching the scope *and*
+    composed by the work — so neither route can smuggle it back in."""
     core, elsewhere = "component:core", "component:elsewhere"
     return Design(
-        system=System(id="system:selection", title="Selection"),
-        components=(
-            Component(id=core, title="Core"),
-            Component(id=elsewhere, title="Elsewhere"),
-        ),
+        id="design:selection",
+        title="Selection",
+        version="0.1.0",
+        components=(_component(core), _component(elsewhere)),
         behaviors=(
             _behavior("behavior:guard", at=(core,)),
             _behavior("behavior:far", at=(elsewhere,)),
             _behavior("behavior:old", at=(core,), lifecycle=Lifecycle.SUPERSEDED),
-            _behavior("behavior:new-work", at=(core,)),
+            _behavior("behavior:new-work", at=(core, "behavior:old")),
         ),
         milestones=(
             Milestone(id="milestone:m", title="M", includes=("behavior:new-work",), scope=(core,)),
@@ -538,45 +287,62 @@ def _selection_store() -> Design:
     )
 
 
-def test_satisfy_is_the_milestones_includes_filtered_to_behavior_refs() -> None:
-    assert _assembled(_selection_store(), "milestone:m").satisfy == ("behavior:new-work",)
+def test_satisfy_is_the_milestones_includes_and_must_not_break_is_the_rest() -> None:
+    """The two behavior lists, read off one design. ``guard`` watches the
+    scope and is not the work, so breaking it is a regression; ``far`` watches
+    nothing the slice may touch and is none of its business; ``new-work`` is
+    the work itself and is never repeated as a standing expectation."""
 
+    packet = assemble(_selection_design(), "milestone:m")
 
-def test_must_not_break_is_active_behaviors_touching_scope_minus_satisfy() -> None:
-    packet = _assembled(_selection_store(), "milestone:m")
-
-    # guard touches scope and is active: in. far touches only elsewhere: out.
-    # old touches scope but is superseded: out. new-work is the satisfy set
-    # itself, not a standing expectation about work it is doing: out.
+    assert packet.satisfy == ("behavior:new-work",)
     assert packet.must_not_break == ("behavior:guard",)
 
 
-def test_the_behavior_lists_enter_elements_at_full_fidelity_with_observations() -> None:
-    packet = _assembled(_selection_store(), "milestone:m")
-    by_ref = {element.ref: element for element in packet.elements}
+def test_both_behavior_lists_arrive_whole() -> None:
+    """Observations are the actionable part of either list: the work has to be
+    built to them, and an expectation that may not break is only checkable
+    verbatim."""
 
-    # Observations included: the satisfy list is the work, and an expectation
-    # that may not be broken is only actionable verbatim.
-    assert by_ref["behavior:new-work"].fidelity is Fidelity.FULL
-    assert by_ref["behavior:guard"].fidelity is Fidelity.FULL
-    assert [obs["id"] for obs in by_ref["behavior:guard"].element["observations"]] == [
-        "behavior:guard#obs-1"
-    ]
-    # A superseded behavior stays what the ring made it — contract context,
-    # never behavior content — even though it touches scope like the guard.
-    assert by_ref["behavior:old"].fidelity is Fidelity.CONTRACT
+    packet = assemble(_selection_design(), "milestone:m")
+
+    fidelities = _fidelities(packet)
+    assert fidelities["behavior:new-work"] is Fidelity.FULL
+    assert fidelities["behavior:guard"] is Fidelity.FULL
 
 
-def _chain_store() -> Design:
-    """The addendum's own A→B→C: the milestone selects A, A composes B, B
-    composes C, and C touches nothing in scope — so the packet carries A and B
-    with observations and references C without expanding it."""
+def test_a_superseded_behavior_joins_nothing() -> None:
+    """It stopped being how the system works, so handing it to an agent asks
+    for the past to be rebuilt. ``behavior:old`` watches the scope and is
+    composed by the work — the two routes in — and arrives by neither, at
+    neither fidelity."""
+
+    packet = assemble(_selection_design(), "milestone:m")
+
+    assert "behavior:old" not in packet.satisfy
+    assert "behavior:old" not in packet.must_not_break
+    assert "behavior:old" not in _fidelities(packet)
+
+
+def test_the_clean_fixtures_superseded_behavior_is_absent_too() -> None:
+    """The same rule against a store an author wrote rather than a test:
+    ``behavior:order-placed`` observes ``component:orders``, which
+    ``milestone:m1`` puts in scope, and is superseded by ``-v2``."""
+
+    packet = assemble(_design("clean"), "milestone:m1")
+
+    assert "behavior:order-placed" not in _fidelities(packet)
+    assert packet.must_not_break == ()
+
+
+def _chain_design() -> Design:
+    """A → B → C: the milestone selects A, A composes B, B composes C, and C
+    watches nothing in scope."""
     return Design(
-        system=System(id="system:chain", title="Chain"),
-        components=(
-            Component(id="component:core", title="Core"),
-            Component(id="component:away", title="Away"),
-        ),
+        id="design:chain",
+        title="Chain",
+        version="0.1.0",
+        components=(_component("component:core"), _component("component:away")),
         behaviors=(
             _behavior("behavior:a", at=("component:core", "behavior:b")),
             _behavior("behavior:b", at=("behavior:c",)),
@@ -591,33 +357,62 @@ def _chain_store() -> Design:
 
 
 def test_composition_expands_exactly_one_hop_from_each_included_behavior() -> None:
-    packet = _assembled(_chain_store(), "milestone:m")
-    by_ref = {element.ref: element for element in packet.elements}
+    """B is the work too, although it watches nothing in scope: one hop from
+    what the milestone named is reason enough. C, two hops out, is not the
+    work — it arrives as the contract B's observation points at, which is how
+    "referenced, not expanded" survives serialization."""
 
-    assert packet.satisfy == ("behavior:a",)
-    # B joins with its own observations although it touches nothing in scope —
-    # one hop from A is reason enough. C, two hops from the root, does not
-    # join, and no list claims it either.
-    assert packet.must_not_break == ()
-    assert by_ref["behavior:a"].fidelity is Fidelity.FULL
-    assert by_ref["behavior:b"].fidelity is Fidelity.FULL
-    assert "behavior:c" not in by_ref
-    # C is still referenced — B's observation asserts it occurs — which is how
-    # "references without expanding" survives serialization.
-    assert [obs["at"] for obs in by_ref["behavior:b"].element["observations"]] == ["behavior:c"]
+    packet = assemble(_chain_design(), "milestone:m")
+
+    assert packet.satisfy == ("behavior:a", "behavior:b")
+    fidelities = _fidelities(packet)
+    assert fidelities["behavior:a"] is fidelities["behavior:b"] is Fidelity.FULL
+    assert fidelities["behavior:c"] is Fidelity.CONTRACT
+    carried = next(e for e in packet.elements if e.ref == "behavior:b")
+    assert [o["at"] for o in carried.element["observations"]] == ["behavior:c"]
 
 
-def test_a_dangling_behavior_include_joins_nothing_and_stops_nothing() -> None:
-    """`includes` naming a behavior nothing defines is `ab check`'s
-    dangling-ref finding, not a reason to refuse the packet: the list still
-    says the milestone named it, no element appears for it, and the behaviors
-    listed after it still expand."""
+def test_a_composition_cycle_terminates_instead_of_hanging() -> None:
+    """Assembly walks input ``ab check`` has not necessarily graded yet, so a
+    cycle it would report as a finding must not hang it. One hop is the whole
+    walk: X composing Y and Y composing X cannot re-enter it."""
+
     design = Design(
-        system=System(id="system:dangling", title="Dangling"),
-        components=(Component(id="component:core", title="Core"),),
+        id="design:cycle",
+        title="Cycle",
+        version="0.1.0",
+        components=(_component("component:core"),),
+        behaviors=(
+            _behavior("behavior:x", at=("component:core", "behavior:y")),
+            _behavior("behavior:y", at=("behavior:x",)),
+        ),
+        milestones=(
+            Milestone(
+                id="milestone:m", title="M", includes=("behavior:x",), scope=("component:core",)
+            ),
+        ),
+    )
+
+    packet = assemble(design, "milestone:m")
+
+    assert packet.satisfy == ("behavior:x", "behavior:y")
+    assert packet.must_not_break == ()
+
+
+def test_an_include_that_names_nothing_joins_nothing_and_stops_nothing() -> None:
+    """``includes`` naming a behavior nothing defines is ``ab check``'s
+    dangling-ref finding, not a reason to refuse a packet: no element appears
+    for it, no list claims it, and the behaviors named after it still
+    expand."""
+
+    design = Design(
+        id="design:dangling",
+        title="Dangling",
+        version="0.1.0",
+        components=(_component("component:core"),),
         behaviors=(
             _behavior("behavior:a", at=("component:core", "behavior:b")),
-            _behavior("behavior:b", at=("behavior:c",)),
+            _behavior("behavior:b", at=("component:core",)),
         ),
         milestones=(
             Milestone(
@@ -629,163 +424,115 @@ def test_a_dangling_behavior_include_joins_nothing_and_stops_nothing() -> None:
         ),
     )
 
-    packet = _assembled(design, "milestone:m")
+    packet = assemble(design, "milestone:m")
 
-    assert packet.satisfy == ("behavior:ghost", "behavior:a")
-    carried = {element.ref for element in packet.elements}
-    assert "behavior:ghost" not in carried
-    # The one-hop walk survived the ref that resolved to nothing.
-    assert "behavior:b" in carried
+    assert packet.satisfy == ("behavior:a", "behavior:b")
+    assert "behavior:ghost" not in _fidelities(packet)
 
 
-def _cycle_store() -> Design:
-    """Composition cycles — the mutual X↔Y and the self-composing Z — which
-    `ab check` reports and `ab packet` must survive: assembly walks possibly
-    unchecked input and cannot hang on it."""
-    return Design(
-        system=System(id="system:cycle", title="Cycle"),
-        components=(Component(id="component:core", title="Core"),),
-        behaviors=(
-            _behavior("behavior:x", at=("component:core", "behavior:y")),
-            _behavior("behavior:y", at=("behavior:x",)),
-            _behavior("behavior:z", at=("behavior:z",)),
-        ),
-        milestones=(
-            Milestone(
-                id="milestone:m",
-                title="M",
-                includes=("behavior:x", "behavior:z"),
-                scope=("component:core",),
+# ------------------------------------------------------------- the refusals
+
+
+@pytest.mark.parametrize("ref", ["milestone:nope", "component:orders"])
+def test_a_ref_that_names_no_milestone_is_a_lookup_error(ref: str) -> None:
+    """A broken invocation, not a statement about the design: an id nothing
+    defines and an id that defines something else fail the same way, because
+    in both cases nobody named a slice."""
+
+    with pytest.raises(LookupError, match=rf"{ref} is not a milestone of design:acme"):
+        assemble(_design("clean"), ref)
+
+
+def test_a_milestone_that_names_no_scope_is_a_finding() -> None:
+    """The milestone exists and says nothing about what may be touched — a
+    true statement about the design, so it carries a ``Finding`` rather than a
+    usage error. Read off ``broken/``, so the finding can name the file a
+    human goes to."""
+
+    with pytest.raises(PacketError) as excinfo:
+        assemble(_design("broken"), "milestone:unscoped")
+
+    report = excinfo.value.report
+    assert report.rule_id == "packet/empty-scope"
+    assert report.severity is Severity.ERROR
+    assert report.ref == "milestone:unscoped"
+    assert report.source == "milestones/unscoped.md"
+    # The exception's own message is the finding's: the CLI echoes `str(error)`
+    # to stderr, and that has to be the sentence worth reading.
+    assert str(excinfo.value) == report.message
+
+
+# --------------------------------------------------- more than one repository
+
+
+def test_a_packet_spans_every_repository_the_slice_lives_in() -> None:
+    """``composite/``: one design over two repositories, and the packet is one
+    brief. The two containers are implemented in different repositories and
+    both arrive whole, with the interface declared on one side and called from
+    the other as the contract between them."""
+
+    packet = assemble(_design("composite"), "milestone:invoicing")
+
+    fidelities = _fidelities(packet)
+    assert fidelities["component:orders-api"] is Fidelity.FULL
+    assert fidelities["component:billing-worker"] is Fidelity.FULL
+    assert fidelities["interface:invoice-events"] is Fidelity.CONTRACT
+    by_ref = {element.ref: element.element for element in packet.elements}
+    assert by_ref["component:orders-api"]["implemented_by"] == ["orders#api"]
+    assert by_ref["component:billing-worker"]["implemented_by"] == ["billing#worker"]
+    assert packet.done_when == ("behavior:order-settles#obs-2",)
+
+
+# ------------------------------------------------------------- the artifact
+
+
+def test_a_note_reaches_no_packet() -> None:
+    """An agent never sees a note. A note is not an element, so assembly
+    cannot reach one — pinned against a design carrying a note pointed
+    straight at the scope."""
+
+    design = Design(
+        id="design:noted",
+        title="Noted",
+        version="0.1.0",
+        components=(_component("component:core"),),
+        milestones=(Milestone(id="milestone:m", title="M", scope=("component:core",)),),
+        notes=(
+            Note(
+                id="note:k1j2k3",
+                created_on=date(2026, 8, 16),
+                text="The packet must never carry this.",
+                about=("component:core",),
             ),
         ),
     )
 
-
-def test_composition_cycles_terminate_instead_of_hanging() -> None:
-    packet = _assembled(_cycle_store(), "milestone:m")
-
-    assert packet.satisfy == ("behavior:x", "behavior:z")
-    # Y joins once, one hop from X; X composing Y and Y composing X cannot
-    # re-enter the walk, and Z's self-composition joins nothing new.
-    assert packet.must_not_break == ()
-    assert {element.ref: element.fidelity for element in packet.elements} == {
-        "milestone:m": Fidelity.FULL,
-        "component:core": Fidelity.FULL,
-        "behavior:x": Fidelity.FULL,
-        "behavior:y": Fidelity.FULL,
-        "behavior:z": Fidelity.FULL,
-    }
-
-
-def _timing_store() -> Design:
-    """Every row of §1.2's table plus the authored-wins rule, one observation
-    each: a stream and a store left unsaid, an authored timing over the
-    `immediate` default, and a `must_not` with no when at all."""
-    return Design(
-        system=System(id="system:timing", title="Timing"),
-        components=(Component(id="component:core", title="Core"),),
-        resources=(
-            Resource(
-                id="resource:events",
-                title="Events",
-                resource_kind=ResourceKind.STREAM,
-                technology="Kafka",
-            ),
-            Resource(
-                id="resource:db",
-                title="Database",
-                resource_kind=ResourceKind.STORE,
-                technology="Postgres",
-            ),
-        ),
-        behaviors=(
-            Behavior(
-                id="behavior:timed",
-                title="Timed",
-                trigger="Something happens.",
-                observations=(
-                    Observation(
-                        id="behavior:timed#obs-1",
-                        statement="unsaid, over a stream",
-                        at="resource:events",
-                    ),
-                    Observation(
-                        id="behavior:timed#obs-2",
-                        statement="unsaid, over a store",
-                        at="resource:db",
-                    ),
-                    Observation(
-                        id="behavior:timed#obs-3",
-                        statement="said, and it wins",
-                        at="component:core",
-                        timing=Timing.EVENTUAL,
-                    ),
-                    Observation(
-                        id="behavior:timed#obs-4",
-                        statement="never, at no point",
-                        at="resource:db",
-                        outcome=Outcome.MUST_NOT,
-                    ),
-                ),
-            ),
-        ),
-        milestones=(
-            Milestone(
-                id="milestone:m", title="M", includes=("behavior:timed",), scope=("component:core",)
-            ),
-        ),
-    )
-
-
-def test_carried_observations_spell_their_effective_timing() -> None:
-    packet = _assembled(_timing_store(), "milestone:m")
-
-    behavior = next(element for element in packet.elements if element.ref == "behavior:timed")
-    observations = behavior.element["observations"]
-
-    assert [observation["effective_timing"] for observation in observations] == [
-        "eventual",  # §1.2: a stream defaults eventual, asserted by consuming it
-        "immediate",  # a store defaults immediate
-        "eventual",  # an authored timing wins over the immediate default
-        None,  # must_not means "at no point": no when to spell
-    ]
-    # The authored side stays what the file said — additive, never rewritten.
-    assert [observation["timing"] for observation in observations] == [None, None, "eventual", None]
-
-
-def test_no_note_ref_appears_anywhere_in_the_serialized_packet(tmp_path: Path) -> None:
-    """§6: an agent never sees a note. Notes are structurally outside
-    `Design`, so assembly cannot reach one — pinned against a store that
-    actually carries a note pointed straight at the scope."""
-    store = tmp_path / "store"
-    (store / "components").mkdir(parents=True)
-    (store / "milestones").mkdir()
-    (store / "notes").mkdir()
-    (store / "system.yaml").write_text("id: system:noted\ntitle: Noted\n", encoding="utf-8")
-    (store / "components" / "core.md").write_text(
-        "---\nid: component:core\ntitle: Core\n---\n", encoding="utf-8"
-    )
-    (store / "milestones" / "m.md").write_text(
-        "---\nid: milestone:m\ntitle: M\nscope:\n- component:core\n---\n", encoding="utf-8"
-    )
-    (store / "notes" / "about-core.md").write_text(
-        "---\nid: note:k1j2k3\nref: component:core\ncreated: 2026-08-16\n---\n"
-        "The packet must never carry this.\n",
-        encoding="utf-8",
-    )
-
-    packet = _assembled(resolve(load_store(store)), "milestone:m")
+    packet = assemble(design, "milestone:m")
 
     assert "note:" not in packet.model_dump_json()
 
 
 def test_the_same_design_and_milestone_assemble_identically() -> None:
-    """§8's premise — the artifact is deterministic from milestone plus design
-    rev — pinned at the source: two assemblies of one store agree byte for
-    byte, lists included."""
-    design = _selection_store()
+    """The premise under regenerating a packet instead of storing one: the
+    artifact is a function of the design and the milestone, so two assemblies
+    of one design agree byte for byte, lists included."""
+
+    design = _selection_design()
 
     assert (
-        _assembled(design, "milestone:m").model_dump_json()
-        == _assembled(design, "milestone:m").model_dump_json()
+        assemble(design, "milestone:m").model_dump_json()
+        == assemble(design, "milestone:m").model_dump_json()
     )
+
+
+def test_summarise_is_one_line_per_element_naming_its_fidelity() -> None:
+    """The human-readable index of a packet, for somebody diffing two of them:
+    every element, once, with the side of the cut it landed on."""
+
+    packet = assemble(_design("clean"), "milestone:m1")
+
+    lines = list(summarise(packet))
+
+    assert len(lines) == len(packet.elements)
+    assert lines[0] == "full     behavior:order-cancelled"
+    assert "contract library:pydantic" in lines

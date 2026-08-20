@@ -1,13 +1,13 @@
 """``ab note`` and ``absicht.notes``: the capture channel, end to end.
 
-Notes are defined by exclusion (addendum §6) — not elements, not in the
-``Design``, never packet input — so these tests hold the exclusion as hard as
-the behavior: a store with notes builds an artifact with no trace of them,
-and the one check rule that reads notes polices ``promoted_to`` and nothing
-else. The rest is the group's contract: capture from an argument, a pipe or
-the editor; an inbox ordered by age, because age is the pressure; promotion
-through the same machinery ``ab new`` uses; and the two refusals that keep
-the record of what a note became alive.
+Notes are defined by exclusion (addendum §6) — not elements, never packet
+input — so these tests hold the exclusion as hard as the behavior: a store
+with notes builds a design no element of which is a note, and the one check
+rule that reads notes polices ``about`` and nothing else. The rest is the
+group's contract: capture from an argument, a pipe or the editor; an inbox
+ordered by age, because age is the pressure; promotion through the same
+machinery ``ab new`` uses; and the two refusals that keep the record of what
+a note became alive.
 """
 
 from __future__ import annotations
@@ -26,15 +26,16 @@ from absicht.build import build as build_design
 from absicht.build import design_json
 from absicht.cli import app
 from absicht.cli._common import ExitCode
-from absicht.codec import dump_element, dump_singleton, parse_element
-from absicht.models import (
-    SCHEMA_VERSION,
+from absicht.codec import dump_design, dump_element, parse_element
+from absicht.models.design import (
+    FORMAT_VERSION,
     Component,
+    ComponentLevel,
     Design,
+    Element,
     Note,
     Question,
     State,
-    System,
 )
 
 runner = CliRunner()
@@ -72,7 +73,13 @@ def _note_file(
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         dump_element(
-            Note(id=note_id, created=created, ref=ref, promoted_to=promoted_to, body=body)
+            Note(
+                id=note_id,
+                created_on=created,
+                about=(ref,) if ref else (),
+                promoted_to=promoted_to,
+                text=body,
+            )
         ),
         encoding="utf-8",
     )
@@ -82,7 +89,10 @@ def _note_file(
 def _parse(store: Path, note_id: str) -> Note:
     """Read one note back through the codec, as the loader would."""
     source = f"notes/{note_id.removeprefix('note:')}.md"
-    return parse_element((store / source).read_text(encoding="utf-8"), model=Note, source=source)
+    parsed, _ = parse_element(
+        (store / source).read_text(encoding="utf-8"), model=Note, source=source
+    )
+    return parsed
 
 
 def _only_note_file(store: Path) -> Path:
@@ -102,8 +112,8 @@ def _clean_store(tmp_path: Path) -> Path:
     """
     root = tmp_path / "clean"
     root.mkdir()
-    (root / "system.yaml").write_text(
-        dump_singleton(System(id="system:acme", title="ACME", state=State.SPECIFIED, owner="vinz")),
+    (root / "design.yaml").write_text(
+        dump_design(Design(id="design:acme", title="ACME", version="0.1.0")),
         encoding="utf-8",
     )
     root.joinpath("components").mkdir()
@@ -114,6 +124,7 @@ def _clean_store(tmp_path: Path) -> Path:
                 title="Cancellation",
                 state=State.SPECIFIED,
                 owner="vinz",
+                level=ComponentLevel.SYSTEM,
             )
         ),
         encoding="utf-8",
@@ -130,11 +141,12 @@ def test_add_with_a_text_argument_writes_a_parseable_note(store: Path) -> None:
     assert result.exit_code == ExitCode.OK
     written = _parse(store, json.loads(result.stdout)["id"])
     assert ID_PATTERN.match(written.id)
-    assert written.created == date.today()
-    assert written.ref is None
+    assert written.created_on == date.today()
+    assert written.about == ()
     assert written.promoted_to is None
-    assert written.body == "The packet scope grows unbounded"
-    assert written.source == f"notes/{written.id.removeprefix('note:')}.md"
+    assert written.text == "The packet scope grows unbounded"
+    # A note stores no `source`: its id already says where the file lives.
+    assert (store / "notes" / f"{written.id.removeprefix('note:')}.md").is_file()
 
 
 def test_add_reports_the_id_and_the_path_in_the_json_envelope(store: Path) -> None:
@@ -142,7 +154,7 @@ def test_add_reports_the_id_and_the_path_in_the_json_envelope(store: Path) -> No
 
     assert result.exit_code == ExitCode.OK
     payload = json.loads(result.stdout)
-    assert payload["schema_version"] == SCHEMA_VERSION
+    assert payload["format_version"] == FORMAT_VERSION
     assert ID_PATTERN.match(payload["id"])
     assert payload["path"] == str(store / "notes" / f"{payload['id'].removeprefix('note:')}.md")
 
@@ -163,9 +175,10 @@ def test_add_reads_piped_stdin_when_no_argument_is_given(store: Path) -> None:
 
     assert result.exit_code == ExitCode.OK
     path = _only_note_file(store)
-    assert parse_element(
+    parsed, _ = parse_element(
         path.read_text(encoding="utf-8"), model=Note, source=f"notes/{path.name}"
-    ).body == ("Piped thought")
+    )
+    assert parsed.text == "Piped thought"
 
 
 def test_add_without_a_body_is_a_usage_error_and_writes_nothing(store: Path) -> None:
@@ -202,7 +215,9 @@ def test_add_refuses_a_ref_that_is_not_a_ref(store: Path) -> None:
     result = note(store, "add", "A thought", "--ref", "not a ref")
 
     assert result.exit_code == ExitCode.USAGE
-    assert "ref" in result.stderr
+    # `--ref` lands in `about`, the field that refuses it, and the message
+    # names that field rather than the flag it arrived on.
+    assert "about" in result.stderr
     assert not (store / "notes").exists()
 
 
@@ -213,7 +228,7 @@ def test_add_accepts_a_ref_that_does_not_resolve_yet(store: Path) -> None:
     result = note(store, "add", "A thought", "--ref", "component:ghost", "--json")
 
     assert result.exit_code == ExitCode.OK
-    assert _parse(store, json.loads(result.stdout)["id"]).ref == "component:ghost"
+    assert _parse(store, json.loads(result.stdout)["id"]).about == ("component:ghost",)
 
 
 def test_a_generated_id_redraws_rather_than_collides_with_a_note_in_the_store(
@@ -224,8 +239,8 @@ def test_a_generated_id_redraws_rather_than_collides_with_a_note_in_the_store(
     drawn = notes.add(store, "Again", created=date.today(), rng=_ScriptedDraws([0, 1]))
 
     assert drawn.id == "note:000001"
-    assert _parse(store, "note:000000").body == "A thought."
-    assert _parse(store, "note:000001").body == "Again"
+    assert _parse(store, "note:000000").text == "A thought."
+    assert _parse(store, "note:000001").text == "Again"
 
 
 class _ScriptedDraws(random.Random):
@@ -289,19 +304,19 @@ def test_list_ids_and_json_are_the_machine_shapes(store: Path) -> None:
     assert ids.exit_code == ExitCode.OK
     assert ids.stdout == "note:old001\nnote:new001\n"
     payload = json.loads(envelope.stdout)
-    assert payload["schema_version"] == SCHEMA_VERSION
+    assert payload["format_version"] == FORMAT_VERSION
     assert payload["notes"] == [
         {
             "id": "note:old001",
-            "ref": None,
-            "created": _days_ago(400).isoformat(),
+            "about": [],
+            "created_on": _days_ago(400).isoformat(),
             "promoted_to": None,
             "age_days": 400,
         },
         {
             "id": "note:new001",
-            "ref": "component:ghost",
-            "created": _days_ago(1).isoformat(),
+            "about": ["component:ghost"],
+            "created_on": _days_ago(1).isoformat(),
             "promoted_to": None,
             "age_days": 1,
         },
@@ -319,9 +334,9 @@ def test_show_prints_the_note_as_authored(store: Path) -> None:
         encoding="utf-8"
     ) + ("\n")
     payload = json.loads(enveloped.stdout)
-    assert payload["schema_version"] == SCHEMA_VERSION
+    assert payload["format_version"] == FORMAT_VERSION
     assert payload["note"]["id"] == note_id
-    assert payload["note"]["body"] == "Look at the packet builder"
+    assert payload["note"]["text"] == "Look at the packet builder"
 
 
 # ------------------------------------------------------- the terminal states
@@ -337,7 +352,7 @@ def test_promote_creates_the_element_and_stamps_the_note(store: Path) -> None:
     result = note(store, "promote", note_id, "question", "packet-retention")
 
     assert result.exit_code == ExitCode.OK
-    element = parse_element(
+    element, _ = parse_element(
         (store / "questions" / "packet-retention.md").read_text(encoding="utf-8"),
         model=Question,
         source="questions/packet-retention.md",
@@ -346,7 +361,7 @@ def test_promote_creates_the_element_and_stamps_the_note(store: Path) -> None:
     assert element.title == "packet-retention"  # the `ab new` default
     stamped = _parse(store, note_id)
     assert stamped.promoted_to == "question:packet-retention"
-    assert stamped.body == "How long do we retain packets?"  # the note survives
+    assert stamped.text == "How long do we retain packets?"  # the note survives
     # Out of the inbox, in under --all
     assert note_id not in note(store, "list").stdout
     everything = note(store, "list", "--all")
@@ -360,7 +375,7 @@ def test_promote_json_names_both_sides(store: Path) -> None:
     result = note(store, "promote", note_id, "question", "why", "--json")
 
     assert json.loads(result.stdout) == {
-        "schema_version": SCHEMA_VERSION,
+        "format_version": FORMAT_VERSION,
         "note": note_id,
         "promoted_to": "question:why",
     }
@@ -417,57 +432,64 @@ def test_an_unknown_note_id_is_a_usage_error(store: Path, verb: str, argv: list[
 # ----------------------------------------------------------------- exclusion
 
 
-def test_a_store_with_notes_builds_a_design_with_no_trace_of_them(store: Path) -> None:
+def test_a_store_with_notes_builds_a_design_no_element_of_which_is_a_note(store: Path) -> None:
     note_id = json.loads(note(store, "add", "How long?", "--json").stdout)["id"]
     assert note(store, "promote", note_id, "question", "retention").exit_code == ExitCode.OK
     _note_file(store, "note:loose01", created=_days_ago(2))
 
-    artifact = design_json(build_design(store))
+    design = build_design(store)
+    artifact = json.loads(design_json(design))
 
     # Structural, not incidental: the exclusion is the point (addendum §6).
-    assert "notes" not in Design.model_fields
-    assert "note:" not in artifact
-    assert "notes" not in artifact
-    # The promotion target is in; the note that became it is not.
-    assert "question:retention" in artifact
+    assert not issubclass(Note, Element)
+    assert [element.id for element in design.elements() if element.id.startswith("note:")] == []
+    # Carried beside the graph, under a key of their own — and nowhere else,
+    # so nothing that walks the design's elements can reach one.
+    assert {entry["id"] for entry in artifact.pop("notes")} == {note_id, "note:loose01"}
+    assert "note:" not in json.dumps(artifact)
+    # The promotion target is in the graph; the note that became it is not.
+    assert "question:retention" in {element.id for element in design.elements()}
 
 
 # --------------------------------------------------------------- the one rule
 
 
-def test_check_on_a_note_with_an_unresolvable_promoted_to_is_exactly_that_rule(
+def test_check_on_a_note_about_something_unresolvable_is_exactly_that_rule(
     tmp_path: Path,
 ) -> None:
     store = _clean_store(tmp_path)
-    _note_file(store, "note:stuck1", created=_days_ago(5), promoted_to="component:ghost")
+    _note_file(store, "note:stuck1", created=_days_ago(5), ref="component:ghost")
 
-    result = runner.invoke(app, ["--store", str(store), "check", "--format", "json"])
+    result = runner.invoke(
+        app, ["--store", str(store), "check", "--severity", "info", "--format", "json"]
+    )
 
-    assert result.exit_code == ExitCode.FINDINGS
+    # `info` never moves the exit: a note about something not yet written is
+    # the normal case, so this is reported and never failed on.
+    assert result.exit_code == ExitCode.OK
     (only,) = json.loads(result.stdout)["findings"]
-    assert only["rule_id"] == "integrity/note-promoted-to-unresolvable"
-    assert only["severity"] == "error"
+    assert only["rule_id"] == "policy/note-dangling"
+    assert only["severity"] == "info"
     # Pinned whole: the finding names the note, the dead target, and nothing
     # vaguer — it is all an agent fixing the store gets to read.
-    assert only["message"] == (
-        "note:stuck1 is promoted to component:ghost, which no element in the store defines"
-    )
+    assert only["message"] == "note:stuck1 is about component:ghost, which nothing defines"
     assert only["ref"] == "note:stuck1"
-    assert only["source"] == "notes/stuck1.md"
+    # A note keeps no `source`, so the finding has no file to point at.
+    assert only["source"] is None
 
 
-def test_check_on_a_note_whose_promoted_to_resolves_says_nothing(tmp_path: Path) -> None:
+def test_check_on_a_note_whose_anchor_resolves_says_nothing(tmp_path: Path) -> None:
     store = _clean_store(tmp_path)
-    _note_file(store, "note:done001", created=_days_ago(5), promoted_to="component:cancellation")
+    _note_file(store, "note:done001", created=_days_ago(5), ref="component:cancellation")
 
-    result = runner.invoke(app, ["--store", str(store), "check"])
+    result = runner.invoke(app, ["--store", str(store), "check", "--severity", "info"])
 
     assert result.exit_code == ExitCode.OK
     assert result.stdout == ""
 
 
 def test_check_explains_the_note_rule() -> None:
-    result = runner.invoke(app, ["check", "--explain", "integrity/note-promoted-to-unresolvable"])
+    result = runner.invoke(app, ["check", "--explain", "policy/note-dangling"])
 
     assert result.exit_code == ExitCode.OK
-    assert "integrity/note-promoted-to-unresolvable:" in result.stdout
+    assert "policy/note-dangling:" in result.stdout

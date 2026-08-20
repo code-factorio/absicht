@@ -1,0 +1,2944 @@
+{
+  "$defs": {
+    "Actor": {
+      "additionalProperties": false,
+      "description": "Who or what the system serves, or is served by.",
+      "properties": {
+        "id": {
+          "pattern": "^[a-z]+:[a-z0-9][a-z0-9-]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "title": {
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/$defs/State",
+          "default": "unknown",
+          "description": "`unknown` by default, so an element nobody finished never reads as\nsettled. Saying nothing and saying \"implement as written\" must differ."
+        },
+        "confidence": {
+          "$ref": "#/$defs/Confidence",
+          "default": "assumed"
+        },
+        "reversibility": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Reversibility"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Set it where the agent decides. `check` warns on a `constrained` or\n`delegated` element without one: the agent cannot judge how far to go."
+        },
+        "lifecycle": {
+          "$ref": "#/$defs/Lifecycle",
+          "default": "active"
+        },
+        "supersedes": {
+          "default": [],
+          "description": "Recorded on the replacement only. A stored `superseded_by` would be a\nsecond copy of one fact, and the two would disagree.",
+          "items": {
+            "pattern": "^[a-z]+:[a-z0-9][a-z0-9-]*$",
+            "type": "string"
+          },
+          "title": "Supersedes",
+          "type": "array"
+        },
+        "owner": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Owner"
+        },
+        "tags": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Tags",
+          "type": "array"
+        },
+        "source": {
+          "default": "",
+          "description": "Path within the store.",
+          "title": "Source",
+          "type": "string"
+        },
+        "body": {
+          "default": "",
+          "description": "Prose, verbatim. Never parsed.",
+          "title": "Body",
+          "type": "string"
+        },
+        "actor_kind": {
+          "$ref": "#/$defs/ActorKind",
+          "default": "person"
+        },
+        "goals": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Goals",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "title"
+      ],
+      "title": "Actor",
+      "type": "object"
+    },
+    "ActorKind": {
+      "enum": [
+        "person",
+        "system",
+        "time"
+      ],
+      "title": "ActorKind",
+      "type": "string"
+    },
+    "Assumption": {
+      "additionalProperties": false,
+      "description": "Something taken as true without proof. It expires.",
+      "properties": {
+        "id": {
+          "pattern": "^[a-z]+:[a-z0-9][a-z0-9-]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "title": {
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/$defs/State",
+          "default": "unknown",
+          "description": "`unknown` by default, so an element nobody finished never reads as\nsettled. Saying nothing and saying \"implement as written\" must differ."
+        },
+        "confidence": {
+          "$ref": "#/$defs/Confidence",
+          "default": "assumed"
+        },
+        "reversibility": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Reversibility"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Set it where the agent decides. `check` warns on a `constrained` or\n`delegated` element without one: the agent cannot judge how far to go."
+        },
+        "lifecycle": {
+          "$ref": "#/$defs/Lifecycle",
+          "default": "active"
+        },
+        "supersedes": {
+          "default": [],
+          "description": "Recorded on the replacement only. A stored `superseded_by` would be a\nsecond copy of one fact, and the two would disagree.",
+          "items": {
+            "pattern": "^[a-z]+:[a-z0-9][a-z0-9-]*$",
+            "type": "string"
+          },
+          "title": "Supersedes",
+          "type": "array"
+        },
+        "owner": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Owner"
+        },
+        "tags": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Tags",
+          "type": "array"
+        },
+        "source": {
+          "default": "",
+          "description": "Path within the store.",
+          "title": "Source",
+          "type": "string"
+        },
+        "body": {
+          "default": "",
+          "description": "Prose, verbatim. Never parsed.",
+          "title": "Body",
+          "type": "string"
+        },
+        "statement": {
+          "minLength": 1,
+          "title": "Statement",
+          "type": "string"
+        },
+        "verified_on": {
+          "anyOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Verified On"
+        },
+        "expires_on": {
+          "anyOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "After this date, check it again before you trust it.",
+          "title": "Expires On"
+        },
+        "invalidates": {
+          "default": [],
+          "description": "What stops holding if the assumption is wrong.",
+          "items": {
+            "pattern": "^[a-z]+:[a-z0-9][a-z0-9-]*$",
+            "type": "string"
+          },
+          "title": "Invalidates",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "statement"
+      ],
+      "title": "Assumption",
+      "type": "object"
+    },
+    "Behavior": {
+      "additionalProperties": false,
+      "description": "What the system does when something happens.\n\nPermanent, and owned by no milestone. An import of an undocumented system\nproduces behaviors in state `observed` and no requirement behind them — a\nlegal state, and an honest one. A `realizes` edge links a behavior to the\nrequirement that asked for it, where one asked.",
+      "properties": {
+        "id": {
+          "pattern": "^[a-z]+:[a-z0-9][a-z0-9-]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "title": {
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/$defs/State",
+          "default": "unknown",
+          "description": "`unknown` by default, so an element nobody finished never reads as\nsettled. Saying nothing and saying \"implement as written\" must differ."
+        },
+        "confidence": {
+          "$ref": "#/$defs/Confidence",
+          "default": "assumed"
+        },
+        "reversibility": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Reversibility"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Set it where the agent decides. `check` warns on a `constrained` or\n`delegated` element without one: the agent cannot judge how far to go."
+        },
+        "lifecycle": {
+          "$ref": "#/$defs/Lifecycle",
+          "default": "active"
+        },
+        "supersedes": {
+          "default": [],
+          "description": "Recorded on the replacement only. A stored `superseded_by` would be a\nsecond copy of one fact, and the two would disagree.",
+          "items": {
+            "pattern": "^[a-z]+:[a-z0-9][a-z0-9-]*$",
+            "type": "string"
+          },
+          "title": "Supersedes",
+          "type": "array"
+        },
+        "owner": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Owner"
+        },
+        "tags": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Tags",
+          "type": "array"
+        },
+        "source": {
+          "default": "",
+          "description": "Path within the store.",
+          "title": "Source",
+          "type": "string"
+        },
+        "body": {
+          "default": "",
+          "description": "Prose, verbatim. Never parsed.",
+          "title": "Body",
+          "type": "string"
+        },
+        "trigger": {
+          "description": "Prose. A sentence that names what happened, not a condition.",
+          "minLength": 1,
+          "title": "Trigger",
+          "type": "string"
+        },
+        "observations": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Observation"
+          },
+          "title": "Observations",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "trigger"
+      ],
+      "title": "Behavior",
+      "type": "object"
+    },
+    "Component": {
+      "additionalProperties": false,
+      "description": "A part of the system we design. Nesting is the zoom, not a new type.\n\nA deep module, in the same sense as `Interface`: what it holds is the\nvalue, and what it shows is the cost. Its interfaces are the whole\nsurface, and the children behind them are nobody else's business — a\ncomponent with many interfaces is shallow, whatever its size.\n\nC4 level 4 is absent on purpose: the code is the truth, and a model of\nit goes stale within a week.",
+      "properties": {
+        "id": {
+          "pattern": "^[a-z]+:[a-z0-9][a-z0-9-]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "title": {
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/$defs/State",
+          "default": "unknown",
+          "description": "`unknown` by default, so an element nobody finished never reads as\nsettled. Saying nothing and saying \"implement as written\" must differ."
+        },
+        "confidence": {
+          "$ref": "#/$defs/Confidence",
+          "default": "assumed"
+        },
+        "reversibility": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Reversibility"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Set it where the agent decides. `check` warns on a `constrained` or\n`delegated` element without one: the agent cannot judge how far to go."
+        },
+        "lifecycle": {
+          "$ref": "#/$defs/Lifecycle",
+          "default": "active"
+        },
+        "supersedes": {
+          "default": [],
+          "description": "Recorded on the replacement only. A stored `superseded_by` would be a\nsecond copy of one fact, and the two would disagree.",
+          "items": {
+            "pattern": "^[a-z]+:[a-z0-9][a-z0-9-]*$",
+            "type": "string"
+          },
+          "title": "Supersedes",
+          "type": "array"
+        },
+        "owner": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Owner"
+        },
+        "tags": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Tags",
+          "type": "array"
+        },
+        "source": {
+          "default": "",
+          "description": "Path within the store.",
+          "title": "Source",
+          "type": "string"
+        },
+        "body": {
+          "default": "",
+          "description": "Prose, verbatim. Never parsed.",
+          "title": "Body",
+          "type": "string"
+        },
+        "level": {
+          "$ref": "#/$defs/ComponentLevel"
+        },
+        "responsibility": {
+          "default": "",
+          "title": "Responsibility",
+          "type": "string"
+        },
+        "technology": {
+          "default": "",
+          "description": "Free text, forever: `Python 3.13`, `React`. An enum needs migrating.",
+          "title": "Technology",
+          "type": "string"
+        },
+        "parent": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z]+:[a-z0-9][a-z0-9-]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "One owner, so a part cannot sit in two containers. `check` holds the\nlevel rule: a container's parent is a system, a component's parent is a\ncontainer, a system has none.",
+          "title": "Parent"
+        },
+        "implemented_by": {
+          "default": [],
+          "description": "\"repo#path\". The authoritative link to code; markers are hints.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Implemented By",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "level"
+      ],
+      "title": "Component",
+      "type": "object"
+    },
+    "ComponentLevel": {
+      "description": "The C4 zoom. One type, one field — the fields do not change per level.",
+      "enum": [
+        "system",
+        "container",
+        "component"
+      ],
+      "title": "ComponentLevel",
+      "type": "string"
+    },
+    "Confidence": {
+      "description": "How much we trust this, independent of how complete it is.",
+      "enum": [
+        "assumed",
+        "reviewed",
+        "verified"
+      ],
+      "title": "Confidence",
+      "type": "string"
+    },
+    "Constraint": {
+      "additionalProperties": false,
+      "description": "A limit the design must obey. A requirement you cannot trade away.\n\nWhat it binds is a `constrained_by` edge, not a field here: the edge\ncarries the reason alongside the link, and one place cannot disagree\nwith itself.",
+      "properties": {
+        "id": {
+          "pattern": "^[a-z]+:[a-z0-9][a-z0-9-]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "title": {
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/$defs/State",
+          "default": "unknown",
+          "description": "`unknown` by default, so an element nobody finished never reads as\nsettled. Saying nothing and saying \"implement as written\" must differ."
+        },
+        "confidence": {
+          "$ref": "#/$defs/Confidence",
+          "default": "assumed"
+        },
+        "reversibility": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Reversibility"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Set it where the agent decides. `check` warns on a `constrained` or\n`delegated` element without one: the agent cannot judge how far to go."
+        },
+        "lifecycle": {
+          "$ref": "#/$defs/Lifecycle",
+          "default": "active"
+        },
+        "supersedes": {
+          "default": [],
+          "description": "Recorded on the replacement only. A stored `superseded_by` would be a\nsecond copy of one fact, and the two would disagree.",
+          "items": {
+            "pattern": "^[a-z]+:[a-z0-9][a-z0-9-]*$",
+            "type": "string"
+          },
+          "title": "Supersedes",
+          "type": "array"
+        },
+        "owner": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Owner"
+        },
+        "tags": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Tags",
+          "type": "array"
+        },
+        "source": {
+          "default": "",
+          "description": "Path within the store.",
+          "title": "Source",
+          "type": "string"
+        },
+        "body": {
+          "default": "",
+          "description": "Prose, verbatim. Never parsed.",
+          "title": "Body",
+          "type": "string"
+        },
+        "statement": {
+          "minLength": 1,
+          "title": "Statement",
+          "type": "string"
+        },
+        "constraint_kind": {
+          "$ref": "#/$defs/ConstraintKind"
+        },
+        "imposed_by": {
+          "default": "",
+          "title": "Imposed By",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "statement",
+        "constraint_kind"
+      ],
+      "title": "Constraint",
+      "type": "object"
+    },
+    "ConstraintKind": {
+      "description": "Where the constraint comes from. You did not choose it.",
+      "enum": [
+        "regulatory",
+        "technical",
+        "organisational",
+        "commercial"
+      ],
+      "title": "ConstraintKind",
+      "type": "string"
+    },
+    "DataEntity": {
+      "additionalProperties": false,
+      "description": "A thing the system stores or carries, and the component that owns it.\n\n`type` is free text and will trail the real type. The entity earns its\nplace anyway: an agent asks who owns a table before it writes to one,\nand no other element answers that.",
+      "properties": {
+        "id": {
+          "pattern": "^[a-z]+:[a-z0-9][a-z0-9-]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "title": {
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/$defs/State",
+          "default": "unknown",
+          "description": "`unknown` by default, so an element nobody finished never reads as\nsettled. Saying nothing and saying \"implement as written\" must differ."
+        },
+        "confidence": {
+          "$ref": "#/$defs/Confidence",
+          "default": "assumed"
+        },
+        "reversibility": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Reversibility"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Set it where the agent decides. `check` warns on a `constrained` or\n`delegated` element without one: the agent cannot judge how far to go."
+        },
+        "lifecycle": {
+          "$ref": "#/$defs/Lifecycle",
+          "default": "active"
+        },
+        "supersedes": {
+          "default": [],
+          "description": "Recorded on the replacement only. A stored `superseded_by` would be a\nsecond copy of one fact, and the two would disagree.",
+          "items": {
+            "pattern": "^[a-z]+:[a-z0-9][a-z0-9-]*$",
+            "type": "string"
+          },
+          "title": "Supersedes",
+          "type": "array"
+        },
+        "owner": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Owner"
+        },
+        "tags": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Tags",
+          "type": "array"
+        },
+        "source": {
+          "default": "",
+          "description": "Path within the store.",
+          "title": "Source",
+          "type": "string"
+        },
+        "body": {
+          "default": "",
+          "description": "Prose, verbatim. Never parsed.",
+          "title": "Body",
+          "type": "string"
+        },
+        "owner_component": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z]+:[a-z0-9][a-z0-9-]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Owner Component"
+        },
+        "fields": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/FieldSpec"
+          },
+          "title": "Fields",
+          "type": "array"
+        },
+        "identity": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Identity",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "title"
+      ],
+      "title": "DataEntity",
+      "type": "object"
+    },
+    "Decision": {
+      "additionalProperties": false,
+      "description": "A choice, with what it costs. The design's ADR.",
+      "properties": {
+        "id": {
+          "pattern": "^[a-z]+:[a-z0-9][a-z0-9-]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "title": {
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/$defs/State",
+          "default": "unknown",
+          "description": "`unknown` by default, so an element nobody finished never reads as\nsettled. Saying nothing and saying \"implement as written\" must differ."
+        },
+        "confidence": {
+          "$ref": "#/$defs/Confidence",
+          "default": "assumed"
+        },
+        "reversibility": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Reversibility"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Set it where the agent decides. `check` warns on a `constrained` or\n`delegated` element without one: the agent cannot judge how far to go."
+        },
+        "lifecycle": {
+          "$ref": "#/$defs/Lifecycle",
+          "default": "active"
+        },
+        "supersedes": {
+          "default": [],
+          "description": "Recorded on the replacement only. A stored `superseded_by` would be a\nsecond copy of one fact, and the two would disagree.",
+          "items": {
+            "pattern": "^[a-z]+:[a-z0-9][a-z0-9-]*$",
+            "type": "string"
+          },
+          "title": "Supersedes",
+          "type": "array"
+        },
+        "owner": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Owner"
+        },
+        "tags": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Tags",
+          "type": "array"
+        },
+        "source": {
+          "default": "",
+          "description": "Path within the store.",
+          "title": "Source",
+          "type": "string"
+        },
+        "body": {
+          "default": "",
+          "description": "Prose, verbatim. Never parsed.",
+          "title": "Body",
+          "type": "string"
+        },
+        "context": {
+          "default": "",
+          "title": "Context",
+          "type": "string"
+        },
+        "choice": {
+          "minLength": 1,
+          "title": "Choice",
+          "type": "string"
+        },
+        "consequences": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Consequences",
+          "type": "array"
+        },
+        "alternatives": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Alternatives",
+          "type": "array"
+        },
+        "applies_to": {
+          "default": [],
+          "items": {
+            "pattern": "^[a-z]+:[a-z0-9][a-z0-9-]*$",
+            "type": "string"
+          },
+          "title": "Applies To",
+          "type": "array"
+        },
+        "decided_on": {
+          "anyOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Decided On"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "choice"
+      ],
+      "title": "Decision",
+      "type": "object"
+    },
+    "ExternalService": {
+      "additionalProperties": false,
+      "description": "A system another party owns. We call it and never design it.\n\nIt is the box beside our own: `Component` means a part we design, so a\nforeign system cannot be one without making that sentence false.\n\nTwo cases. Where the other side has an absicht design, `design` names\nthe import, and the interfaces we call are its exports — we hold no\nopinion of our own about a contract somebody else publishes. Where it\nhas none, like Stripe, we write the `Interface` we require and own the\nassumptions behind it, with the date they expire.",
+      "properties": {
+        "id": {
+          "pattern": "^[a-z]+:[a-z0-9][a-z0-9-]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "title": {
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/$defs/State",
+          "default": "unknown",
+          "description": "`unknown` by default, so an element nobody finished never reads as\nsettled. Saying nothing and saying \"implement as written\" must differ."
+        },
+        "confidence": {
+          "$ref": "#/$defs/Confidence",
+          "default": "assumed"
+        },
+        "reversibility": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Reversibility"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Set it where the agent decides. `check` warns on a `constrained` or\n`delegated` element without one: the agent cannot judge how far to go."
+        },
+        "lifecycle": {
+          "$ref": "#/$defs/Lifecycle",
+          "default": "active"
+        },
+        "supersedes": {
+          "default": [],
+          "description": "Recorded on the replacement only. A stored `superseded_by` would be a\nsecond copy of one fact, and the two would disagree.",
+          "items": {
+            "pattern": "^[a-z]+:[a-z0-9][a-z0-9-]*$",
+            "type": "string"
+          },
+          "title": "Supersedes",
+          "type": "array"
+        },
+        "owner": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Owner"
+        },
+        "tags": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Tags",
+          "type": "array"
+        },
+        "source": {
+          "default": "",
+          "description": "Path within the store.",
+          "title": "Source",
+          "type": "string"
+        },
+        "body": {
+          "default": "",
+          "description": "Prose, verbatim. Never parsed.",
+          "title": "Body",
+          "type": "string"
+        },
+        "design": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z]+:[a-z0-9][a-z0-9-]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The imported design that describes it. Must match an `Import.id`.",
+          "title": "Design"
+        },
+        "technology": {
+          "default": "",
+          "title": "Technology",
+          "type": "string"
+        },
+        "contract": {
+          "default": "",
+          "title": "Contract",
+          "type": "string"
+        },
+        "assumptions": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Assumptions",
+          "type": "array"
+        },
+        "failure_modes": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Failure Modes",
+          "type": "array"
+        },
+        "verified_on": {
+          "anyOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Verified On"
+        },
+        "expires_on": {
+          "anyOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Expires On"
+        }
+      },
+      "required": [
+        "id",
+        "title"
+      ],
+      "title": "ExternalService",
+      "type": "object"
+    },
+    "FieldSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "pattern": "^[a-z0-9][a-z0-9-]*$",
+          "title": "Name",
+          "type": "string"
+        },
+        "type": {
+          "title": "Type",
+          "type": "string"
+        },
+        "optional": {
+          "default": false,
+          "title": "Optional",
+          "type": "boolean"
+        },
+        "note": {
+          "default": "",
+          "title": "Note",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "type"
+      ],
+      "title": "FieldSpec",
+      "type": "object"
+    },
+    "Goal": {
+      "additionalProperties": false,
+      "description": "A business outcome. The why above the requirements.\n\nOne goal answers the \"so that\" of twenty requirements, and it answers it\nonce. A story sentence spreads the same intent over twenty slightly\ndifferent wordings, and none of them can be checked.",
+      "properties": {
+        "id": {
+          "pattern": "^[a-z]+:[a-z0-9][a-z0-9-]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "title": {
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/$defs/State",
+          "default": "unknown",
+          "description": "`unknown` by default, so an element nobody finished never reads as\nsettled. Saying nothing and saying \"implement as written\" must differ."
+        },
+        "confidence": {
+          "$ref": "#/$defs/Confidence",
+          "default": "assumed"
+        },
+        "reversibility": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Reversibility"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Set it where the agent decides. `check` warns on a `constrained` or\n`delegated` element without one: the agent cannot judge how far to go."
+        },
+        "lifecycle": {
+          "$ref": "#/$defs/Lifecycle",
+          "default": "active"
+        },
+        "supersedes": {
+          "default": [],
+          "description": "Recorded on the replacement only. A stored `superseded_by` would be a\nsecond copy of one fact, and the two would disagree.",
+          "items": {
+            "pattern": "^[a-z]+:[a-z0-9][a-z0-9-]*$",
+            "type": "string"
+          },
+          "title": "Supersedes",
+          "type": "array"
+        },
+        "owner": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Owner"
+        },
+        "tags": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Tags",
+          "type": "array"
+        },
+        "source": {
+          "default": "",
+          "description": "Path within the store.",
+          "title": "Source",
+          "type": "string"
+        },
+        "body": {
+          "default": "",
+          "description": "Prose, verbatim. Never parsed.",
+          "title": "Body",
+          "type": "string"
+        },
+        "outcome": {
+          "minLength": 1,
+          "title": "Outcome",
+          "type": "string"
+        },
+        "measure": {
+          "default": "",
+          "title": "Measure",
+          "type": "string"
+        },
+        "target": {
+          "default": "",
+          "description": "A goal with no measure is a slogan. `check` warns, and it is right.",
+          "title": "Target",
+          "type": "string"
+        },
+        "stakeholders": {
+          "default": [],
+          "items": {
+            "pattern": "^[a-z]+:[a-z0-9][a-z0-9-]*$",
+            "type": "string"
+          },
+          "title": "Stakeholders",
+          "type": "array"
+        },
+        "horizon": {
+          "anyOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Horizon"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "outcome"
+      ],
+      "title": "Goal",
+      "type": "object"
+    },
+    "Import": {
+      "additionalProperties": false,
+      "description": "Another design this one points into.\n\nA `Ref` carries no location, so a foreign id looks like a local one. The\nchecker indexes this design and its imports together; an id two designs\nboth define is an error there, which keeps every id short.\n\nAn import reaches the other design's `exports` and nothing else. Import\ncycles are an error: two designs that need each other are one design.",
+      "properties": {
+        "id": {
+          "pattern": "^[a-z]+:[a-z0-9][a-z0-9-]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "source": {
+          "minLength": 1,
+          "title": "Source",
+          "type": "string"
+        },
+        "ref": {
+          "default": "main",
+          "description": "A ref, never a pin.",
+          "title": "Ref",
+          "type": "string"
+        },
+        "expects": {
+          "default": "",
+          "description": "The version range we assume of the other design, as for a library.\nEmpty says nobody decided, so `check` cannot warn when the other side\nmoves.",
+          "title": "Expects",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "source"
+      ],
+      "title": "Import",
+      "type": "object"
+    },
+    "Interface": {
+      "additionalProperties": false,
+      "description": "A seam. One element declares the contract, and hides what is behind it.\n\nOusterhout's sense of the word: the value of an interface is the ratio\nbetween what it hides and what it shows. So a deep one names few\noperations and holds a lot; a long list of operations is the smell, not\nthe achievement.\n\n`declared_by` is the owner, and it is not always the element that answers\nthe call: an external service declares what we call, but a port inside a\ncontainer is declared by the component that needs it, and satisfied by\nan adapter. Whoever declares it owns the shape.\n\nAn interface on an external service is the part we require, written down\nas we understand it — the only version we can check against.\n\nThis is also the lowest zoom, in place of a code model: a `call`\ninterface declared by a level-3 component is the port. It names the shape\nand no class, so any type of that shape satisfies it, and the model does\nnot rot each time somebody renames a class.",
+      "properties": {
+        "id": {
+          "pattern": "^[a-z]+:[a-z0-9][a-z0-9-]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "title": {
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/$defs/State",
+          "default": "unknown",
+          "description": "`unknown` by default, so an element nobody finished never reads as\nsettled. Saying nothing and saying \"implement as written\" must differ."
+        },
+        "confidence": {
+          "$ref": "#/$defs/Confidence",
+          "default": "assumed"
+        },
+        "reversibility": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Reversibility"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Set it where the agent decides. `check` warns on a `constrained` or\n`delegated` element without one: the agent cannot judge how far to go."
+        },
+        "lifecycle": {
+          "$ref": "#/$defs/Lifecycle",
+          "default": "active"
+        },
+        "supersedes": {
+          "default": [],
+          "description": "Recorded on the replacement only. A stored `superseded_by` would be a\nsecond copy of one fact, and the two would disagree.",
+          "items": {
+            "pattern": "^[a-z]+:[a-z0-9][a-z0-9-]*$",
+            "type": "string"
+          },
+          "title": "Supersedes",
+          "type": "array"
+        },
+        "owner": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Owner"
+        },
+        "tags": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Tags",
+          "type": "array"
+        },
+        "source": {
+          "default": "",
+          "description": "Path within the store.",
+          "title": "Source",
+          "type": "string"
+        },
+        "body": {
+          "default": "",
+          "description": "Prose, verbatim. Never parsed.",
+          "title": "Body",
+          "type": "string"
+        },
+        "style": {
+          "$ref": "#/$defs/InterfaceStyle"
+        },
+        "declared_by": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z]+:[a-z0-9][a-z0-9-]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The single owner of the shape. Components carry no `provides` list.",
+          "title": "Declared By"
+        },
+        "contract": {
+          "default": "",
+          "description": "Path or URL of the artifact (OpenAPI, schema), when one exists.",
+          "title": "Contract",
+          "type": "string"
+        },
+        "operations": {
+          "default": [],
+          "description": "Author these only where the shape is the design. An OpenAPI file in\n`contract` already carries them, and two copies disagree.",
+          "items": {
+            "$ref": "#/$defs/Operation"
+          },
+          "title": "Operations",
+          "type": "array"
+        },
+        "implemented_by": {
+          "default": [],
+          "description": "\"repo#path\". A duck-typed shape declares nothing in the code, so the\nlink back has to live here.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Implemented By",
+          "type": "array"
+        },
+        "failure_modes": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Failure Modes",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "style"
+      ],
+      "title": "Interface",
+      "type": "object"
+    },
+    "InterfaceStyle": {
+      "enum": [
+        "call",
+        "http",
+        "event",
+        "queue",
+        "file",
+        "ui"
+      ],
+      "title": "InterfaceStyle",
+      "type": "string"
+    },
+    "Library": {
+      "additionalProperties": false,
+      "description": "Code compiled into a container. It crosses no runtime boundary.\n\nC4 draws no libraries, and that is right — a library provides no\ninterface and takes part in no call. The license and the version are\nstill facts about the system, so the type exists.",
+      "properties": {
+        "id": {
+          "pattern": "^[a-z]+:[a-z0-9][a-z0-9-]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "title": {
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/$defs/State",
+          "default": "unknown",
+          "description": "`unknown` by default, so an element nobody finished never reads as\nsettled. Saying nothing and saying \"implement as written\" must differ."
+        },
+        "confidence": {
+          "$ref": "#/$defs/Confidence",
+          "default": "assumed"
+        },
+        "reversibility": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Reversibility"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Set it where the agent decides. `check` warns on a `constrained` or\n`delegated` element without one: the agent cannot judge how far to go."
+        },
+        "lifecycle": {
+          "$ref": "#/$defs/Lifecycle",
+          "default": "active"
+        },
+        "supersedes": {
+          "default": [],
+          "description": "Recorded on the replacement only. A stored `superseded_by` would be a\nsecond copy of one fact, and the two would disagree.",
+          "items": {
+            "pattern": "^[a-z]+:[a-z0-9][a-z0-9-]*$",
+            "type": "string"
+          },
+          "title": "Supersedes",
+          "type": "array"
+        },
+        "owner": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Owner"
+        },
+        "tags": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Tags",
+          "type": "array"
+        },
+        "source": {
+          "default": "",
+          "description": "Path within the store.",
+          "title": "Source",
+          "type": "string"
+        },
+        "body": {
+          "default": "",
+          "description": "Prose, verbatim. Never parsed.",
+          "title": "Body",
+          "type": "string"
+        },
+        "package": {
+          "minLength": 1,
+          "title": "Package",
+          "type": "string"
+        },
+        "ecosystem": {
+          "minLength": 1,
+          "title": "Ecosystem",
+          "type": "string"
+        },
+        "version_range": {
+          "default": "",
+          "description": "What we assume, never a pin. Pinning belongs to a deliberate upgrade.",
+          "title": "Version Range",
+          "type": "string"
+        },
+        "license": {
+          "default": "",
+          "title": "License",
+          "type": "string"
+        },
+        "replaceable": {
+          "default": true,
+          "description": "`False` marks lock-in: the design would change if this one went away.",
+          "title": "Replaceable",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "package",
+        "ecosystem"
+      ],
+      "title": "Library",
+      "type": "object"
+    },
+    "Lifecycle": {
+      "description": "Whether an element is still how the system works.\n\nA second axis to `state`, which says how well specified it is: an\ninterface can be perfectly `specified` and no longer true.",
+      "enum": [
+        "active",
+        "superseded"
+      ],
+      "title": "Lifecycle",
+      "type": "string"
+    },
+    "Milestone": {
+      "additionalProperties": false,
+      "description": "A vertical slice, and the envelope an agent works inside.\n\nA selection over the design plus a delta: `scope` says what may be\ntouched, `must_hold` what may not break, `may_decide` where the agent is\nfree, and `unresolved` which questions stay open on purpose. A milestone\nends; the elements it selects do not.\n\nIt never says how the work runs. No dates, no sizes, no assignees and no\norder: milestones are sequential, and the order is the order they are\nwritten in. Splitting a slice and tracking it belong to whatever consumes\nthe packet, and a design that guessed at them would be wrong within a\nweek and believed anyway.",
+      "properties": {
+        "id": {
+          "pattern": "^[a-z]+:[a-z0-9][a-z0-9-]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "title": {
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/$defs/State",
+          "default": "unknown",
+          "description": "`unknown` by default, so an element nobody finished never reads as\nsettled. Saying nothing and saying \"implement as written\" must differ."
+        },
+        "confidence": {
+          "$ref": "#/$defs/Confidence",
+          "default": "assumed"
+        },
+        "reversibility": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Reversibility"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Set it where the agent decides. `check` warns on a `constrained` or\n`delegated` element without one: the agent cannot judge how far to go."
+        },
+        "lifecycle": {
+          "$ref": "#/$defs/Lifecycle",
+          "default": "active"
+        },
+        "supersedes": {
+          "default": [],
+          "description": "Recorded on the replacement only. A stored `superseded_by` would be a\nsecond copy of one fact, and the two would disagree.",
+          "items": {
+            "pattern": "^[a-z]+:[a-z0-9][a-z0-9-]*$",
+            "type": "string"
+          },
+          "title": "Supersedes",
+          "type": "array"
+        },
+        "owner": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Owner"
+        },
+        "tags": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Tags",
+          "type": "array"
+        },
+        "source": {
+          "default": "",
+          "description": "Path within the store.",
+          "title": "Source",
+          "type": "string"
+        },
+        "body": {
+          "default": "",
+          "description": "Prose, verbatim. Never parsed.",
+          "title": "Body",
+          "type": "string"
+        },
+        "outcome": {
+          "default": "",
+          "title": "Outcome",
+          "type": "string"
+        },
+        "includes": {
+          "default": [],
+          "items": {
+            "pattern": "^[a-z]+:[a-z0-9][a-z0-9-]*$",
+            "type": "string"
+          },
+          "title": "Includes",
+          "type": "array"
+        },
+        "scope": {
+          "default": [],
+          "items": {
+            "pattern": "^[a-z]+:[a-z0-9][a-z0-9-]*$",
+            "type": "string"
+          },
+          "title": "Scope",
+          "type": "array"
+        },
+        "must_hold": {
+          "default": [],
+          "items": {
+            "pattern": "^[a-z]+:[a-z0-9][a-z0-9-]*$",
+            "type": "string"
+          },
+          "title": "Must Hold",
+          "type": "array"
+        },
+        "may_decide": {
+          "default": [],
+          "description": "Explicit freedoms, in prose. Without them an agent either asks about\neverything or invents everything.",
+          "items": {
+            "type": "string"
+          },
+          "title": "May Decide",
+          "type": "array"
+        },
+        "unresolved": {
+          "default": [],
+          "items": {
+            "pattern": "^[a-z]+:[a-z0-9][a-z0-9-]*$",
+            "type": "string"
+          },
+          "title": "Unresolved",
+          "type": "array"
+        },
+        "done_when": {
+          "default": [],
+          "items": {
+            "pattern": "^[a-z]+:[a-z0-9][a-z0-9-]*#obs-\\d+$",
+            "type": "string"
+          },
+          "title": "Done When",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "title"
+      ],
+      "title": "Milestone",
+      "type": "object"
+    },
+    "Note": {
+      "additionalProperties": false,
+      "description": "A thought or a todo against the design, deliberately not an element.\n\nNot in `elements()`, never rendered, never packet input: an agent never\nsees a note. It asks for no title, state or owner, because the moment\nwriting one needs a classification it stops being used. If it matters,\nit becomes a real element, and `promoted_to` records that.",
+      "properties": {
+        "id": {
+          "pattern": "^[a-z]+:[a-z0-9][a-z0-9-]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "created_on": {
+          "format": "date",
+          "title": "Created On",
+          "type": "string"
+        },
+        "text": {
+          "default": "",
+          "title": "Text",
+          "type": "string"
+        },
+        "about": {
+          "default": [],
+          "description": "What it concerns. A ref, so renaming an element surfaces the note\ninstead of leaving it stranded in prose. It may dangle: a note about\nsomething not yet written is the normal case, so `check` reports these\nand never fails on them.",
+          "items": {
+            "pattern": "^[a-z]+:[a-z0-9][a-z0-9-]*$",
+            "type": "string"
+          },
+          "title": "About",
+          "type": "array"
+        },
+        "done_on": {
+          "anyOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "A note somebody means to close is a todo. No second type for that.",
+          "title": "Done On"
+        },
+        "promoted_to": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z]+:[a-z0-9][a-z0-9-]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Promoted To"
+        }
+      },
+      "required": [
+        "id",
+        "created_on"
+      ],
+      "title": "Note",
+      "type": "object"
+    },
+    "Observation": {
+      "additionalProperties": false,
+      "description": "One expectation about how the system acts, anchored to its behavior.\n\nA negative observation is the reason this type exists. \"No row appears in\nthe audit log\" catches the double write, the leak and the side effect\nnobody wanted, and it never survives being written as prose.",
+      "properties": {
+        "id": {
+          "pattern": "^[a-z]+:[a-z0-9][a-z0-9-]*#obs-\\d+$",
+          "title": "Id",
+          "type": "string"
+        },
+        "statement": {
+          "minLength": 1,
+          "title": "Statement",
+          "type": "string"
+        },
+        "at": {
+          "description": "A component, an interface, a resource, or another behavior. `check`\nsays which targets are legal; a dangling `at` is a report line, not an\nexception.",
+          "pattern": "^[a-z]+:[a-z0-9][a-z0-9-]*$",
+          "title": "At",
+          "type": "string"
+        },
+        "outcome": {
+          "$ref": "#/$defs/Outcome",
+          "default": "must"
+        },
+        "timing": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Timing"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Optional on purpose: the effective timing is computed, never stored,\nso \"not said\" and \"deliberately immediate\" stay different."
+        }
+      },
+      "required": [
+        "id",
+        "statement",
+        "at"
+      ],
+      "title": "Observation",
+      "type": "object"
+    },
+    "Operation": {
+      "additionalProperties": false,
+      "description": "One call an interface offers. The shape only, never the body.",
+      "properties": {
+        "name": {
+          "pattern": "^[a-z0-9][a-z0-9-]*$",
+          "title": "Name",
+          "type": "string"
+        },
+        "signature": {
+          "default": "",
+          "description": "Free text: `charge(amount: Money) -> ChargeId`. A parameter model here\nwould be a second type system, and it would always trail the real one.",
+          "title": "Signature",
+          "type": "string"
+        },
+        "idempotent": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "`None` says nobody decided. A retry policy needs the answer.",
+          "title": "Idempotent"
+        },
+        "errors": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Errors",
+          "type": "array"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "Operation",
+      "type": "object"
+    },
+    "Outcome": {
+      "description": "Whether an observation is required, forbidden, or advisory.",
+      "enum": [
+        "must",
+        "must_not",
+        "should"
+      ],
+      "title": "Outcome",
+      "type": "string"
+    },
+    "Priority": {
+      "description": "How strong the statement is, matching the modal verb it already uses.\n\nMoSCoW without the W: \"won't have this time\" is a plan, and the design\nholds no plans. Something we will not build is `state: out_of_scope`,\nwhich says it once.",
+      "enum": [
+        "must",
+        "should",
+        "could"
+      ],
+      "title": "Priority",
+      "type": "string"
+    },
+    "QualityAttribute": {
+      "enum": [
+        "latency",
+        "throughput",
+        "availability",
+        "durability",
+        "security",
+        "privacy",
+        "usability",
+        "cost",
+        "operability"
+      ],
+      "title": "QualityAttribute",
+      "type": "string"
+    },
+    "QualityRequirement": {
+      "additionalProperties": false,
+      "description": "Non-functional, as a scenario. A prose target is not checkable.\n\n`scope` may point at a behavior, and that is how a promise about how the\nsystem acts becomes measurable. \"Both parts start without waiting\" is an\nobservation; \"the pair finishes within 200 ms\" is this. `priority` then\nseparates a hard rule (`must`) from best effort (`should`).",
+      "properties": {
+        "id": {
+          "pattern": "^[a-z]+:[a-z0-9][a-z0-9-]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "title": {
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/$defs/State",
+          "default": "unknown",
+          "description": "`unknown` by default, so an element nobody finished never reads as\nsettled. Saying nothing and saying \"implement as written\" must differ."
+        },
+        "confidence": {
+          "$ref": "#/$defs/Confidence",
+          "default": "assumed"
+        },
+        "reversibility": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Reversibility"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Set it where the agent decides. `check` warns on a `constrained` or\n`delegated` element without one: the agent cannot judge how far to go."
+        },
+        "lifecycle": {
+          "$ref": "#/$defs/Lifecycle",
+          "default": "active"
+        },
+        "supersedes": {
+          "default": [],
+          "description": "Recorded on the replacement only. A stored `superseded_by` would be a\nsecond copy of one fact, and the two would disagree.",
+          "items": {
+            "pattern": "^[a-z]+:[a-z0-9][a-z0-9-]*$",
+            "type": "string"
+          },
+          "title": "Supersedes",
+          "type": "array"
+        },
+        "owner": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Owner"
+        },
+        "tags": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Tags",
+          "type": "array"
+        },
+        "source": {
+          "default": "",
+          "description": "Path within the store.",
+          "title": "Source",
+          "type": "string"
+        },
+        "body": {
+          "default": "",
+          "description": "Prose, verbatim. Never parsed.",
+          "title": "Body",
+          "type": "string"
+        },
+        "attribute": {
+          "$ref": "#/$defs/QualityAttribute"
+        },
+        "stimulus": {
+          "default": "",
+          "title": "Stimulus",
+          "type": "string"
+        },
+        "measure": {
+          "default": "",
+          "title": "Measure",
+          "type": "string"
+        },
+        "target": {
+          "default": "",
+          "title": "Target",
+          "type": "string"
+        },
+        "scope": {
+          "default": [],
+          "items": {
+            "pattern": "^[a-z]+:[a-z0-9][a-z0-9-]*$",
+            "type": "string"
+          },
+          "title": "Scope",
+          "type": "array"
+        },
+        "priority": {
+          "$ref": "#/$defs/Priority",
+          "default": "must"
+        },
+        "evidence": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Evidence",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "attribute"
+      ],
+      "title": "QualityRequirement",
+      "type": "object"
+    },
+    "Question": {
+      "additionalProperties": false,
+      "description": "An `unknown` with an owner and a way out.\n\nThe answer is not a string here. It is the `Decision` that closed it, so\nthe reasoning survives and the trace holds.",
+      "properties": {
+        "id": {
+          "pattern": "^[a-z]+:[a-z0-9][a-z0-9-]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "title": {
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/$defs/State",
+          "default": "unknown",
+          "description": "`unknown` by default, so an element nobody finished never reads as\nsettled. Saying nothing and saying \"implement as written\" must differ."
+        },
+        "confidence": {
+          "$ref": "#/$defs/Confidence",
+          "default": "assumed"
+        },
+        "reversibility": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Reversibility"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Set it where the agent decides. `check` warns on a `constrained` or\n`delegated` element without one: the agent cannot judge how far to go."
+        },
+        "lifecycle": {
+          "$ref": "#/$defs/Lifecycle",
+          "default": "active"
+        },
+        "supersedes": {
+          "default": [],
+          "description": "Recorded on the replacement only. A stored `superseded_by` would be a\nsecond copy of one fact, and the two would disagree.",
+          "items": {
+            "pattern": "^[a-z]+:[a-z0-9][a-z0-9-]*$",
+            "type": "string"
+          },
+          "title": "Supersedes",
+          "type": "array"
+        },
+        "owner": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Owner"
+        },
+        "tags": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Tags",
+          "type": "array"
+        },
+        "source": {
+          "default": "",
+          "description": "Path within the store.",
+          "title": "Source",
+          "type": "string"
+        },
+        "body": {
+          "default": "",
+          "description": "Prose, verbatim. Never parsed.",
+          "title": "Body",
+          "type": "string"
+        },
+        "question": {
+          "minLength": 1,
+          "title": "Question",
+          "type": "string"
+        },
+        "method": {
+          "$ref": "#/$defs/ResolutionMethod",
+          "default": "ask"
+        },
+        "blocks": {
+          "default": [],
+          "description": "What waits on the answer. Urgency is read from here, not from a date\nsomebody guessed and nobody revisits.",
+          "items": {
+            "pattern": "^[a-z]+:[a-z0-9][a-z0-9-]*$",
+            "type": "string"
+          },
+          "title": "Blocks",
+          "type": "array"
+        },
+        "resolved_by": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z]+:[a-z0-9][a-z0-9-]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Resolved By"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "question"
+      ],
+      "title": "Question",
+      "type": "object"
+    },
+    "Rejection": {
+      "additionalProperties": false,
+      "description": "Tried it, it was bad. It stops an agent proposing a dead idea again.\n\nThe idea it rejects was never modelled, so `state: out_of_scope` has\nnothing to sit on. The rejection is the record, and the argument is in\n`body`.",
+      "properties": {
+        "id": {
+          "pattern": "^[a-z]+:[a-z0-9][a-z0-9-]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "title": {
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/$defs/State",
+          "default": "unknown",
+          "description": "`unknown` by default, so an element nobody finished never reads as\nsettled. Saying nothing and saying \"implement as written\" must differ."
+        },
+        "confidence": {
+          "$ref": "#/$defs/Confidence",
+          "default": "assumed"
+        },
+        "reversibility": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Reversibility"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Set it where the agent decides. `check` warns on a `constrained` or\n`delegated` element without one: the agent cannot judge how far to go."
+        },
+        "lifecycle": {
+          "$ref": "#/$defs/Lifecycle",
+          "default": "active"
+        },
+        "supersedes": {
+          "default": [],
+          "description": "Recorded on the replacement only. A stored `superseded_by` would be a\nsecond copy of one fact, and the two would disagree.",
+          "items": {
+            "pattern": "^[a-z]+:[a-z0-9][a-z0-9-]*$",
+            "type": "string"
+          },
+          "title": "Supersedes",
+          "type": "array"
+        },
+        "owner": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Owner"
+        },
+        "tags": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Tags",
+          "type": "array"
+        },
+        "source": {
+          "default": "",
+          "description": "Path within the store.",
+          "title": "Source",
+          "type": "string"
+        },
+        "body": {
+          "default": "",
+          "description": "Prose, verbatim. Never parsed.",
+          "title": "Body",
+          "type": "string"
+        },
+        "applies_to": {
+          "default": [],
+          "items": {
+            "pattern": "^[a-z]+:[a-z0-9][a-z0-9-]*$",
+            "type": "string"
+          },
+          "title": "Applies To",
+          "type": "array"
+        },
+        "rejected_on": {
+          "anyOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Rejected On"
+        },
+        "milestone": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z]+:[a-z0-9][a-z0-9-]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Milestone"
+        }
+      },
+      "required": [
+        "id",
+        "title"
+      ],
+      "title": "Rejection",
+      "type": "object"
+    },
+    "Relationship": {
+      "additionalProperties": false,
+      "description": "An edge between two elements, kept out of both.\n\nA field carries a link with exactly one owner (`Interface.declared_by`,\n`Component.parent`). Everything many-to-many lives here, in one list,\nso two elements can never disagree about the same link.",
+      "properties": {
+        "source_id": {
+          "pattern": "^[a-z]+:[a-z0-9][a-z0-9-]*$",
+          "title": "Source Id",
+          "type": "string"
+        },
+        "target_id": {
+          "pattern": "^[a-z]+:[a-z0-9][a-z0-9-]*$",
+          "title": "Target Id",
+          "type": "string"
+        },
+        "type": {
+          "$ref": "#/$defs/RelationshipType"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The C4 arrow label: \"sends orders to\".",
+          "title": "Description"
+        },
+        "technology": {
+          "default": "",
+          "description": "The C4 arrow technology: \"HTTPS/JSON\". Free text, forever.",
+          "title": "Technology",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source_id",
+        "target_id",
+        "type"
+      ],
+      "title": "Relationship",
+      "type": "object"
+    },
+    "RelationshipType": {
+      "description": "The edge kinds a checker branches on. Add one only if it does.\n\nThe architecture side owns the trace: a component says which requirement\nit implements, never the reverse. The architecture changes more often, so\nthe edge moves with the side that moves.",
+      "enum": [
+        "relates_to",
+        "implements",
+        "satisfies",
+        "constrained_by",
+        "realizes",
+        "calls",
+        "depends_on",
+        "specifies",
+        "derives_from",
+        "refines",
+        "conflicts_with"
+      ],
+      "title": "RelationshipType",
+      "type": "string"
+    },
+    "Repository": {
+      "additionalProperties": false,
+      "description": "A repository that holds part of the implementation.\n\nOne design, many repositories. Every `implemented_by` entry reads\n`billing#src/refund.py`, and the prefix must be declared here, so a link\ninto code resolves to a URL and a ref instead of to a guess.",
+      "properties": {
+        "id": {
+          "pattern": "^[a-z0-9][a-z0-9-]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "url": {
+          "minLength": 1,
+          "title": "Url",
+          "type": "string"
+        },
+        "ref": {
+          "default": "main",
+          "description": "A ref, never a pin.",
+          "title": "Ref",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "url"
+      ],
+      "title": "Repository",
+      "type": "object"
+    },
+    "Requirement": {
+      "additionalProperties": false,
+      "description": "Functional. What the system must do, and why.\n\nThe three parts of \"As an X, I want Y, so that Z\" all live here or next\ndoor: X is `actors`, Y is `statement`, Z is the `Goal` this derives from.\nThe sentence is therefore a rendering, and no second list of stories has\nto be kept in step with this one.",
+      "properties": {
+        "id": {
+          "pattern": "^[a-z]+:[a-z0-9][a-z0-9-]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "title": {
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/$defs/State",
+          "default": "unknown",
+          "description": "`unknown` by default, so an element nobody finished never reads as\nsettled. Saying nothing and saying \"implement as written\" must differ."
+        },
+        "confidence": {
+          "$ref": "#/$defs/Confidence",
+          "default": "assumed"
+        },
+        "reversibility": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Reversibility"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Set it where the agent decides. `check` warns on a `constrained` or\n`delegated` element without one: the agent cannot judge how far to go."
+        },
+        "lifecycle": {
+          "$ref": "#/$defs/Lifecycle",
+          "default": "active"
+        },
+        "supersedes": {
+          "default": [],
+          "description": "Recorded on the replacement only. A stored `superseded_by` would be a\nsecond copy of one fact, and the two would disagree.",
+          "items": {
+            "pattern": "^[a-z]+:[a-z0-9][a-z0-9-]*$",
+            "type": "string"
+          },
+          "title": "Supersedes",
+          "type": "array"
+        },
+        "owner": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Owner"
+        },
+        "tags": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Tags",
+          "type": "array"
+        },
+        "source": {
+          "default": "",
+          "description": "Path within the store.",
+          "title": "Source",
+          "type": "string"
+        },
+        "body": {
+          "default": "",
+          "description": "Prose, verbatim. Never parsed.",
+          "title": "Body",
+          "type": "string"
+        },
+        "statement": {
+          "description": "One sentence, one requirement, with a modal verb that matches `priority`.",
+          "minLength": 1,
+          "title": "Statement",
+          "type": "string"
+        },
+        "rationale": {
+          "default": "",
+          "description": "Why, in prose. The measurable part belongs in the `Goal`.",
+          "title": "Rationale",
+          "type": "string"
+        },
+        "priority": {
+          "$ref": "#/$defs/Priority",
+          "default": "must"
+        },
+        "actors": {
+          "default": [],
+          "items": {
+            "pattern": "^[a-z]+:[a-z0-9][a-z0-9-]*$",
+            "type": "string"
+          },
+          "title": "Actors",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "statement"
+      ],
+      "title": "Requirement",
+      "type": "object"
+    },
+    "ResolutionMethod": {
+      "description": "The way out. A question without one is a wish.",
+      "enum": [
+        "ask",
+        "spike",
+        "prototype",
+        "measure"
+      ],
+      "title": "ResolutionMethod",
+      "type": "string"
+    },
+    "Resource": {
+      "additionalProperties": false,
+      "description": "An addressable thing we depend on but do not design.\n\nRedis and S3 are not components: we do not specify them, we specify what\nwe expect to find in them, so making one a component would drag it\ninside the design boundary. Observations point here. Ownership needs no\nfield, because `state` answers it — `specified` we define, `delegated`\nanother team owns, `out_of_scope` deliberately outside. A resource takes\npart in no interface: a component's relation to one is a dependency, and\nthe observations are what give it meaning.",
+      "properties": {
+        "id": {
+          "pattern": "^[a-z]+:[a-z0-9][a-z0-9-]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "title": {
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/$defs/State",
+          "default": "unknown",
+          "description": "`unknown` by default, so an element nobody finished never reads as\nsettled. Saying nothing and saying \"implement as written\" must differ."
+        },
+        "confidence": {
+          "$ref": "#/$defs/Confidence",
+          "default": "assumed"
+        },
+        "reversibility": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Reversibility"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Set it where the agent decides. `check` warns on a `constrained` or\n`delegated` element without one: the agent cannot judge how far to go."
+        },
+        "lifecycle": {
+          "$ref": "#/$defs/Lifecycle",
+          "default": "active"
+        },
+        "supersedes": {
+          "default": [],
+          "description": "Recorded on the replacement only. A stored `superseded_by` would be a\nsecond copy of one fact, and the two would disagree.",
+          "items": {
+            "pattern": "^[a-z]+:[a-z0-9][a-z0-9-]*$",
+            "type": "string"
+          },
+          "title": "Supersedes",
+          "type": "array"
+        },
+        "owner": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Owner"
+        },
+        "tags": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Tags",
+          "type": "array"
+        },
+        "source": {
+          "default": "",
+          "description": "Path within the store.",
+          "title": "Source",
+          "type": "string"
+        },
+        "body": {
+          "default": "",
+          "description": "Prose, verbatim. Never parsed.",
+          "title": "Body",
+          "type": "string"
+        },
+        "resource_kind": {
+          "$ref": "#/$defs/ResourceKind"
+        },
+        "technology": {
+          "description": "Free text, forever: `Redis`, `Kafka`, a filesystem path. C4 refuses a\nstorage taxonomy for the same reason — a string never needs migrating.",
+          "minLength": 1,
+          "title": "Technology",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "resource_kind",
+        "technology"
+      ],
+      "title": "Resource",
+      "type": "object"
+    },
+    "ResourceKind": {
+      "description": "What an observation about it looks like, and therefore how it is checked.\n\nTwo values, because two things branch. A call is neither: an\n`ExternalService` is the system, an `Interface` is the call, and an\nobservation about one points there.",
+      "enum": [
+        "store",
+        "stream"
+      ],
+      "title": "ResourceKind",
+      "type": "string"
+    },
+    "Reversibility": {
+      "description": "The cost of being wrong. It sets how far an agent may go alone.",
+      "enum": [
+        "cheap",
+        "costly",
+        "one_way"
+      ],
+      "title": "Reversibility",
+      "type": "string"
+    },
+    "Revision": {
+      "additionalProperties": false,
+      "description": "One line of the change history.",
+      "properties": {
+        "version": {
+          "title": "Version",
+          "type": "string"
+        },
+        "changed_on": {
+          "format": "date",
+          "title": "Changed On",
+          "type": "string"
+        },
+        "author": {
+          "title": "Author",
+          "type": "string"
+        },
+        "summary": {
+          "minLength": 1,
+          "title": "Summary",
+          "type": "string"
+        }
+      },
+      "required": [
+        "version",
+        "changed_on",
+        "author",
+        "summary"
+      ],
+      "title": "Revision",
+      "type": "object"
+    },
+    "State": {
+      "description": "How complete an element is, and what an agent may do about it.\n\nThis is the field that lets a gap be deliberate. `specified` and\n`unknown` are both legal, and they instruct the agent differently, so\nsilence never has to stand for either one.",
+      "enum": [
+        "specified",
+        "constrained",
+        "delegated",
+        "unknown",
+        "observed",
+        "out_of_scope"
+      ],
+      "title": "State",
+      "type": "string"
+    },
+    "Term": {
+      "additionalProperties": false,
+      "description": "One word of the glossary. The design uses it and nothing else.",
+      "properties": {
+        "id": {
+          "pattern": "^[a-z]+:[a-z0-9][a-z0-9-]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "title": {
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/$defs/State",
+          "default": "unknown",
+          "description": "`unknown` by default, so an element nobody finished never reads as\nsettled. Saying nothing and saying \"implement as written\" must differ."
+        },
+        "confidence": {
+          "$ref": "#/$defs/Confidence",
+          "default": "assumed"
+        },
+        "reversibility": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Reversibility"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Set it where the agent decides. `check` warns on a `constrained` or\n`delegated` element without one: the agent cannot judge how far to go."
+        },
+        "lifecycle": {
+          "$ref": "#/$defs/Lifecycle",
+          "default": "active"
+        },
+        "supersedes": {
+          "default": [],
+          "description": "Recorded on the replacement only. A stored `superseded_by` would be a\nsecond copy of one fact, and the two would disagree.",
+          "items": {
+            "pattern": "^[a-z]+:[a-z0-9][a-z0-9-]*$",
+            "type": "string"
+          },
+          "title": "Supersedes",
+          "type": "array"
+        },
+        "owner": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Owner"
+        },
+        "tags": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Tags",
+          "type": "array"
+        },
+        "source": {
+          "default": "",
+          "description": "Path within the store.",
+          "title": "Source",
+          "type": "string"
+        },
+        "body": {
+          "default": "",
+          "description": "Prose, verbatim. Never parsed.",
+          "title": "Body",
+          "type": "string"
+        },
+        "definition": {
+          "minLength": 1,
+          "title": "Definition",
+          "type": "string"
+        },
+        "aliases": {
+          "default": [],
+          "description": "The other words people say for this one, so a reader who knows the\nwrong one still finds the right entry.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Aliases",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "definition"
+      ],
+      "title": "Term",
+      "type": "object"
+    },
+    "Timing": {
+      "description": "When the outcome becomes true.",
+      "enum": [
+        "immediate",
+        "eventual"
+      ],
+      "title": "Timing",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Intent, requirements, architecture and gaps, for one system.\n\nA container plus its edges, and nothing computed. It is not a document:\na specification, a diagram and a story sentence are all renderings of\nthis, and an agent reads it whole.",
+  "properties": {
+    "format_version": {
+      "default": 1,
+      "title": "Format Version",
+      "type": "integer"
+    },
+    "id": {
+      "pattern": "^[a-z]+:[a-z0-9][a-z0-9-]*$",
+      "title": "Id",
+      "type": "string"
+    },
+    "title": {
+      "minLength": 1,
+      "title": "Title",
+      "type": "string"
+    },
+    "version": {
+      "title": "Version",
+      "type": "string"
+    },
+    "purpose": {
+      "default": "",
+      "title": "Purpose",
+      "type": "string"
+    },
+    "scope": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "title": "Scope",
+      "type": "array"
+    },
+    "out_of_scope": {
+      "default": [],
+      "description": "Written down, because a reader guesses wrong about what is missing.",
+      "items": {
+        "type": "string"
+      },
+      "title": "Out Of Scope",
+      "type": "array"
+    },
+    "exports": {
+      "default": [],
+      "description": "The public surface: what another design may point at. Contract kinds\nonly (`EXPORTABLE`), and only elements this design declares — to offer\nsomebody else's interface, wrap it in one of ours, which makes it ours\nto keep. Everything unlisted is internal, and a foreign `Ref` into it is\nan error: without that rule two designs can never move apart, because\nany id is a dependency the moment somebody uses it. A long list is the\nsmell, for the reason a long interface is.",
+      "items": {
+        "pattern": "^[a-z]+:[a-z0-9][a-z0-9-]*$",
+        "type": "string"
+      },
+      "title": "Exports",
+      "type": "array"
+    },
+    "revisions": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/Revision"
+      },
+      "title": "Revisions",
+      "type": "array"
+    },
+    "imports": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/Import"
+      },
+      "title": "Imports",
+      "type": "array"
+    },
+    "repositories": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/Repository"
+      },
+      "title": "Repositories",
+      "type": "array"
+    },
+    "glossary": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/Term"
+      },
+      "title": "Glossary",
+      "type": "array"
+    },
+    "actors": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/Actor"
+      },
+      "title": "Actors",
+      "type": "array"
+    },
+    "goals": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/Goal"
+      },
+      "title": "Goals",
+      "type": "array"
+    },
+    "requirements": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/Requirement"
+      },
+      "title": "Requirements",
+      "type": "array"
+    },
+    "qualities": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/QualityRequirement"
+      },
+      "title": "Qualities",
+      "type": "array"
+    },
+    "constraints": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/Constraint"
+      },
+      "title": "Constraints",
+      "type": "array"
+    },
+    "behaviors": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/Behavior"
+      },
+      "title": "Behaviors",
+      "type": "array"
+    },
+    "components": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/Component"
+      },
+      "title": "Components",
+      "type": "array"
+    },
+    "interfaces": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/Interface"
+      },
+      "title": "Interfaces",
+      "type": "array"
+    },
+    "data_entities": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/DataEntity"
+      },
+      "title": "Data Entities",
+      "type": "array"
+    },
+    "resources": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/Resource"
+      },
+      "title": "Resources",
+      "type": "array"
+    },
+    "libraries": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/Library"
+      },
+      "title": "Libraries",
+      "type": "array"
+    },
+    "external_services": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/ExternalService"
+      },
+      "title": "External Services",
+      "type": "array"
+    },
+    "assumptions": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/Assumption"
+      },
+      "title": "Assumptions",
+      "type": "array"
+    },
+    "decisions": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/Decision"
+      },
+      "title": "Decisions",
+      "type": "array"
+    },
+    "questions": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/Question"
+      },
+      "title": "Questions",
+      "type": "array"
+    },
+    "rejections": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/Rejection"
+      },
+      "title": "Rejections",
+      "type": "array"
+    },
+    "milestones": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/Milestone"
+      },
+      "title": "Milestones",
+      "type": "array"
+    },
+    "relationships": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/Relationship"
+      },
+      "title": "Relationships",
+      "type": "array"
+    },
+    "notes": {
+      "default": [],
+      "description": "Outside the graph on purpose. `elements()` does not yield them.",
+      "items": {
+        "$ref": "#/$defs/Note"
+      },
+      "title": "Notes",
+      "type": "array"
+    }
+  },
+  "required": [
+    "id",
+    "title",
+    "version"
+  ],
+  "title": "Design",
+  "type": "object"
+}

@@ -1,13 +1,17 @@
 ---
-id: requirement:render-site
+id: req:render-site
 title: Render a read-only site with stable layout
 state: specified
 confidence: reviewed
 owner: vfeenstr
-realized_by:
-- component:render
-- component:diagram
-- component:layout
+statement: The tool must render the design as a read-only site whose layout is
+  the same on every build.
+priority: must
+actors:
+- actor:designer
+relates:
+- to: goal:design-is-queryable
+  type: derives_from
 ---
 
 Element pages, traceability, gaps, the note inbox, and diagrams as

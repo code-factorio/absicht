@@ -1,0 +1,64 @@
+{
+  "additionalProperties": false,
+  "description": "A thought or a todo against the design, deliberately not an element.\n\nNot in `elements()`, never rendered, never packet input: an agent never\nsees a note. It asks for no title, state or owner, because the moment\nwriting one needs a classification it stops being used. If it matters,\nit becomes a real element, and `promoted_to` records that.",
+  "properties": {
+    "id": {
+      "pattern": "^[a-z]+:[a-z0-9][a-z0-9-]*$",
+      "title": "Id",
+      "type": "string"
+    },
+    "created_on": {
+      "format": "date",
+      "title": "Created On",
+      "type": "string"
+    },
+    "text": {
+      "default": "",
+      "title": "Text",
+      "type": "string"
+    },
+    "about": {
+      "default": [],
+      "description": "What it concerns. A ref, so renaming an element surfaces the note\ninstead of leaving it stranded in prose. It may dangle: a note about\nsomething not yet written is the normal case, so `check` reports these\nand never fails on them.",
+      "items": {
+        "pattern": "^[a-z]+:[a-z0-9][a-z0-9-]*$",
+        "type": "string"
+      },
+      "title": "About",
+      "type": "array"
+    },
+    "done_on": {
+      "anyOf": [
+        {
+          "format": "date",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "A note somebody means to close is a todo. No second type for that.",
+      "title": "Done On"
+    },
+    "promoted_to": {
+      "anyOf": [
+        {
+          "pattern": "^[a-z]+:[a-z0-9][a-z0-9-]*$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Promoted To"
+    }
+  },
+  "required": [
+    "id",
+    "created_on"
+  ],
+  "title": "Note",
+  "type": "object"
+}

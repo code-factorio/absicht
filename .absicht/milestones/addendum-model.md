@@ -8,7 +8,7 @@ outcome: Resources, behaviors with observations, notes, derived scope and
   composition, lifecycle and supersession, the run store — through every
   layer
 includes:
-- story:capture-a-thought
+- behavior:notes-never-reach-agents
 scope:
 - component:models
 - component:load
@@ -34,13 +34,8 @@ unresolved:
 - question:observation-evidence-hint
 - question:brownfield-behavior-import
 done_when:
-- story:capture-a-thought#ac-1
-- story:capture-a-thought#ac-2
-depends_on:
-- milestone:step-2-build-query-site
-- milestone:step-3-handoff
-- milestone:step-4-verify
+- behavior:notes-never-reach-agents#obs-1
+- behavior:notes-never-reach-agents#obs-3
 ---
-
 Tasks 50 through 60, tickets 32qgzq through 4r5xrr. CLI before site on every
 addition, per the renderers-last rule.

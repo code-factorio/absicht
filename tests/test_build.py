@@ -14,7 +14,7 @@ What the spec (docs/tasks/20-build.md) pins, and these hold:
   to come, per docs/maintainers/verification.md; nothing here may make it
   impossible.
 - A store with a ``LoadError`` fails the build rather than emitting a partial
-  artifact: ``broken/``'s two unreadable files are the case.
+  artifact: ``broken/``'s three unreadable files are the case.
 - ``--check`` compares byte-for-byte against the file at ``--out``: identical
   is ``OK``, drifted or missing is ``FINDINGS`` — a missing artifact has
   trivially moved from nothing, and CI's drift gate must not pass on absence.
@@ -36,13 +36,13 @@ from typer.testing import CliRunner
 from absicht.build import _AtRevision, build, design_json
 from absicht.cli import app
 from absicht.cli._common import ExitCode
-from absicht.models import SCHEMA_VERSION, Design
+from absicht.models.design import FORMAT_VERSION, Design
 
 runner = CliRunner()
 FIXTURES = Path(__file__).parent / "fixtures" / "systems"
 
 # The fixtures that load cleanly. `broken/` cannot be built on purpose: its
-# two unreadable files are the refusal case below, not a snapshot.
+# three unreadable files are the refusal case below, not a snapshot.
 BUILDABLE = ("brownfield", "clean", "composite")
 
 
@@ -89,10 +89,11 @@ def test_a_store_with_load_errors_fails_the_build_without_writing(tmp_path: Path
     result = runner.invoke(app, ["--store", str(FIXTURES / "broken"), "build", "--out", str(out)])
 
     assert result.exit_code == ExitCode.FINDINGS
-    # Both unreadable files are named, and the way out is `ab check` — the
+    # Every unreadable file is named, and the way out is `ab check` — the
     # findings command, not a partial build to inspect.
     assert "requirements/garbage.md" in result.stderr
-    assert "stories/bad-anchor.md" in result.stderr
+    assert "behaviors/bad-anchor.md" in result.stderr
+    assert "behaviors/bad-timing.md" in result.stderr
     assert "ab check" in result.stderr
     assert not out.exists()
 
@@ -106,11 +107,11 @@ def test_stdout_prints_the_artifact_and_writes_nothing(tmp_path: Path) -> None:
 
     assert plain.exit_code == ExitCode.OK
     # `--json` is a no-op here by construction: the document on stdout is
-    # already machine output, `schema_version` first.
+    # already machine output, `format_version` first.
     assert plain.stdout == as_json.stdout
     # Byte-identical to what a write would have produced, newline included.
     assert plain.stdout == design_json(build(FIXTURES / "clean"))
-    assert json.loads(plain.stdout)["schema_version"] == SCHEMA_VERSION
+    assert json.loads(plain.stdout)["format_version"] == FORMAT_VERSION
     assert not out.exists()
 
 
@@ -186,9 +187,9 @@ def test_json_envelopes_the_write_and_the_check(tmp_path: Path) -> None:
     assert ahead.exit_code == ExitCode.OK
     assert fresh.exit_code == ExitCode.OK
     assert stale.exit_code == ExitCode.FINDINGS
-    assert json.loads(ahead.stdout) == {"schema_version": SCHEMA_VERSION, "out": str(out)}
+    assert json.loads(ahead.stdout) == {"format_version": FORMAT_VERSION, "out": str(out)}
     assert json.loads(fresh.stdout) == {
-        "schema_version": SCHEMA_VERSION,
+        "format_version": FORMAT_VERSION,
         "out": str(out),
         "stale": False,
     }
@@ -215,16 +216,19 @@ def history(tmp_path: Path) -> tuple[Path, str]:
     repo = tmp_path / "repo"
     store = repo / ".absicht"
     (store / "components" / "nested").mkdir(parents=True)
-    (store / "system.yaml").write_text("id: system:tiny\ntitle: Tiny\n", encoding="utf-8")
+    (store / "design.yaml").write_text(
+        "id: design:tiny\ntitle: Tiny\nversion: 0.1.0\n", encoding="utf-8"
+    )
 
     def component(title: str) -> None:
         (store / "components" / "cancellation.md").write_text(
-            f"---\nid: component:cancellation\ntitle: {title}\n---\n", encoding="utf-8"
+            f"---\nid: component:cancellation\ntitle: {title}\nlevel: component\n---\n",
+            encoding="utf-8",
         )
 
     component("Cancellation")
     (store / "components" / "nested" / "deep.md").write_text(
-        "---\nid: component:deep\ntitle: Deep\n---\n", encoding="utf-8"
+        "---\nid: component:deep\ntitle: Deep\nlevel: component\n---\n", encoding="utf-8"
     )
     _git(repo, "init", "-q", "-b", "main")
     # A bare CI machine has no git identity, and commits must not try to sign.
@@ -278,12 +282,15 @@ def test_the_git_source_answers_loads_three_questions(history: tuple[Path, str])
     store, first = history
     source = _AtRevision(Path(".absicht"), first, store.parent)
 
-    assert source.exists(Path(".absicht/system.yaml"))
+    assert source.exists(Path(".absicht/design.yaml"))
     assert source.exists(Path(".absicht/components"))  # a tree, not only a blob
     assert not source.exists(Path(".absicht/questions"))
     assert source.list_files(Path(".absicht/components")) == (
         Path(".absicht/components/cancellation.md"),
     )
-    assert source.read_text(Path(".absicht/system.yaml")) == "id: system:tiny\ntitle: Tiny\n"
+    assert (
+        source.read_text(Path(".absicht/design.yaml"))
+        == "id: design:tiny\ntitle: Tiny\nversion: 0.1.0\n"
+    )
     with pytest.raises(OSError, match="absent at the revision"):
         source.read_text(Path(".absicht/never-existed.md"))

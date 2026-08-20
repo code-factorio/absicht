@@ -1,8 +1,15 @@
 ---
-id: requirement:dogfood-in-ci
+id: req:dogfood-in-ci
 title: ab check runs against absicht's own store in CI
 state: unknown
 owner: vfeenstr
+statement: CI must run ab check against absicht's own design store.
+priority: must
+actors:
+- actor:ci
+relates:
+- to: goal:intent-survives
+  type: derives_from
 ---
 
 Promoted from a note captured against step 1. CI's own comment says the

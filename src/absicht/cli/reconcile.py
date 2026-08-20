@@ -41,7 +41,8 @@ from absicht.markers import MarkerError
 from absicht.markers import check as check_marker
 from absicht.markers import stamp as stamp_marker
 from absicht.markers import sync as sync_marker
-from absicht.models import SCHEMA_VERSION, Packet, PacketLock
+from absicht.models.design import FORMAT_VERSION
+from absicht.models.packet import Packet, PacketLock
 from absicht.render import UnknownRefError
 from absicht.runstore import RunStoreError, packet_id, record_run
 from absicht.status import StatusUsageError
@@ -51,10 +52,10 @@ from absicht.verify import (
     VerifyContext,
     VerifyUsageError,
     context_for,
-    criterion_results,
     discover_sealed_packet,
     load_sealed_packet,
     observation_summary,
+    run_results,
     run_rules,
     summary_json,
     summary_lines,
@@ -169,7 +170,7 @@ def _record_run(
             packet_id=packet_id(packet.milestone, lock.design_rev),
             commit_sha=current_rev(context.repos[0]),
             recorded_at=utc_now_iso(),
-            results=criterion_results(context),
+            results=run_results(context),
         )
     except RunStoreError as exc:
         typer.echo(str(exc), err=True)
@@ -350,7 +351,7 @@ def marker_sync(
         typer.echo(
             json.dumps(
                 {
-                    "schema_version": SCHEMA_VERSION,
+                    "format_version": FORMAT_VERSION,
                     "out": str(repo / ".absicht"),
                     "units": [unit.model_dump(mode="json") for unit in marker.units],
                 }
@@ -427,7 +428,7 @@ def marker_stamp(
         typer.echo(
             json.dumps(
                 {
-                    "schema_version": SCHEMA_VERSION,
+                    "format_version": FORMAT_VERSION,
                     "out": str(repo / ".absicht"),
                     "units": [watermark.model_dump(mode="json") for watermark in marker.units],
                 }

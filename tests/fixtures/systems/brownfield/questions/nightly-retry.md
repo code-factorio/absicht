@@ -1,13 +1,10 @@
 ---
 id: question:nightly-retry
-title: Why does the nightly job retry three times?
+title: Should reconciliation retry a failed night?
 state: unknown
-owner: finance
-method: ask
-blocks:
-- milestone:reconcile-mvp
-due_on: 2026-01-10
+confidence: assumed
+owner: sam
+question: When a night's reconciliation fails, should the next run redo it?
+method: spike
 ---
-
-`component:legacy-billing` retries the nightly run three times and nobody
-remembers why. Ask billing ops before designing the replacement.
+Open, and blocking nothing: the answer changes a detail, not a slice.

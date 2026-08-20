@@ -1,109 +1,103 @@
 positions:
-- ref: component:build
-  x: 0.3444218515250481
-  y: 0.2579544029403025
-- ref: component:check
-  x: 3.920571580830845
+- ref: component:ab
+  x: 4.344421851525048
+  y: 4.257954402940302
+- ref: component:absicht
+  x: -0.079428419169155
   y: -0.24108324970703665
-- ref: component:cli
+- ref: component:build
   x: 8.011274721368608
-  y: -0.09506586254958571
-- ref: component:codec
+  y: 7.9049341374504145
+- ref: component:check
   x: 12.283798589034772
-  y: -0.19668727392107255
-- ref: component:diagram
+  y: 7.803312726078928
+- ref: component:cli
   x: 15.976596954152356
-  y: 0.0833820394550312
-- ref: component:diff
+  y: 8.083382039455032
+- ref: component:codec
   x: 20.408112885195337
-  y: 0.004686855817390256
-- ref: component:findings
+  y: 8.00468685581739
+- ref: component:diagram
   x: 23.781837844399703
-  y: 0.25580420415722394
-- ref: component:gherkin
+  y: 8.255804204157224
+- ref: component:diff
   x: 28.118368996675333
-  y: -0.24949365863755946
-- ref: component:git
+  y: 7.75050634136244
+- ref: component:findings
   x: 32.40974625596824
-  y: 0.4827854760376531
-- ref: component:init
+  y: 8.482785476037654
+- ref: component:gherkin
   x: 36.31021723599659
-  y: 0.4021659504395827
-- ref: component:layout
+  y: 8.402165950439583
+- ref: component:git
   x: 39.810147569319334
-  y: 0.22983174826012864
-- ref: component:load
+  y: 8.229831748260128
+- ref: component:init
   x: 44.39883828796799
-  y: 0.18398393191544127
-- ref: component:markers
+  y: 8.183983931915442
+- ref: component:layout
   x: 47.97214271545271
-  y: -0.3992987919316342
-- ref: component:migrate
+  y: 7.600701208068366
+- ref: component:load
   x: 51.93417183545378
-  y: 0.1108869734438016
-- ref: component:models
+  y: 8.110886973443801
+- ref: component:markers
   x: 56.413011053237895
-  y: 0.4666063677707588
-- ref: component:new
+  y: 8.466606367770758
+- ref: component:migrate
   x: 59.97700977655272
-  y: 0.36530992777164006
-- ref: component:notes
+  y: 8.36530992777164
+- ref: component:models
   x: 63.76049231039196
-  y: 0.30502782701302233
-- ref: component:packet
+  y: 8.305027827013022
+- ref: component:new
   x: 68.04869930383559
-  y: -0.48595829983598104
-- ref: component:render
+  y: 7.514041700164019
+- ref: component:notes
   x: 72.21970468640396
-  y: -0.10117645777573125
-- ref: component:resolve
+  y: 7.898823542224269
+- ref: component:packet
   x: 76.32484497714823
-  y: 0.16815320123185085
-- ref: component:runstore
+  y: 8.168153201231851
+- ref: component:render
   x: 79.50114281931442
-  y: -0.006422133534675356
-- ref: component:schema
+  y: 7.9935778664653245
+- ref: component:resolve
   x: 84.36760277549278
-  y: -0.256089123112868
-- ref: component:status
+  y: 7.743910876887132
+- ref: component:runstore
   x: 87.82520436274739
-  y: 0.3704712321086546
-- ref: component:verify
+  y: 8.370471232108654
+- ref: component:schema
   x: 91.69106709150239
-  y: 0.06751074062067186
-- ref: external:pydantic
-  x: -0.2613840713847798
+  y: 8.067510740620673
+- ref: component:status
+  x: 95.73861592861522
   y: 8.467540250290144
-- ref: external:python
-  x: 4.30317946927987
+- ref: component:verify
+  x: 100.30317946927987
   y: 7.9479695714355705
-- ref: external:pyyaml
-  x: 7.580445818552535
-  y: 7.820054604672546
-- ref: external:typer
-  x: 12.007940642520573
-  y: 8.432833824226908
-- ref: resource:git-repository
-  x: -0.3909421540688963
+- ref: interface:design-artifact
+  x: -0.4195541814474646
+  y: 11.820054604672546
+- ref: interface:findings-report
+  x: 4.007940642520574
+  y: 12.432833824226908
+- ref: interface:json-envelope
+  x: 7.609057845931104
   y: 12.051267246090552
-- ref: resource:runs-db
-  x: 4.2065614098668895
+- ref: interface:record-format
+  x: 12.20656140986689
   y: 12.047440911328424
-- ref: resource:store-tree
-  x: 8.314466863291337
+- ref: interface:run-store
+  x: 16.314466863291337
   y: 12.040283606970323
-- ref: seam:design-artifact
+- ref: resource:git-repository
   x: 0.4638385459738009
-  y: 4.103185627961383
-- ref: seam:findings-report
+  y: 20.103185627961384
+- ref: resource:runs-db
   x: 4.087617064175436
-  y: 3.944989026275516
-- ref: seam:json-envelope
+  y: 19.944989026275515
+- ref: resource:store-tree
   x: 8.096286861583106
-  y: 3.8849011459726603
-- ref: seam:record-format
-  x: 12.075651014164889
-  y: 3.790329502402758
-- ref: seam:run-store
-  x: 15.689391328554356
-  y: 3.686729528255555
+  y: 19.88490114597266

@@ -10,12 +10,13 @@ What these tests pin, per ``docs/tasks/22-list.md``:
 - ``--format ids`` is exactly one id per line and nothing else — the format an
   agent pipes to ``xargs``, so an empty answer is no output at all rather
   than a blank line;
-- ``--format json`` is the ``schema_version`` envelope of
+- ``--format json`` is the ``format_version`` envelope of
   ``00-conventions.md``, and ``--json`` folds into a default ``--format``
   without overriding an explicit one (docs/adr/0001);
-- the one ``Kind``/``Design`` field-name mismatch (``nfr`` vs
-  ``non_functionals``) is handled — pinned by asking for a kind no fixture
-  stores yet and getting an empty answer rather than a crash.
+- the ``Kind``/``Design`` field-name mismatches (``req`` vs
+  ``requirements``, ``term`` vs ``glossary``, ``data`` vs ``data_entities``)
+  are handled — pinned by asking for each and, for a kind no fixture stores
+  yet, getting an empty answer rather than a crash.
 
 Since the model addendum: ``resource`` and ``behavior`` list like every other
 kind; ``--lifecycle`` filters the behavior's second axis (§5 — a behavior can
@@ -37,7 +38,7 @@ from typer.testing import CliRunner
 
 from absicht.cli import app
 from absicht.cli._common import ExitCode
-from absicht.models import SCHEMA_VERSION
+from absicht.models.design import FORMAT_VERSION
 
 runner = CliRunner()
 
@@ -60,30 +61,44 @@ def _ids(store: Path, kind: str, *flags: str) -> list[str]:
 
 def test_state_matches_any_of_the_repeatable_flag_s_values() -> None:
     assert _ids(BROWNFIELD, "component", "--state", "observed") == [
+        "component:legacy",
         "component:legacy-billing",
         "component:shadow-report",
     ]
-    # `story:reconcile-billing` is `observed`: under any-of it survives a
-    # second `--state` it does not have, which a last-value-wins reading
+    # `behavior:reconciliation-fires` is `observed`: under any-of it survives
+    # a second `--state` it does not have, which a last-value-wins reading
     # (or an exact single match) would drop.
-    assert _ids(BROWNFIELD, "story", "--state", "observed", "--state", "specified") == [
-        "story:reconcile-billing"
+    assert _ids(BROWNFIELD, "behavior", "--state", "observed", "--state", "specified") == [
+        "behavior:reconciliation-fires"
     ]
-    assert _ids(BROWNFIELD, "requirement", "--state", "specified") == []
+    assert _ids(BROWNFIELD, "req", "--state", "specified") == []
 
 
 def test_confidence_is_exact() -> None:
-    assert _ids(CLEAN, "requirement", "--confidence", "reviewed") == ["requirement:cancel-orders"]
-    assert _ids(CLEAN, "requirement", "--confidence", "assumed") == ["requirement:browse-catalog"]
+    """Neither fixture mixes confidences inside one store — clean is
+    `reviewed` throughout, brownfield `assumed` — so exactness reads across
+    the two: the level a store carries answers with the whole kind, and the
+    other level answers with nothing rather than being ignored."""
+    assert _ids(CLEAN, "req", "--confidence", "reviewed") == [
+        "req:browse-catalog",
+        "req:cancel-orders",
+    ]
+    assert _ids(CLEAN, "req", "--confidence", "assumed") == []
+    assert _ids(BROWNFIELD, "req", "--confidence", "assumed") == [
+        "req:audit-trail",
+        "req:refund-parity",
+    ]
 
 
 def test_unowned_finds_the_ungoverned_unknown() -> None:
     """brownfield's unowned requirement is the `unknown` `ab gaps` exists to
-    surface. No fixture element carries an owner, so the honest positive for
-    `--owner` is that it applies and answers nothing — an ignored flag would
-    list every element of the kind instead."""
-    assert _ids(BROWNFIELD, "requirement", "--unowned") == ["requirement:audit-trail"]
-    assert _ids(BROWNFIELD, "requirement", "--owner", "anyone") == []
+    surface, and nothing points at it, so no owner is inherited either.
+    `--owner` is its mirror: the rest of the store answers to sam, and a name
+    nobody carries answers nothing — an ignored flag would list every
+    element of the kind instead."""
+    assert _ids(BROWNFIELD, "req", "--unowned") == ["req:refund-parity"]
+    assert _ids(BROWNFIELD, "req", "--owner", "sam") == ["req:audit-trail"]
+    assert _ids(BROWNFIELD, "req", "--owner", "anyone") == []
 
 
 def test_owner_and_unowned_together_is_usage() -> None:
@@ -103,21 +118,26 @@ def test_tag_filters_out_elements_without_the_tag() -> None:
 
 def test_orphaned_finds_the_disconnected_elements() -> None:
     """`data:audit-log` is the element nothing points at — what brownfield was
-    built around. The two components the observed behavior watches are no
-    longer orphaned: an observation is a reference, and what points at them is
-    what gives them meaning. `requirement:audit-trail` is pointed at by its
-    story, so it is not orphaned either: `--orphaned` reads `referenced_by`,
-    not `state`."""
+    built around. The components the observed behavior watches are not
+    orphaned: an observation is a reference, and what points at them is what
+    gives them meaning. `req:audit-trail` is pointed at by the behavior that
+    realizes it and the component that implements it, so it is not orphaned
+    either despite being `observed`: `--orphaned` reads `referenced_by`, not
+    `state` — and `req:refund-parity`, which nothing points at, is."""
     assert _ids(BROWNFIELD, "component", "--orphaned") == []
     assert _ids(BROWNFIELD, "data", "--orphaned") == ["data:audit-log"]
-    assert _ids(BROWNFIELD, "requirement", "--orphaned") == []
+    assert _ids(BROWNFIELD, "req", "--orphaned") == ["req:refund-parity"]
 
 
 def test_milestone_returns_exactly_its_scope() -> None:
-    """`milestone:m1`'s scope is `component:cancellation` alone; the filter
-    intersects scope with KIND rather than answering with the scope itself."""
-    assert _ids(CLEAN, "component", "--milestone", "milestone:m1") == ["component:cancellation"]
-    assert _ids(CLEAN, "seam", "--milestone", "milestone:m1") == []
+    """`milestone:m1`'s scope is `component:orders` and `component:cancellation`;
+    the filter intersects scope with KIND rather than answering with the scope
+    itself."""
+    assert _ids(CLEAN, "component", "--milestone", "milestone:m1") == [
+        "component:cancellation",
+        "component:orders",
+    ]
+    assert _ids(CLEAN, "interface", "--milestone", "milestone:m1") == []
 
 
 def test_an_unknown_milestone_ref_is_a_usage_error() -> None:
@@ -137,27 +157,29 @@ def test_ids_is_exactly_one_id_per_line() -> None:
     result = _list(BROWNFIELD, "component", "--format", "ids")
 
     assert result.exit_code == ExitCode.OK
-    assert result.stdout == "component:legacy-billing\ncomponent:shadow-report\n"
+    assert result.stdout == (
+        "component:legacy\ncomponent:legacy-billing\ncomponent:shadow-report\n"
+    )
 
 
 def test_an_empty_answer_prints_nothing_at_all() -> None:
     """No blank line where an id would be: `"\n".splitlines()` yields one
     empty string, so a lone newline would hand xargs one empty argument."""
-    result = _list(BROWNFIELD, "requirement", "--state", "specified", "--format", "ids")
+    result = _list(BROWNFIELD, "req", "--state", "specified", "--format", "ids")
 
     assert result.exit_code == ExitCode.OK
     assert result.stdout == ""
 
 
 def test_json_envelopes_the_selected_elements() -> None:
-    result = _list(CLEAN, "requirement", "--format", "json", "--state", "specified")
+    result = _list(CLEAN, "req", "--format", "json", "--state", "specified")
 
     document = json.loads(result.stdout)
-    assert document["schema_version"] == SCHEMA_VERSION
-    assert document["kind"] == "requirement"
+    assert document["format_version"] == FORMAT_VERSION
+    assert document["kind"] == "req"
     assert [element["id"] for element in document["elements"]] == [
-        "requirement:browse-catalog",
-        "requirement:cancel-orders",
+        "req:browse-catalog",
+        "req:cancel-orders",
     ]
     # The elements themselves, not just their ids: a field a filter keyed on
     # is a field the output can be checked against.
@@ -170,29 +192,40 @@ def test_json_folds_into_a_default_format_only() -> None:
 
     assert folded.exit_code == ExitCode.OK
     assert json.loads(folded.stdout)["kind"] == "component"
-    assert explicit.stdout == "component:cancellation\ncomponent:catalog\ncomponent:orders\n"
+    assert explicit.stdout == (
+        "component:acme\ncomponent:cancellation\ncomponent:catalog\ncomponent:orders\n"
+    )
 
 
 def test_text_is_one_row_per_element_with_id_state_and_title() -> None:
     result = _list(BROWNFIELD, "component")
 
     assert result.exit_code == ExitCode.OK
-    lines = result.stdout.splitlines()
-    assert len(lines) == 2
-    assert "component:legacy-billing" in lines[0]
-    assert "observed" in lines[0]
-    assert "Legacy billing" in lines[0]
-    assert "component:shadow-report" in lines[1]
+    assert result.stdout.splitlines() == [
+        "component:legacy          observed  Legacy billing",
+        "component:legacy-billing  observed  Billing engine",
+        "component:shadow-report   observed  Shadow report",
+    ]
 
 
-def test_the_nfr_kind_maps_to_its_differently_spelled_field() -> None:
-    """`nfr` is the one `Kind` whose `Design` field is not its plural
-    (`non_functionals`). No fixture stores an nfr yet, so the honest pin is
-    that the lookup answers empty rather than crashing on the misspelling."""
-    result = _list(CLEAN, "nfr", "--format", "ids")
-
-    assert result.exit_code == ExitCode.OK
-    assert result.stdout == ""
+@pytest.mark.parametrize(
+    ("kind", "expected"),
+    [
+        ("term", ["term:order"]),  # glossary
+        ("req", ["req:browse-catalog", "req:cancel-orders"]),  # requirements
+        ("quality", ["quality:cancel-latency"]),  # qualities
+        ("data", ["data:order"]),  # data_entities
+        ("external", []),  # external_services — clean stores none
+    ],
+)
+def test_a_kind_maps_to_its_differently_spelled_field(kind: str, expected: list[str]) -> None:
+    """A `Kind`'s value is its ref prefix, and several `Design` fields are
+    spelled differently from it (`term`/`glossary`, `req`/`requirements`,
+    `data`/`data_entities`, `external`/`external_services`). The lookup is a
+    table, not a pluralisation, so each answers with its own elements — and a
+    kind no fixture stores yet answers empty rather than crashing on the
+    misspelling."""
+    assert _ids(CLEAN, kind) == expected
 
 
 # --- the addendum's kinds --------------------------------------------------------
@@ -202,7 +235,7 @@ def test_the_new_kinds_list_like_every_other_kind() -> None:
     """`resource` and `behavior` are plain `Kind`s — same rows, same envelope
     — and the behavior's own second axis rides in the element like any
     field, which is what `--lifecycle` then selects on."""
-    assert _ids(CLEAN, "resource") == ["resource:order-cache"]
+    assert _ids(CLEAN, "resource") == ["resource:order-cache", "resource:order-stream"]
 
     document = json.loads(_list(CLEAN, "behavior", "--format", "json").stdout)
 
@@ -214,10 +247,11 @@ def test_the_new_kinds_list_like_every_other_kind() -> None:
 def test_lifecycle_filters_behaviors_second_axis() -> None:
     """`--lifecycle` is the axis `state` is not (addendum §5).
     `behavior:order-placed` is the clean fixture's superseded one; its
-    replacement and the catalog behavior stay active."""
+    replacement and the other two behaviors stay active."""
     assert _ids(CLEAN, "behavior", "--lifecycle", "superseded") == ["behavior:order-placed"]
     assert _ids(CLEAN, "behavior", "--lifecycle", "active") == [
         "behavior:catalog-browsable",
+        "behavior:order-cancelled",
         "behavior:order-placed-v2",
     ]
 
@@ -245,23 +279,29 @@ def test_the_behavior_rows_gain_the_derived_scope_column() -> None:
     components = _list(CLEAN, "component").stdout.splitlines()
 
     assert behaviors == [
-        "behavior:catalog-browsable  specified  local  The catalog answers a browse",
-        "behavior:order-placed       specified  system  Order placed [superseded]",
-        "behavior:order-placed-v2    specified  system  Order placed through checkout",
+        "behavior:catalog-browsable  specified  local  Browsing the catalog signed out",
+        "behavior:order-cancelled    specified  system  Cancelling an unshipped order",
+        "behavior:order-placed       specified  local  Placing an order (the first cut) [superseded]",
+        "behavior:order-placed-v2    specified  system  Placing an order",
     ]
     assert components == [
-        "component:cancellation  constrained  Cancellation",
+        "component:acme          specified  ACME",
+        "component:cancellation  specified  Cancellation",
         "component:catalog       specified  Catalog",
         "component:orders        specified  Orders",
     ]
 
 
 def test_scope_filters_the_derived_classification() -> None:
-    """`--scope` selects on the same §4.1 classification the column shows:
-    `catalog-browsable` is the clean fixture's only local behavior."""
-    assert _ids(CLEAN, "behavior", "--scope", "local") == ["behavior:catalog-browsable"]
-    assert _ids(CLEAN, "behavior", "--scope", "system") == [
+    """`--scope` selects on the same §4.1 classification the column shows: a
+    behavior whose direct non-behavior touches are one component is `local`,
+    and anything wider — two resources, or a resource alone — is `system`."""
+    assert _ids(CLEAN, "behavior", "--scope", "local") == [
+        "behavior:catalog-browsable",
         "behavior:order-placed",
+    ]
+    assert _ids(CLEAN, "behavior", "--scope", "system") == [
+        "behavior:order-cancelled",
         "behavior:order-placed-v2",
     ]
 
@@ -286,7 +326,7 @@ def test_json_carries_the_derived_scope_beside_the_element() -> None:
 
     by_id = {element["id"]: element for element in document["elements"]}
     assert by_id["behavior:catalog-browsable"]["scope"] == "local"
-    assert by_id["behavior:order-placed"]["scope"] == "system"
+    assert by_id["behavior:order-cancelled"]["scope"] == "system"
     assert "scope" not in plain["elements"][0]
 
 
@@ -296,46 +336,53 @@ def test_json_carries_the_derived_scope_beside_the_element() -> None:
 @pytest.fixture
 def inheritance(tmp_path: Path) -> Path:
     """§7's owner inheritance in the smallest store that holds it:
-    `requirement:inherits` is an unowned `unknown` whose one referencing
-    element carries an owner; `requirement:self-owned` has an owner of its
-    own; `component:contested` is referenced by two elements with two
-    different owners. No fixture carries an owner on a referencing element,
-    and growing one would move other tickets' exact-match worklist
+    `req:inherits` is an unowned `unknown` whose one referencing element
+    carries an owner; `req:self-owned` has an owner of its own;
+    `component:contested` is referenced by two elements with two different
+    owners. No fixture pairs an unowned `unknown` with an owned referencing
+    element, and growing one would move other tickets' exact-match worklist
     assertions — the case gets a store of its own instead."""
     root = tmp_path / "inheritance"
-    _write(root, "system.yaml", "id: system:inheritance\ntitle: Inheritance\nstate: specified\n")
+    _write(
+        root,
+        "design.yaml",
+        "format_version: 1\nid: design:inheritance\ntitle: Inheritance\nversion: 0.1.0\n",
+    )
     _write(
         root,
         "requirements/inherits.md",
-        "---\nid: requirement:inherits\ntitle: Inherits\nstate: unknown\n---\n",
+        "---\nid: req:inherits\ntitle: Inherits\nstate: unknown\n"
+        "statement: Somebody must say what this means.\n---\n",
     )
     _write(
         root,
         "requirements/self-owned.md",
-        "---\nid: requirement:self-owned\ntitle: Self owned\nstate: unknown\nowner: qa\n---\n",
+        "---\nid: req:self-owned\ntitle: Self owned\nstate: unknown\nowner: qa\n"
+        "statement: Somebody must say what this one means too.\n---\n",
     )
     _write(
         root,
         "components/contested.md",
-        "---\nid: component:contested\ntitle: Contested\nstate: unknown\n---\n",
+        "---\nid: component:contested\ntitle: Contested\nstate: unknown\nlevel: container\n---\n",
     )
     _write(
         root,
-        "requirements/by-a.md",
-        "---\nid: requirement:by-a\ntitle: By A\nstate: specified\nowner: team-a\nrealized_by:\n"
-        "- component:contested\n---\n",
+        "components/caller-a.md",
+        "---\nid: component:caller-a\ntitle: Caller A\nstate: specified\nowner: team-a\n"
+        "level: container\nrelates:\n- to: component:contested\n  type: calls\n---\n",
     )
     _write(
         root,
-        "requirements/by-b.md",
-        "---\nid: requirement:by-b\ntitle: By B\nstate: specified\nowner: team-b\nrealized_by:\n"
-        "- component:contested\n---\n",
+        "components/caller-b.md",
+        "---\nid: component:caller-b\ntitle: Caller B\nstate: specified\nowner: team-b\n"
+        "level: container\nrelates:\n- to: component:contested\n  type: calls\n---\n",
     )
     _write(
         root,
-        "stories/carrier.md",
-        "---\nid: story:carrier\ntitle: Carrier\nstate: specified\nowner: platform\nsatisfies:\n"
-        "- requirement:inherits\n- requirement:self-owned\n---\n",
+        "components/carrier.md",
+        "---\nid: component:carrier\ntitle: Carrier\nstate: specified\nowner: platform\n"
+        "level: container\nrelates:\n- to: req:inherits\n  type: implements\n"
+        "- to: req:self-owned\n  type: implements\n---\n",
     )
     return root
 
@@ -349,22 +396,22 @@ def _write(root: Path, rel: str, text: str) -> None:
 def test_owner_groups_the_unknown_that_inherits_its_referencers(
     inheritance: Path,
 ) -> None:
-    """`--owner platform` answers with `requirement:inherits` even though its
-    own `owner` is empty: grouping by owner is where §7's inheritance lives,
+    """`--owner platform` answers with `req:inherits` even though its own
+    `owner` is empty: grouping by owner is where §7's inheritance lives,
     and the group that would own the unknown is the one that referenced it."""
-    assert _ids(inheritance, "requirement", "--owner", "platform") == ["requirement:inherits"]
+    assert _ids(inheritance, "req", "--owner", "platform") == ["req:inherits"]
 
 
 def test_an_element_with_its_own_owner_is_never_overridden(inheritance: Path) -> None:
-    """`story:carrier` (owned by platform) satisfies both requirements, but
-    `requirement:self-owned` answers to qa alone: inheritance is for the
+    """`component:carrier` (owned by platform) implements both requirements,
+    but `req:self-owned` answers to qa alone: inheritance is for the
     ownerless, and an authored owner always stands."""
-    assert _ids(inheritance, "requirement", "--owner", "qa") == ["requirement:self-owned"]
+    assert _ids(inheritance, "req", "--owner", "qa") == ["req:self-owned"]
 
 
 def test_unowned_means_no_owner_not_even_an_inherited_one(inheritance: Path) -> None:
     """The inherited side of the same coin: an unknown that answers to
     platform leaves `--unowned`, while `component:contested` — referenced by
     an owner and another owner — stays ownerless: ambiguity is not a guess."""
-    assert _ids(inheritance, "requirement", "--unowned") == []
+    assert _ids(inheritance, "req", "--unowned") == []
     assert _ids(inheritance, "component", "--unowned") == ["component:contested"]

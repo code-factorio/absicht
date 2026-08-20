@@ -1,726 +1,890 @@
-"""``ab check``'s first two layers: schema findings, then integrity findings.
+"""Proposed `ab check` for the revamped model: integrity, then policy.
 
-The schema layer is the one with the least new logic to write: pydantic
-already enforced the field types and the ``Ref``/``Slug``/``CriterionId``
-patterns at parse time, inside ``absicht.codec``/``absicht.load``, and every
-file that failed there is already a ``LoadError``. What this module adds is
-the translation ``load`` deliberately does not do — one ``LoadError`` becomes
-one ``Finding`` at error severity, under a rule id that says which *kind* of
-schema problem it was, because ``ab check --explain ID`` answers "what does
-this rule check" per rule, not per file.
+Two layers, and the split is the point.
 
-The integrity layer reads the resolved artifact instead of the load errors:
-every reference a ``Design`` carries must name an element that exists, and
-the two relations that must be acyclic — ``contains`` and ``depends_on`` —
-are checked as their own directed graphs. Criteria anchoring is the spec's
-third integrity line but cannot be violated here: ``Story``'s own validator
-rejects a misanchored criterion at parse time, so it can only ever surface
-as a ``schema/validation`` load error; its id stays registered, marked
-handled upstream, for ``--explain`` to answer with. Notes stay outside that
-walk by construction — they are not in the ``Design`` — and their single
-rule reads the loader's collection instead.
+*Integrity* asks whether the graph holds together — does every reference
+resolve, is every relation legal, is anything acyclic that must be. These are
+facts about the design, so every one of them is an error.
 
-The policy layer passes judgement on the same resolved artifact — states,
-staleness and accountability rather than structure. Its severities are a
-posture, not a fact: the unowned ``unknown`` and the rationale-less
-``one_way`` decision are errors because the spec's own wording is "needs",
-while the unrealized requirement and the expired external assumption are
-warnings — incomplete-but-honest and stale-but-routine are the states
-``observed``-heavy brownfield stores legitimately hold, and a checker that
-errors on them teaches people to stop recording them. The clock is injected
-(``today`` is a parameter, never read inside a rule), so a run answers
-"expired as of when" and stays reproducible. The CLI wiring — flags,
-formats, exit codes — is task 15's.
+*Policy* passes judgement on the same graph: coverage, agency, staleness. Its
+severities are a posture, not a fact. An unimplemented requirement and an
+expired assumption are warnings, because incomplete-but-honest is a state a
+brownfield design legitimately holds, and a checker that fails on it teaches
+people to stop recording it. An `unknown` with no owner is an error, because
+nobody can resolve it.
 
-The model addendum grows every layer, and its rule table is pinned in
-``docs/tasks/50-addendum-conventions.md`` — this module implements that
-table, it does not re-derive it. Two shapes are worth naming: an addendum
-rule can be *handled upstream* (enforced at parse time by a model validator,
-or subsumed by the generic dangling-ref sweep) and then only its id and
-explanation are registered, so ``--explain`` answers for it — the
-``integrity/criteria-anchored`` precedent; and a rule can be the *same walk*
-under a new name, which is what composition and supersession cycles are —
-they reuse ``_cycles`` with their own ids rather than folding into
-``integrity/cycle``, because a finding's id is what ``--rule`` selects on.
+There is no schema layer here. Pydantic already rejected the malformed record
+at parse time, so `codec` owns that translation. Rules that a model validator
+enforces are registered all the same, marked handled upstream, so
+`ab check --explain ID` answers for every rule we agreed.
+
+The clock is a parameter. A rule never reads `date.today()`, so a run answers
+"expired as of when" and stays reproducible.
 """
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from datetime import date
 from graphlib import CycleError, TopologicalSorter
+from itertools import pairwise
+
+from packaging.specifiers import InvalidSpecifier, SpecifierSet
+from packaging.version import InvalidVersion, Version
 
 from absicht.findings import RULES, Finding, Severity, finding
 from absicht.load import LoadedStore, LoadErrorReason
-from absicht.models import Behavior, Design, External, Lifecycle, Ref, Reversibility, State
-from absicht.resolve import Index, iter_references
+from absicht.models.design import (
+    Behavior,
+    Component,
+    ComponentLevel,
+    Design,
+    ExternalService,
+    Interface,
+    Outcome,
+    RelationshipType,
+    State,
+)
+from absicht.resolve import Index, carriers, kind, references
 
 RULES.update(
     {
-        "schema/yaml-syntax": (
-            "A file that is not the format: YAML the parser refuses, or a document "
-            "without the --- front matter every element is read through. Always an "
-            "error — a file that does not parse cannot be advisory."
+        # --------------------------------------------------------------- store
+        "store/yaml-syntax": (
+            "A file does not read as the format at all: YAML the parser "
+            "refuses, a document that is not a mapping, or front matter that "
+            "never closes. Nothing downstream can run until it parses."
         ),
-        "schema/validation": (
-            "A file that parsed but whose fields failed validation: a wrong type, a "
-            "Ref/Slug/CriterionId pattern, or a record-level rule such as a criterion "
-            "anchored to another story. The message names the offending field."
+        "store/validation": (
+            "A file parsed but its fields did not validate. Every shape a "
+            "record cannot have surfaces here, because pydantic rejects it at "
+            "the boundary rather than a rule re-deriving it later."
         ),
-        "schema/system-missing": (
-            "The store has no system.yaml. A store is exactly one System element plus "
-            "its kind directories, and everything downstream reads the system."
+        "store/design-missing": (
+            "No `design.yaml`. A store is one design, and a design without an "
+            "id, a title and a version cannot be folded or pointed at."
         ),
-        "schema/unreadable-file": (
-            "A file the loader could not read at all — permissions, or it vanished "
-            "mid-walk. Not a judgement about the design, but check cannot see past a "
-            "file it cannot read."
+        "store/unreadable-file": (
+            "A file could not be read, never mind parsed. A permission or an "
+            "encoding, not a design judgement."
         ),
-        # The addendum's must_not-with-timing shape is the criteria-anchored
-        # pattern again: Observation's own validator rejects it at parse time
-        # (addendum §3.1), so it only ever surfaces as schema/validation.
-        # Registered as handled upstream so --explain answers for the rule the
-        # addendum states under this id.
-        "schema/must-not-has-timing": (
-            "Handled upstream, at the schema layer: Observation's own validator "
-            "rejects a `must_not` observation that carries a `timing`, because "
-            "`must_not` means at no point and a timing says when the never "
-            "happens. The failure surfaces as schema/validation on the behavior's "
-            "file. No finding can carry this id."
-        ),
+        # ------------------------------------------------------------ integrity
         "integrity/dangling-ref": (
-            "A ref-typed field points at an id no element in the store defines. Refs "
-            "are typed `kind:slug` precisely so this is checkable without a lookup, "
-            "and a dangling ref is a link that stops tracing — in System.externals "
-            "and a criterion's touches as much as in contains. The finding names the "
-            "source element, the field, and the missing target. Always an error."
+            "A ref-typed field points at an id nothing defines, here or in an "
+            "imported design. Refs are typed `kind:slug` so this is checkable "
+            "without a lookup, and a dangling ref is a trace that stops."
+        ),
+        "integrity/not-exported": (
+            "A ref names an element an imported design defines but does not "
+            "export. Reaching past the export surface makes the other design's "
+            "internals your dependency, and neither side can move again."
+        ),
+        "integrity/export-undefined": (
+            "An exported ref names nothing this design defines. You may export "
+            "only what you declare: to offer somebody else's interface, wrap it "
+            "in one of yours, which makes it yours to keep."
+        ),
+        "integrity/export-kind": (
+            "Handled upstream: `Design`'s own validator rejects an export that "
+            "is not a contract kind. A goal or a requirement is why we built "
+            "the thing and a component is the thing, so neither crosses a "
+            "boundary. It surfaces as a parse failure on design.yaml."
+        ),
+        "integrity/component-level": (
+            "The C4 nesting rule: a system has no parent, a container's parent "
+            "is a system, a component's parent is a container. Nesting is the "
+            "zoom, so a broken chain makes every diagram wrong."
         ),
         "integrity/cycle": (
-            "A relation that must be acyclic has a cycle: contains (component "
-            "nesting) or depends_on (milestone ordering), each checked as its own "
-            "directed graph. One finding per distinct cycle, naming every element "
-            "on it — a cycle leaves `inside` and `before` undefined. Always an error."
+            "A relation that must be acyclic has one: component nesting, "
+            "milestone order, or supersession. One finding per distinct cycle, "
+            "naming every element on it, because a cycle leaves `inside`, "
+            "`before` and `replaces` undefined."
         ),
-        # The spec's third integrity line — criteria anchored to their story —
-        # is unreachable here by construction: Story._criteria_anchored_to_story
-        # in models.py rejects a misanchored criterion at parse time, so it only
-        # ever surfaces as a schema/validation load error. Registered as handled
-        # upstream rather than silently dropped, so --explain answers for it.
-        "integrity/criteria-anchored": (
-            "Handled upstream, at the schema layer: Story's own validator rejects a "
-            "criterion anchored to another story at parse time, and the failure "
-            "surfaces as schema/validation on that story's file. No integrity "
-            "finding can carry this id."
+        "integrity/edge-kinds": (
+            "A relationship joins two kinds it is not defined between — a "
+            "`calls` edge into a library, an `implements` edge from something "
+            "that is not a component. The edge kind is what a checker branches "
+            "on, so a wrong one silently disables every rule behind it."
         ),
-        "integrity/seam-references-resource": (
-            "A seam's provider, consumers or carries names a resource. Always an "
-            "error: a seam is a contract between components, while a component's "
-            "relationship to a resource is a dependency — what gives it meaning is "
-            "the observations referencing it, not a contract an author writes. The "
-            "finding names the seam, the field and the resource."
+        "integrity/observation-target": (
+            "An observation's `at` points at something you cannot observe. A "
+            "component, an interface, a resource or another behavior can be "
+            "watched; a requirement, a goal or a decision cannot."
         ),
-        # The addendum states this rule separately, but an observation's `at`
-        # is yielded by iter_references attributed to the behavior that carries
-        # it — the same walk integrity/dangling-ref reads — so a target no
-        # element defines already reports there. Registered as handled upstream
-        # rather than duplicating the walk with a second id.
-        "integrity/observation-at-unresolvable": (
-            "Handled upstream, by integrity/dangling-ref: an observation's `at` is "
-            "attributed to the behavior that carries it in the generic reference "
-            "walk, so a target no element in the store defines surfaces as a "
-            "dangling ref on that behavior. No finding can carry this id — it stays "
-            "registered so --explain answers for the rule the addendum states."
+        "integrity/must-not-has-timing": (
+            "Handled upstream: `Observation`'s validator rejects a `must_not` "
+            "that carries a `timing`, because `must_not` means at no point and "
+            "a timing says when the never happens."
         ),
-        "integrity/observation-at-wrong-kind": (
-            "An observation whose `at` points at a requirement, a decision, a "
-            "question or a note. Always an error: what an observation may be about "
-            "is a component, a resource, a seam or another behavior — the things "
-            "whose acting is observable — and a note additionally is not an element "
-            "and can never resolve. The finding names the observation and its "
-            "target; existence is the generic dangling-ref sweep's to judge."
+        "integrity/observations-anchored": (
+            "Handled upstream: `Behavior`'s validator rejects an observation "
+            "whose id names another behavior. The id says which behavior owns "
+            "it, so a mismatch is a broken file and not a design judgement."
         ),
-        "integrity/composition-cycle": (
-            "Behaviors composing each other in a circle: observations whose `at` "
-            "points at behavior refs form the composition graph, and one finding "
-            "per distinct cycle names every behavior on the closed path. Always an "
-            "error — the same failure as a contains or depends_on cycle, walked the "
-            "same way, because a cycle leaves what causes what undefined."
+        "integrity/external-design-unknown": (
+            "An external service names a design that no import declares. The "
+            "box has to point at something we actually pulled in, or the "
+            "contract behind it cannot be read."
         ),
-        # Supersession is the same subsumption as observation-at-unresolvable:
-        # Behavior.supersedes is a ref-typed field the generic walk already
-        # checks, so only the id is registered here.
-        "integrity/supersedes-unresolvable": (
-            "Handled upstream, by integrity/dangling-ref: a behavior's `supersedes` "
-            "is a ref-typed field in the generic reference walk, so a replacement "
-            "naming a behavior no element in the store defines surfaces as a "
-            "dangling ref on it. No finding can carry this id — it stays registered "
-            "so --explain answers for the rule the addendum states."
+        "integrity/external-design-interface": (
+            "An interface is declared by an external service that has its own "
+            "design. Their exports are the contract; a copy here would be a "
+            "second opinion about something somebody else publishes."
         ),
-        "integrity/supersession-cycle": (
-            "Supersession edges forming a cycle — one behavior's supersedes naming "
-            "another and back again, or a behavior superseding itself, the length-1 "
-            "case under the same id. Always an error: supersession is the one "
-            "relation whose whole job is saying which behavior is current, and a "
-            "cycle leaves that with no answer. One finding per distinct cycle."
+        "integrity/interface-on-resource": (
+            "An interface is declared by a resource. A resource takes part in "
+            "no contract: a component's relation to one is a dependency, and "
+            "the observations pointing at it are what give it meaning."
         ),
-        "integrity/note-promoted-to-unresolvable": (
-            "A note's promoted_to names the element it became, and that element "
-            "must exist: the promotion is a note's one claim on the record, and a "
-            "target no element defines leaves it pointing at something nobody can "
-            "read. Always an error. This is the only rule that reads notes — they "
-            "are outside the Design and exempt from graph validation by "
-            "construction, so their refs are never walked; only a claimed "
-            "promotion must resolve."
+        "integrity/repository-unknown": (
+            "An `implemented_by` entry uses a repository prefix that "
+            "`Design.repositories` does not declare, so the link into code "
+            "resolves to a guess instead of to a URL and a ref."
+        ),
+        # --------------------------------------------------------------- policy
+        "policy/requirement-unimplemented": (
+            "No component implements this requirement. An error once a human "
+            "has reviewed it, because somebody agreed to build it and nothing "
+            "claims to; a warning while it is still assumed."
+        ),
+        "policy/requirement-unrealized": (
+            "No behavior realizes this requirement, so nothing says how you "
+            "would know it holds. A warning: the requirement may be true and "
+            "merely unobserved, which is a normal state mid-design."
+        ),
+        "policy/requirement-aimless": (
+            "The requirement derives from no goal, so nobody can say why it "
+            "exists. A warning, because the goal may simply not be written yet."
+        ),
+        "policy/goal-unserved": (
+            "No requirement derives from this goal. An error: a goal nothing "
+            "serves is either finished, abandoned, or a slogan, and each of "
+            "those wants a different edit."
+        ),
+        "policy/goal-unmeasured": (
+            "The goal states no measure, so nobody can tell whether it was "
+            "met. A goal with no measure is a slogan."
+        ),
+        "policy/behavior-unobserved": (
+            "A behavior with no observations says something happens and never "
+            "says what, so verification has nothing to check."
+        ),
+        "policy/agency-undeclared": (
+            "A `constrained` or `delegated` element carries no "
+            "`reversibility`, so an agent cannot judge whether to decide "
+            "freely, propose first, or stop and ask."
+        ),
+        "policy/unknown-unowned": (
+            "An `unknown` element has no owner. `unknown` means ask, and an "
+            "error here is the honest one: with nobody to ask, the state is a "
+            "wish and an agent will invent instead."
+        ),
+        "policy/assumption-expired": (
+            "An assumption passed `expires_on`. Stale-but-routine, so a "
+            "warning — but everything in `invalidates` is now unproven."
+        ),
+        "policy/external-assumption-expired": (
+            "An external service passed `expires_on`. Somebody else's system "
+            "moved while we were not looking, or nobody re-checked."
+        ),
+        "policy/import-unpinned": (
+            "An import states no `expects`, so nothing can warn when the other "
+            "design moves under us. The same gap as a dependency with no "
+            "version range."
+        ),
+        "policy/quality-unevidenced": (
+            "A component claims to satisfy a quality requirement that carries "
+            "no evidence. The claim may be true; nothing measured it."
+        ),
+        "policy/milestone-unscoped": (
+            "A milestone declares no `scope`, so nothing says what an agent "
+            "may touch. The packet cannot be assembled from it."
+        ),
+        "policy/note-dangling": (
+            "A note points at an element nothing defines. Informational and "
+            "never a failure: a note about something not yet written is the "
+            "normal case, and the point of the typed link is that a rename "
+            "surfaces it."
+        ),
+        "policy/advisory-count": (
+            "How many `should` observations exist. They never fail "
+            "verification, which is what makes them a dumping ground, so the "
+            "count is reported to keep it visible."
+        ),
+        # ----------------------------------------------------------- landscape
+        "landscape/duplicate-design": (
+            "Two designs claim the same id. Every ref resolves against one "
+            "index built from the whole landscape, so a repeated design id "
+            "makes every foreign lookup ambiguous."
+        ),
+        "landscape/import-unresolved": (
+            "A design imports one the landscape does not hold. Nothing after "
+            "it can be trusted for that design: every ref into the missing "
+            "design reads as dangling, which is the honest cascade."
+        ),
+        "landscape/import-cycle": (
+            "Two or more designs import each other. Two designs that need each "
+            "other are one design, and neither can be released without the "
+            "other."
+        ),
+        "landscape/version-mismatch": (
+            "An imported design's version falls outside the range the importer "
+            "expects. Either the other side moved under us or our range is "
+            "stale, and both are edits somebody has to make."
+        ),
+        "landscape/version-unreadable": (
+            "A version or a range that cannot be parsed. Not a judgement about "
+            "the design, but nothing can be compared until both sides write it "
+            "in a form that reads the same way."
+        ),
+        "landscape/duplicate-id": (
+            "Two designs define the same element id. A ref carries no "
+            "location, which is what lets an element move without breaking a "
+            "link; the price is that an id must be unique across everything "
+            "indexed together."
+        ),
+        "landscape/export-unused": (
+            "A design that others import exports something nobody consumes. "
+            "Informational: a surface with no consumer is cost with no "
+            "benefit, and it is the cheapest thing in a design to withdraw."
         ),
     }
 )
 
-_RULE_BY_REASON: dict[LoadErrorReason, str] = {
-    LoadErrorReason.SYNTAX: "schema/yaml-syntax",
-    LoadErrorReason.VALIDATION: "schema/validation",
-    LoadErrorReason.MISSING_SYSTEM: "schema/system-missing",
-    LoadErrorReason.IO: "schema/unreadable-file",
+
+# ---------------------------------------------------------------------- store
+
+
+_LOAD_RULES: dict[LoadErrorReason, str] = {
+    LoadErrorReason.SYNTAX: "store/yaml-syntax",
+    LoadErrorReason.VALIDATION: "store/validation",
+    LoadErrorReason.MISSING_DESIGN: "store/design-missing",
+    LoadErrorReason.IO: "store/unreadable-file",
 }
-"""One rule id per failure family — the reason exists so this is a lookup, not message parsing."""
 
 
-def schema_findings(loaded: LoadedStore) -> tuple[Finding, ...]:
-    """One error-severity finding per ``LoadError``, in the order load reported them."""
-    return tuple(
+def store_findings(loaded: LoadedStore) -> list[Finding]:
+    """The files that did not load, as findings.
+
+    The one layer above the design graph: a file nobody could parse is not a
+    statement about the design, so no rule here reads a `Design`. `load`
+    already classified each failure, which is why this is a lookup and not a
+    second reading of the message.
+    """
+    return [
         finding(
-            _RULE_BY_REASON[error.reason],
+            _LOAD_RULES[error.reason],
             severity=Severity.ERROR,
             message=error.message,
             source=error.path,
         )
         for error in loaded.errors
-    )
+    ]
 
 
-def integrity_findings(design: Design, index: Index) -> tuple[Finding, ...]:
-    """Every dangling ref, then every cycle, then the addendum's integrity
-    rules.
-
-    ``index`` must be ``Index.from_design(design)``: the same enumeration that
-    built the index decides what "exists" means here, so a mismatched pair
-    would misreport both rules. Dangling refs come first, in ``Design`` field
-    order; cycles after, one finding per distinct cycle; the addendum's
-    kind and cycle rules last, in the order the addendum states them.
-    """
-    return (
-        *_dangling_ref_findings(design, index),
-        *_cycle_findings(design, index),
-        *_seam_resource_findings(design),
-        *_observation_at_wrong_kind_findings(design),
-        *_composition_cycle_findings(design, index),
-        *_supersession_cycle_findings(design, index),
-    )
+# ------------------------------------------------------------------ integrity
 
 
-def _dangling_ref_findings(design: Design, index: Index) -> tuple[Finding, ...]:
-    """One finding per reference whose target no element defines.
-
-    ``iter_references`` is the one enumeration of ref-typed fields — the walk
-    ``Index`` itself is built from — so a field added to a model is checked
-    here without this module learning about it, criteria ``touches`` included
-    (attributed to the story that carries them) and ``System.externals`` too,
-    which is why the multi-repo sanity the spec asks about needs no rule of
-    its own.
-    """
-    return tuple(
-        finding(
-            "integrity/dangling-ref",
-            severity=Severity.ERROR,
-            message=(
-                f"{reference.source}'s {reference.field} points at "
-                f"{reference.target}, which no element in the store defines"
-            ),
-            ref=reference.source,
-            # The singleton system.yaml carries no store path; renderers treat
-            # None and "" differently (SARIF emits a location for "").
-            source=index.by_id[reference.source].source or None,
-        )
-        for reference in iter_references(design)
-        if reference.target not in index.by_id
-    )
-
-
-def _cycle_findings(design: Design, index: Index) -> tuple[Finding, ...]:
-    """One finding per distinct cycle, per relation, in ``Design`` field order.
-
-    ``contains`` (component nesting) and ``depends_on`` (milestone ordering)
-    are checked as separate directed graphs: each must be acyclic for
-    "inside" and "before" to mean anything. A target that does not resolve is
-    the dangling-ref rule's finding and cannot close a cycle, so it is
-    dropped from the graph before the walk.
-    """
-    relations = (
-        ("contains", tuple((c.id, c.contains) for c in design.components)),
-        ("depends_on", tuple((m.id, m.depends_on) for m in design.milestones)),
-    )
-    return tuple(
-        finding
-        for relation, edges in relations
-        for finding in _cyclic_relation_findings("integrity/cycle", relation, edges, index)
-    )
-
-
-def _cyclic_relation_findings(
-    rule_id: str, relation: str, edges: tuple[tuple[Ref, tuple[Ref, ...]], ...], index: Index
-) -> tuple[Finding, ...]:
-    """One error per distinct cycle in one directed relation, under its own id.
-
-    The walk every acyclic relation shares: drop targets that do not resolve
-    (a dangling target is the dangling-ref rule's finding and cannot close a
-    cycle), then hand the graph to ``_cycles``. The relation names the edges
-    in the message; the id is what ``--rule`` selects on, which is why the
-    addendum's composition and supersession walks call this with their own
-    ids rather than folding into ``integrity/cycle``.
-    """
-    graph = {
-        source: tuple(target for target in targets if target in index.by_id)
-        for source, targets in edges
-    }
-    return tuple(
-        finding(
-            rule_id,
-            severity=Severity.ERROR,
-            message=f"{relation} edges form a cycle: {' -> '.join(cycle)}",
-        )
-        for cycle in _cycles(graph)
-    )
-
-
-def _cycles(graph: dict[Ref, tuple[Ref, ...]]) -> Iterator[tuple[Ref, ...]]:
-    """Every distinct cycle in a directed graph, as the closed path through it.
-
-    ``TopologicalSorter.prepare`` raises ``CycleError`` once, naming one cycle
-    in ``args[1]`` as the node path with its first node repeated at the end —
-    the shape CPython's graphlib has always produced, and the reason it is
-    preferred over a hand-rolled DFS here. Dropping that cycle's nodes and
-    re-preparing finds cycles elsewhere in the graph, so disjoint loops are
-    reported separately; cycles sharing a node surface as the one loop the
-    first hit identifies, which is one finding for what is already an error
-    either way.
-    """
-    remaining = graph
-    while remaining:
-        try:
-            TopologicalSorter(remaining).prepare()
-        except CycleError as exc:
-            cycle: list[Ref] = exc.args[1]
-            members = set(cycle)
-            remaining = {
-                node: targets for node, targets in remaining.items() if node not in members
-            }
-            yield tuple(cycle)
-        else:
-            return
-
-
-def _seam_resource_findings(design: Design) -> tuple[Finding, ...]:
-    """One finding per ``resource:`` ref a seam carries in its ref fields.
-
-    Only the seam's own ref fields are walked — ``provider``, ``consumers``,
-    ``carries`` — because the rule is about who a contract runs between, not
-    about refs elsewhere on the record. The prefix check is the whole test: a
-    ref's kind is readable without a lookup, and whether the resource exists
-    is the dangling-ref rule's question, not this one's.
-    """
-    findings: list[Finding] = []
-    for seam in design.seams:
-        edges = (
-            ("provider", seam.provider),
-            *(("consumers", consumer) for consumer in seam.consumers),
-            *(("carries", carried) for carried in seam.carries),
-        )
-        findings.extend(
-            finding(
-                "integrity/seam-references-resource",
-                severity=Severity.ERROR,
-                message=(
-                    f"{seam.id}'s {field} names {target}: a seam is a contract "
-                    "between components, and a component's relationship to a "
-                    "resource is a dependency"
-                ),
-                ref=seam.id,
-                source=seam.source or None,
-            )
-            for field, target in edges
-            if target is not None and target.startswith("resource:")
-        )
-    return tuple(findings)
-
-
-_OBSERVATION_AT_WRONG_KINDS = frozenset({"requirement", "decision", "question", "note"})
-"""The kinds an observation's ``at`` may never point at, per the addendum's
-own list (§3.2 names requirement, decision and question; a note joins them
-because it is not an element at all). The kinds not named here — the allowed
-component, resource, seam and behavior — are the rule's silent side."""
-
-
-def _observation_at_wrong_kind_findings(design: Design) -> tuple[Finding, ...]:
-    """One finding per observation whose ``at`` targets a kind it may not.
-
-    The message names the observation (its id embeds the behavior that
-    carries it) and says what an observation may point at instead, so the fix
-    is readable from the finding alone. A note target gets the sharper why —
-    it can never resolve, not merely does not — since no fixture will ever
-    hold one quietly.
-    """
-    findings: list[Finding] = []
-    for behavior in design.behaviors:
-        for observation in behavior.observations:
-            kind = observation.at.split(":", 1)[0]
-            if kind not in _OBSERVATION_AT_WRONG_KINDS:
-                continue
-            allowed = (
-                "an observation may point at a component, a resource, a seam or another behavior"
-            )
-            forbidden = (
-                f"a note is not an element and can never resolve — {allowed}"
-                if kind == "note"
-                else allowed
-            )
-            findings.append(
-                finding(
-                    "integrity/observation-at-wrong-kind",
+def _refs_resolve(ix: Index) -> Iterator[Finding]:
+    for element in ix.elements():
+        for carrier in carriers(element):
+            owner = getattr(carrier, "id", element.id)
+            for field, ref in references(carrier):
+                if ix.resolves(ref):
+                    continue
+                rule = (
+                    "integrity/not-exported"
+                    if ix.is_private_foreign(ref)
+                    else "integrity/dangling-ref"
+                )
+                yield finding(
+                    rule,
                     severity=Severity.ERROR,
-                    message=f"{observation.id}'s at points at {observation.at}; {forbidden}",
+                    message=f"{owner}.{field} points at {ref}",
+                    ref=element.id,
+                    source=element.source or None,
+                )
+    for edge in ix.design.relationships:
+        for field, ref in (("source_id", edge.source_id), ("target_id", edge.target_id)):
+            if ix.resolves(ref):
+                continue
+            rule = (
+                "integrity/not-exported" if ix.is_private_foreign(ref) else "integrity/dangling-ref"
+            )
+            yield finding(
+                rule,
+                severity=Severity.ERROR,
+                message=f"{edge.type} edge {field} points at {ref}",
+                ref=edge.source_id,
+            )
+
+
+def _exports_defined(ix: Index) -> Iterator[Finding]:
+    for ref in ix.design.exports:
+        if ref not in ix.local:
+            yield finding(
+                "integrity/export-undefined",
+                severity=Severity.ERROR,
+                message=f"{ix.design.id} exports {ref}, which it does not define",
+                ref=ix.design.id,
+            )
+
+
+_PARENT_OF: dict[ComponentLevel, ComponentLevel | None] = {
+    ComponentLevel.SYSTEM: None,
+    ComponentLevel.CONTAINER: ComponentLevel.SYSTEM,
+    ComponentLevel.COMPONENT: ComponentLevel.CONTAINER,
+}
+
+
+def _component_levels(ix: Index) -> Iterator[Finding]:
+    for component in ix.of_type(Component):
+        expected = _PARENT_OF[component.level]
+        parent = ix.local.get(component.parent) if component.parent else None
+        if expected is None:
+            if component.parent:
+                yield finding(
+                    "integrity/component-level",
+                    severity=Severity.ERROR,
+                    message=f"{component.id} is a system and has a parent",
+                    ref=component.id,
+                    source=component.source or None,
+                )
+            continue
+        if parent is None:
+            yield finding(
+                "integrity/component-level",
+                severity=Severity.ERROR,
+                message=f"{component.id} is a {component.level} with no parent {expected}",
+                ref=component.id,
+                source=component.source or None,
+            )
+        elif not isinstance(parent, Component) or parent.level is not expected:
+            yield finding(
+                "integrity/component-level",
+                severity=Severity.ERROR,
+                message=f"{component.id} is a {component.level}; its parent must be a {expected}",
+                ref=component.id,
+                source=component.source or None,
+            )
+
+
+def _break_edge(working: dict[str, set[str]], cycle: Sequence[str]) -> bool:
+    """Drop one edge of a reported cycle, so the next pass finds the next one.
+
+    Which way round `graphlib` lists the path is its business, so try both;
+    returning False when nothing came out is what stops the caller looping
+    forever on an edge it cannot find.
+    """
+    for first, second in pairwise(cycle):
+        for tail, head in ((first, second), (second, first)):
+            if head in working.get(tail, ()):
+                working[tail].discard(head)
+                return True
+    return False
+
+
+def _acyclic(
+    graph: Mapping[str, set[str]],
+    label: str,
+    rule_id: str = "integrity/cycle",
+) -> Iterator[Finding]:
+    """Report every distinct cycle, not only the first one graphlib names."""
+    working = {node: set(edges) for node, edges in graph.items()}
+    while True:
+        try:
+            TopologicalSorter(working).prepare()
+            return
+        except CycleError as exc:
+            nodes = list(exc.args[1])
+            yield finding(
+                rule_id,
+                severity=Severity.ERROR,
+                message=f"{label} cycle: {' -> '.join(nodes)}",
+                ref=nodes[0],
+            )
+            if not _break_edge(working, nodes):
+                return
+
+
+def _cycles(ix: Index) -> Iterator[Finding]:
+    nesting = {c.id: {c.parent} if c.parent else set() for c in ix.of_type(Component)}
+    yield from _acyclic(nesting, "component nesting")
+
+    order: dict[str, set[str]] = {}
+    for source, target in ix.edges(RelationshipType.DEPENDS_ON):
+        order.setdefault(source, set()).add(target)
+    yield from _acyclic(order, "depends_on")
+
+    supersession = {e.id: set(e.supersedes) for e in ix.elements() if e.supersedes}
+    yield from _acyclic(supersession, "supersedes")
+
+
+_ANY: frozenset[str] | None = None
+
+_EDGE_KINDS: dict[RelationshipType, tuple[frozenset[str] | None, frozenset[str] | None]] = {
+    RelationshipType.IMPLEMENTS: (frozenset({"component"}), frozenset({"req", "interface"})),
+    RelationshipType.SATISFIES: (frozenset({"component"}), frozenset({"quality"})),
+    RelationshipType.CONSTRAINED_BY: (frozenset({"component"}), frozenset({"constraint"})),
+    RelationshipType.REALIZES: (frozenset({"behavior"}), frozenset({"req"})),
+    RelationshipType.CALLS: (
+        frozenset({"component"}),
+        frozenset({"interface", "external", "design"}),
+    ),
+    RelationshipType.DEPENDS_ON: (
+        frozenset({"component"}),
+        frozenset({"library", "resource", "component"}),
+    ),
+    RelationshipType.DERIVES_FROM: (frozenset({"req"}), frozenset({"req", "goal"})),
+    RelationshipType.SPECIFIES: (frozenset({"design"}), _ANY),
+    RelationshipType.REFINES: (_ANY, _ANY),
+    RelationshipType.CONFLICTS_WITH: (_ANY, _ANY),
+    RelationshipType.RELATES_TO: (_ANY, _ANY),
+}
+
+
+def _edge_kinds(ix: Index) -> Iterator[Finding]:
+    for edge in ix.design.relationships:
+        sources, targets = _EDGE_KINDS[edge.type]
+        if sources is not None and kind(edge.source_id) not in sources:
+            yield finding(
+                "integrity/edge-kinds",
+                severity=Severity.ERROR,
+                message=f"{edge.type} starts at {edge.source_id}; it starts at {sorted(sources)}",
+                ref=edge.source_id,
+            )
+        if targets is not None and kind(edge.target_id) not in targets:
+            yield finding(
+                "integrity/edge-kinds",
+                severity=Severity.ERROR,
+                message=f"{edge.type} ends at {edge.target_id}; it ends at {sorted(targets)}",
+                ref=edge.source_id,
+            )
+
+
+_OBSERVABLE = frozenset({"component", "interface", "resource", "behavior"})
+
+
+def _observation_targets(ix: Index) -> Iterator[Finding]:
+    for behavior in ix.of_type(Behavior):
+        for observation in behavior.observations:
+            if kind(observation.at) not in _OBSERVABLE:
+                yield finding(
+                    "integrity/observation-target",
+                    severity=Severity.ERROR,
+                    message=f"{observation.id} watches {observation.at}, which cannot be watched",
                     ref=behavior.id,
                     source=behavior.source or None,
                 )
+
+
+def _boundaries(ix: Index) -> Iterator[Finding]:
+    declared_designs = {imported.id for imported in ix.design.imports}
+    backed: set[str] = set()
+    for service in ix.design.external_services:
+        if service.design is None:
+            continue
+        backed.add(service.id)
+        if service.design not in declared_designs:
+            yield finding(
+                "integrity/external-design-unknown",
+                severity=Severity.ERROR,
+                message=f"{service.id} names {service.design}, which no import declares",
+                ref=service.id,
+                source=service.source or None,
             )
-    return tuple(findings)
+    for interface in ix.of_type(Interface):
+        owner = interface.declared_by
+        if owner is None:
+            continue
+        if owner in backed:
+            yield finding(
+                "integrity/external-design-interface",
+                severity=Severity.ERROR,
+                message=f"{interface.id} is declared by {owner}, which has its own design",
+                ref=interface.id,
+                source=interface.source or None,
+            )
+        if kind(owner) == "resource":
+            yield finding(
+                "integrity/interface-on-resource",
+                severity=Severity.ERROR,
+                message=f"{interface.id} is declared by the resource {owner}",
+                ref=interface.id,
+                source=interface.source or None,
+            )
 
 
-def _composition_cycle_findings(design: Design, index: Index) -> tuple[Finding, ...]:
-    """The composition graph: an edge per observation whose ``at`` is a
-    behavior ref, checked for cycles under its own id.
-
-    The behavior-prefix filter says what the graph *is* — composition is
-    behavior-to-behavior — and the shared walk's resolve filter then drops
-    targets that dangle, same as every other cyclic relation.
-    """
-    edges = tuple(
-        (
-            behavior.id,
-            tuple(
-                observation.at
-                for observation in behavior.observations
-                if observation.at.startswith("behavior:")
-            ),
-        )
-        for behavior in design.behaviors
-    )
-    return _cyclic_relation_findings("integrity/composition-cycle", "composition", edges, index)
+def _repositories(ix: Index) -> Iterator[Finding]:
+    declared = {repository.id for repository in ix.design.repositories}
+    for element in ix.elements():
+        for entry in getattr(element, "implemented_by", ()):
+            prefix = entry.split("#", 1)[0]
+            if prefix not in declared:
+                yield finding(
+                    "integrity/repository-unknown",
+                    severity=Severity.ERROR,
+                    message=f"{element.id} points into the undeclared repository {prefix!r}",
+                    ref=element.id,
+                    source=element.source or None,
+                )
 
 
-def _supersession_cycle_findings(design: Design, index: Index) -> tuple[Finding, ...]:
-    """The supersession graph over behaviors' stored ``supersedes`` edges.
-
-    Self-supersession needs no case of its own: a behavior naming itself is
-    the length-1 cycle the shared walk already reports under this id. Only
-    behaviors are walked — ``Decision.supersedes`` is the pre-addendum ADR
-    relation, with no spec line asking for a cycle rule.
-    """
-    edges = tuple((behavior.id, behavior.supersedes) for behavior in design.behaviors)
-    return _cyclic_relation_findings("integrity/supersession-cycle", "supersession", edges, index)
+# --------------------------------------------------------------------- policy
 
 
-def note_findings(loaded: LoadedStore, index: Index) -> tuple[Finding, ...]:
-    """The one rule that reads notes: a ``promoted_to`` no element defines.
+def _requirement_coverage(ix: Index) -> Iterator[Finding]:
+    implemented = ix.targets_of(RelationshipType.IMPLEMENTS)
+    realized = ix.targets_of(RelationshipType.REALIZES)
 
-    Notes never join ``iter_references`` — the exemption is structural, not a
-    filter — so this walks the loader's own collection against the index.
-    ``index`` must be ``Index.from_design`` of the store these notes loaded
-    from, the same pairing every other layer here holds.
-    """
-    return tuple(
-        finding(
-            "integrity/note-promoted-to-unresolvable",
-            severity=Severity.ERROR,
-            message=(
-                f"{note.id} is promoted to {note.promoted_to}, "
-                "which no element in the store defines"
-            ),
-            ref=note.id,
-            source=note.source or None,
-        )
-        for note in loaded.notes
-        if note.promoted_to is not None and note.promoted_to not in index.by_id
-    )
-
-
-# --- the policy layer --------------------------------------------------------
-
-RULES.update(
-    {
-        "policy/unknown-needs-owner": (
-            "An element in state unknown must name an owner. Error, not warn: "
-            "unknown means ask, spike or mark blocking — never invent — and with "
-            "nobody accountable there is nobody to ask, which makes this a real "
-            "gap rather than an incomplete-but-honest state."
-        ),
-        "policy/requirement-needs-realizer": (
-            "A requirement must be realized by at least one component "
-            "(realized_by). Warn, not error: a requirement still waiting for its "
-            "realizer is incomplete but honest — the state brownfield stores "
-            "legitimately hold — so the finding nudges rather than blocks. It "
-            "asks for a realizing component, not for the requirement's removal."
-        ),
-        "policy/one-way-needs-rationale": (
-            "A one_way decision must carry a rationale body; whitespace is not "
-            "one. Error, not warn: the spec's wording is 'needs a rationale "
-            "body', and the argument is the point of a decision that cannot be "
-            "revisited — once the door is closed, the why is the only thing "
-            "anyone can still read."
-        ),
-        "policy/external-assumptions-expired": (
-            "An external's expires_on is in the past relative to the run's "
-            "today: the assumptions were verified only until then, so re-check "
-            "before trusting them. Warn, not error: expiry is staleness about a "
-            "third party, not a break in the design — re-checking is routine "
-            "maintenance, and erroring would teach deleting the date."
-        ),
-        "policy/behavior-needs-observations": (
-            "A behavior carries no observations. Error, not warn, and whatever "
-            "its lifecycle: a behavior is how you would know the system acts, an "
-            "expectation with nothing observable is not one — and a superseded "
-            "behavior with no observations was always broken."
-        ),
-        "policy/requirement-needs-behavior": (
-            "A requirement no active behavior's realizes names. Warn, not error, "
-            "mirroring requirement-needs-realizer: a requirement still waiting "
-            "for its behavior is incomplete but honest, the state a design in "
-            "progress legitimately holds. Only active behaviors count — a "
-            "superseded behavior stopped being true, so realizing a requirement "
-            "with one is realizing it with something the system no longer does."
-        ),
-        "policy/superseded-in-must-satisfy": (
-            "A milestone's includes names a behavior whose lifecycle is "
-            "superseded. Error: a superseded behavior stopped being packet input "
-            "and stops being verified — selecting it as work a slice must newly "
-            "satisfy is a contradiction; the must-satisfy set is live work only."
-        ),
-    }
-)
-
-# Considered and declined, per the policy spec's own "optional extensions"
-# clause. An overdue unresolved Question and a Milestone.unresolved entry a
-# decision has already resolved_by are not rules: a Question that is unknown
-# and unowned is already caught by policy/unknown-needs-owner, and neither
-# overdue-ness nor staleness has a spec line to hang a rule id from — add them
-# when one does. Orphaned elements (nothing points at them) are likewise not
-# a finding: neither the integrity nor the policy spec models them, the same
-# concern under two rule ids is exactly what the specs warn against, and
-# `ab list --orphaned` / `ab gaps` already answer it as a query.
+    for requirement in ix.design.requirements:
+        if requirement.id not in implemented:
+            reviewed = requirement.confidence is not requirement.confidence.ASSUMED
+            yield finding(
+                "policy/requirement-unimplemented",
+                severity=Severity.ERROR if reviewed else Severity.WARN,
+                message=f"nothing implements {requirement.id}",
+                ref=requirement.id,
+                source=requirement.source or None,
+            )
+        if requirement.id not in realized:
+            yield finding(
+                "policy/requirement-unrealized",
+                severity=Severity.WARN,
+                message=f"no behavior says how you would know {requirement.id} holds",
+                ref=requirement.id,
+                source=requirement.source or None,
+            )
+        goals = {t for s, t in ix.edges(RelationshipType.DERIVES_FROM) if s == requirement.id}
+        if not any(kind(goal) == "goal" for goal in goals):
+            yield finding(
+                "policy/requirement-aimless",
+                severity=Severity.WARN,
+                message=f"{requirement.id} derives from no goal",
+                ref=requirement.id,
+                source=requirement.source or None,
+            )
 
 
-def policy_findings(design: Design, index: Index, *, today: date) -> tuple[Finding, ...]:
-    """The seven policy rules: the four the original spec lists, then the
-    addendum's three in the order its task names them.
+def _goal_coverage(ix: Index) -> Iterator[Finding]:
+    derived_from = ix.targets_of(RelationshipType.DERIVES_FROM)
 
-    ``index`` must be ``Index.from_design(design)``: the unknown-owner rule
-    walks ``index.by_id`` — the one enumeration of every element — so a
-    mismatched pair would judge a different design than the one handed in.
-    ``today`` anchors the expiry rule and is injected rather than read from
-    the clock, so runs are reproducible and a future ``--rev`` run can ask
-    "expired as of when" without a rewrite.
-    """
-    return (
-        *_unknown_needs_owner_findings(index),
-        *_requirement_needs_realizer_findings(design),
-        *_one_way_needs_rationale_findings(design),
-        *_external_assumptions_expired_findings(design, today=today),
-        *_behavior_needs_observations_findings(design),
-        *_requirement_needs_behavior_findings(design),
-        *_superseded_in_must_satisfy_findings(design, index),
-    )
-
-
-def _unknown_needs_owner_findings(index: Index) -> tuple[Finding, ...]:
-    """Every element — not only questions — that is ``unknown`` and unowned.
-
-    Error: the README's posture for ``unknown`` is "ask, spike, or mark
-    blocking; never invent", and an unknown with nobody accountable for it is
-    a question nobody will ever ask.
-    """
-    return tuple(
-        finding(
-            "policy/unknown-needs-owner",
-            severity=Severity.ERROR,
-            message=f"{element.id} is unknown and has no owner",
-            ref=element.id,
-            # The loader-set store path; None for elements that never had one.
-            source=element.source or None,
-        )
-        for element in index.by_id.values()
-        if element.state is State.UNKNOWN and element.owner is None
-    )
+    for goal in ix.design.goals:
+        if goal.id not in derived_from:
+            yield finding(
+                "policy/goal-unserved",
+                severity=Severity.ERROR,
+                message=f"no requirement serves {goal.id}",
+                ref=goal.id,
+                source=goal.source or None,
+            )
+        if not goal.measure:
+            yield finding(
+                "policy/goal-unmeasured",
+                severity=Severity.WARN,
+                message=f"{goal.id} states no measure",
+                ref=goal.id,
+                source=goal.source or None,
+            )
 
 
-def _requirement_needs_realizer_findings(design: Design) -> tuple[Finding, ...]:
-    """A requirement no component realizes — unconditionally, for now.
+def _evidence_coverage(ix: Index) -> Iterator[Finding]:
+    """What a behavior, a quality and a milestone each owe before anyone builds."""
+    evidenced = ix.targets_of(RelationshipType.SATISFIES)
 
-    The spec line carries no state carve-out ("a requirement needs a realizing
-    component"), so none is implemented: an ``unknown`` requirement that is
-    also unrealized is honest about being early, and the warn severity is
-    what keeps that honesty from reading as breakage. If the fixtures ever
-    show this as wrong noise rather than a fair nudge, the carve-out is the
-    change to make — not before then.
+    for behavior in ix.of_type(Behavior):
+        if not behavior.observations:
+            yield finding(
+                "policy/behavior-unobserved",
+                severity=Severity.ERROR,
+                message=f"{behavior.id} observes nothing",
+                ref=behavior.id,
+                source=behavior.source or None,
+            )
+
+    for quality in ix.design.qualities:
+        if quality.id in evidenced and not quality.evidence:
+            yield finding(
+                "policy/quality-unevidenced",
+                severity=Severity.WARN,
+                message=f"{quality.id} is claimed satisfied and carries no evidence",
+                ref=quality.id,
+                source=quality.source or None,
+            )
+
+    for milestone in ix.design.milestones:
+        if not milestone.scope:
+            yield finding(
+                "policy/milestone-unscoped",
+                severity=Severity.ERROR,
+                message=f"{milestone.id} says nothing about what may be touched",
+                ref=milestone.id,
+                source=milestone.source or None,
+            )
+
+
+_DECIDES = frozenset({State.CONSTRAINED, State.DELEGATED})
+
+
+def _agency(ix: Index) -> Iterator[Finding]:
+    for element in ix.elements():
+        if element.state in _DECIDES and element.reversibility is None:
+            yield finding(
+                "policy/agency-undeclared",
+                severity=Severity.WARN,
+                message=f"{element.id} is {element.state} and states no reversibility",
+                ref=element.id,
+                source=element.source or None,
+            )
+        if element.state is State.UNKNOWN and not element.owner:
+            yield finding(
+                "policy/unknown-unowned",
+                severity=Severity.ERROR,
+                message=f"{element.id} is unknown and has nobody to ask",
+                ref=element.id,
+                source=element.source or None,
+            )
+
+
+def expired_services(design: Design, *, today: date) -> tuple[ExternalService, ...]:
+    """Every external service whose `expires_on` has passed.
+
+    Here rather than in the caller because `ab gaps` puts the same fact on
+    its worklist: one spelling of "expired", so a warning and a worklist row
+    can never disagree about which services lapsed.
     """
     return tuple(
-        finding(
-            "policy/requirement-needs-realizer",
+        service
+        for service in design.external_services
+        if service.expires_on and service.expires_on < today
+    )
+
+
+def _staleness(ix: Index, today: date) -> Iterator[Finding]:
+    for assumption in ix.design.assumptions:
+        if assumption.expires_on and assumption.expires_on < today:
+            yield finding(
+                "policy/assumption-expired",
+                severity=Severity.WARN,
+                message=f"{assumption.id} expired on {assumption.expires_on}",
+                ref=assumption.id,
+                source=assumption.source or None,
+            )
+    for service in expired_services(ix.design, today=today):
+        yield finding(
+            "policy/external-assumption-expired",
             severity=Severity.WARN,
-            message=f"{requirement.id} is realized by no component",
-            ref=requirement.id,
-            source=requirement.source or None,
-        )
-        for requirement in design.requirements
-        if not requirement.realized_by
-    )
-
-
-def _one_way_needs_rationale_findings(design: Design) -> tuple[Finding, ...]:
-    """A ``one_way`` decision whose body carries no argument.
-
-    Error: reversibility is what earns it — a decision that cannot be
-    revisited and cannot be explained is a gap nobody can repair later,
-    because later is exactly what ``one_way`` forecloses. Decisions cheap or
-    costly to revisit may go unexplained without a finding.
-    """
-    return tuple(
-        finding(
-            "policy/one-way-needs-rationale",
-            severity=Severity.ERROR,
-            message=f"{decision.id} is a one_way decision with no rationale body",
-            ref=decision.id,
-            source=decision.source or None,
-        )
-        for decision in design.decisions
-        if decision.reversibility is Reversibility.ONE_WAY and not decision.body.strip()
-    )
-
-
-def expired_externals(design: Design, *, today: date) -> tuple[External, ...]:
-    """Externals whose ``expires_on`` is strictly past the injected ``today``.
-
-    The one spelling of "expired": ``ab gaps``' worklist reuses it rather than
-    re-deriving the comparison, so the checker's finding and the worklist's
-    entry can never disagree about when trust in an assumption lapses.
-    """
-    return tuple(
-        external
-        for external in design.externals
-        if external.expires_on is not None and external.expires_on < today
-    )
-
-
-def _external_assumptions_expired_findings(design: Design, *, today: date) -> tuple[Finding, ...]:
-    """An external whose assumptions were verified only until ``expires_on``,
-    with that day strictly in the past relative to the injected ``today``.
-
-    Strictly: ``expires_on`` means "after this, re-check", so the day itself
-    is still within what was verified. Warn: staleness about a third party is
-    routine maintenance, not a break in the design.
-    """
-
-    def as_finding(external: External) -> Finding:
-        # The non-None `expires_on` is guaranteed by `expired_externals`' own
-        # filter, out of the type checker's sight — narrowed here rather than
-        # trusted.
-        assert external.expires_on is not None
-        return finding(
-            "policy/external-assumptions-expired",
-            severity=Severity.WARN,
-            message=(
-                f"{external.id}'s assumptions expired on {external.expires_on.isoformat()}"
-                " — re-check before trusting"
-            ),
-            ref=external.id,
-            source=external.source or None,
+            message=f"{service.id} was last checked before {service.expires_on}",
+            ref=service.id,
+            source=service.source or None,
         )
 
-    return tuple(as_finding(external) for external in expired_externals(design, today=today))
+
+def _boundaries_policy(ix: Index) -> Iterator[Finding]:
+    for imported in ix.design.imports:
+        if not imported.expects:
+            yield finding(
+                "policy/import-unpinned",
+                severity=Severity.WARN,
+                message=f"{imported.id} is imported with no version range",
+                ref=imported.id,
+            )
 
 
-# --- the addendum's policy rules ----------------------------------------------
+def _notes(ix: Index) -> Iterator[Finding]:
+    for note in ix.design.notes:
+        for ref in note.about:
+            if not ix.resolves(ref):
+                yield finding(
+                    "policy/note-dangling",
+                    severity=Severity.INFO,
+                    message=f"{note.id} is about {ref}, which nothing defines",
+                    ref=note.id,
+                )
 
 
-def _behavior_needs_observations_findings(design: Design) -> tuple[Finding, ...]:
-    """A behavior with an empty ``observations`` tuple.
-
-    An empty tuple is valid on the model — a behavior mid-authoring is a
-    legitimate file on disk — which is exactly why this is a report line and
-    not a parse failure. ``lifecycle`` deliberately carves nothing out: a
-    superseded behavior with no observations was already broken when it was
-    live.
-    """
-    return tuple(
-        finding(
-            "policy/behavior-needs-observations",
-            severity=Severity.ERROR,
-            message=f"{behavior.id} has no observations",
-            ref=behavior.id,
-            source=behavior.source or None,
+def _advisory(ix: Index) -> Iterator[Finding]:
+    advisory = [
+        observation.id
+        for behavior in ix.of_type(Behavior)
+        for observation in behavior.observations
+        if observation.outcome is Outcome.SHOULD
+    ]
+    if advisory:
+        yield finding(
+            "policy/advisory-count",
+            severity=Severity.INFO,
+            message=f"{len(advisory)} advisory observations never fail verification",
         )
-        for behavior in design.behaviors
-        if not behavior.observations
-    )
 
 
-def _requirement_needs_behavior_findings(design: Design) -> tuple[Finding, ...]:
-    """A requirement no active behavior's ``realizes`` names.
+# ---------------------------------------------------------------------- entry
 
-    The set is computed once, not per requirement — the question is about the
-    design's behavior graph, and asking it per element would walk the same
-    tuples once per requirement. ``active`` is load-bearing: supersession is
-    the record of what stopped being true, so it never rescues a requirement.
+
+def _worst_first(one: Finding) -> tuple[int, str, str]:
+    return (-one.severity.rank, one.rule_id, one.ref or "")
+
+
+def check(
+    design: Design,
+    *,
+    imports: Mapping[str, Design] | None = None,
+    today: date | None = None,
+) -> list[Finding]:
+    """Every finding about one design, worst first.
+
+    `imports` carries the designs this one pulls in, keyed by design id. Pass
+    none and every foreign ref reads as dangling, which is the honest answer
+    when the other design was not fetched.
     """
-    realized = {
-        target
-        for behavior in design.behaviors
-        if behavior.lifecycle is Lifecycle.ACTIVE
-        for target in behavior.realizes
-    }
-    return tuple(
-        finding(
-            "policy/requirement-needs-behavior",
-            severity=Severity.WARN,
-            message=f"{requirement.id} is realized by no active behavior",
-            ref=requirement.id,
-            source=requirement.source or None,
-        )
-        for requirement in design.requirements
-        if requirement.id not in realized
+    ix = Index(design, imports or {})
+    when = today or date.today()
+    produced: Iterable[Finding] = (
+        *_refs_resolve(ix),
+        *_exports_defined(ix),
+        *_component_levels(ix),
+        *_cycles(ix),
+        *_edge_kinds(ix),
+        *_observation_targets(ix),
+        *_boundaries(ix),
+        *_repositories(ix),
+        *_requirement_coverage(ix),
+        *_goal_coverage(ix),
+        *_evidence_coverage(ix),
+        *_agency(ix),
+        *_staleness(ix, when),
+        *_boundaries_policy(ix),
+        *_notes(ix),
+        *_advisory(ix),
     )
+    return sorted(produced, key=_worst_first)
 
 
-def _superseded_in_must_satisfy_findings(design: Design, index: Index) -> tuple[Finding, ...]:
-    """A milestone whose ``includes`` names a superseded behavior.
+# ------------------------------------------------------------------ landscape
 
-    The must-satisfy set is ``includes`` filtered to behaviors (the pinned
-    milestone convention), so the walk is over that field alone. An include
-    that does not resolve is the dangling-ref rule's finding; one naming an
-    active behavior is the selection working as intended.
+
+def _mentioned(design: Design) -> set[str]:
+    """Every ref this design names, wherever it names it."""
+    refs: set[str] = set()
+    for element in design.elements():
+        for carrier in carriers(element):
+            refs.update(ref for _, ref in references(carrier))
+    for edge in design.relationships:
+        refs.update({edge.source_id, edge.target_id})
+    return refs
+
+
+def _versions_agree(design: Design, by_id: Mapping[str, Design]) -> Iterator[Finding]:
+    for imported in design.imports:
+        other = by_id.get(imported.id)
+        if other is None or not imported.expects:
+            continue
+        try:
+            allowed = SpecifierSet(imported.expects)
+            actual = Version(other.version)
+        except (InvalidSpecifier, InvalidVersion) as exc:
+            yield finding(
+                "landscape/version-unreadable",
+                severity=Severity.WARN,
+                message=f"{design.id} expects {imported.expects!r} of {imported.id}: {exc}",
+                ref=design.id,
+            )
+            continue
+        if actual not in allowed:
+            yield finding(
+                "landscape/version-mismatch",
+                severity=Severity.ERROR,
+                message=f"{design.id} expects {imported.expects} of {imported.id}, which is {other.version}",
+                ref=design.id,
+            )
+
+
+def _unused_exports(
+    by_id: Mapping[str, Design], consumers: Mapping[str, set[str]]
+) -> Iterator[Finding]:
+    imported_by_someone = {imported.id for design in by_id.values() for imported in design.imports}
+    for design in by_id.values():
+        if design.id not in imported_by_someone:
+            continue  # nobody depends on it yet, so an unused surface is not a smell
+        used: set[str] = set()
+        for other_id, refs in consumers.items():
+            if other_id != design.id:
+                used |= refs
+        for ref in design.exports:
+            if ref not in used:
+                yield finding(
+                    "landscape/export-unused",
+                    severity=Severity.INFO,
+                    message=f"{design.id} exports {ref}, which nothing consumes",
+                    ref=ref,
+                )
+
+
+def check_landscape(designs: Iterable[Design], *, today: date | None = None) -> list[Finding]:
+    """Every finding about a graph of designs, worst first.
+
+    It owns the questions one design cannot answer about itself: whether its
+    imports exist, whether the versions agree, whether an id is unique across
+    everything indexed together, and whether the graph is acyclic. Then it
+    runs `check` per design with the imports resolved, so a single call
+    answers for the whole landscape.
     """
+    by_id: dict[str, Design] = {}
     findings: list[Finding] = []
-    for milestone in design.milestones:
-        for include in milestone.includes:
-            element = index.by_id.get(include)
-            if isinstance(element, Behavior) and element.lifecycle is Lifecycle.SUPERSEDED:
+    for design in designs:
+        if design.id in by_id:
+            findings.append(
+                finding(
+                    "landscape/duplicate-design",
+                    severity=Severity.ERROR,
+                    message=f"two designs claim {design.id}",
+                    ref=design.id,
+                )
+            )
+            continue
+        by_id[design.id] = design
+
+    graph: dict[str, set[str]] = {}
+    for design in by_id.values():
+        graph[design.id] = set()
+        for imported in design.imports:
+            if imported.id not in by_id:
                 findings.append(
                     finding(
-                        "policy/superseded-in-must-satisfy",
+                        "landscape/import-unresolved",
                         severity=Severity.ERROR,
-                        message=(
-                            f"{milestone.id}'s includes names {include}, which is "
-                            "superseded and stopped being must-satisfy input"
-                        ),
-                        ref=milestone.id,
-                        source=milestone.source or None,
+                        message=f"{design.id} imports {imported.id} from {imported.source!r}, which is not here",
+                        ref=design.id,
                     )
                 )
-    return tuple(findings)
+                continue
+            graph[design.id].add(imported.id)
+    findings += _acyclic(graph, "import", rule_id="landscape/import-cycle")
+
+    seen: dict[str, str] = {}
+    for design in by_id.values():
+        for element in design.elements():
+            first = seen.setdefault(element.id, design.id)
+            if first != design.id:
+                findings.append(
+                    finding(
+                        "landscape/duplicate-id",
+                        severity=Severity.ERROR,
+                        message=f"{element.id} is defined by {first} and {design.id}",
+                        ref=element.id,
+                        source=element.source or None,
+                    )
+                )
+
+    consumers = {design.id: _mentioned(design) for design in by_id.values()}
+    for design in by_id.values():
+        findings += _versions_agree(design, by_id)
+    findings += _unused_exports(by_id, consumers)
+
+    for design in by_id.values():
+        resolved = {i.id: by_id[i.id] for i in design.imports if i.id in by_id}
+        for one in check(design, imports=resolved, today=today):
+            findings.append(one.model_copy(update={"message": f"{design.id}: {one.message}"}))
+
+    return sorted(findings, key=_worst_first)

@@ -1,0 +1,44 @@
+{
+  "$defs": {
+    "Position": {
+      "additionalProperties": false,
+      "description": "One diagram node's pinned coordinates.",
+      "properties": {
+        "ref": {
+          "pattern": "^[a-z]+:[a-z0-9][a-z0-9-]*$",
+          "title": "Ref",
+          "type": "string"
+        },
+        "x": {
+          "title": "X",
+          "type": "number"
+        },
+        "y": {
+          "title": "Y",
+          "type": "number"
+        }
+      },
+      "required": [
+        "ref",
+        "x",
+        "y"
+      ],
+      "title": "Position",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "The `layout.yaml` singleton: one pinned position per diagram node.\n\nA tuple in id order, like every collection in the design: the dump's\norder is the model's own, so byte-identical output does not rest on\ndict insertion order.",
+  "properties": {
+    "positions": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/Position"
+      },
+      "title": "Positions",
+      "type": "array"
+    }
+  },
+  "title": "Layout",
+  "type": "object"
+}

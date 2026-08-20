@@ -1,13 +1,16 @@
 ---
 id: behavior:supersede-b
-title: Supersession cycle, second side
+title: Replaced by supersede-a
 state: specified
-trigger: A file exercises the other side of a supersession cycle.
+confidence: reviewed
+owner: dana
 supersedes:
 - behavior:supersede-a
+trigger: Something happens.
 observations:
 - id: behavior:supersede-b#obs-1
-  statement: The second side of the cycle is observable
-  at: component:dangling
+  statement: A row lands in the store.
+  at: resource:audit-store
   outcome: must
 ---
+The other half of the supersession cycle.

@@ -20,7 +20,7 @@ from typer.testing import CliRunner
 from absicht import __version__
 from absicht.cli import app, author, handoff, query, reconcile
 from absicht.cli._common import ExitCode, GlobalOptions, options
-from absicht.models import SCHEMA_VERSION
+from absicht.models.design import FORMAT_VERSION
 
 runner = CliRunner()
 
@@ -73,7 +73,9 @@ SURFACE: dict[str, tuple[list[str], list[str]]] = {
             "--format",
         ],
     ),
-    "gaps": (["gaps"], ["--kind", "--owner", "--overdue", "--blocking", "--format"]),
+    # `--overdue` is gone with the due date it read: the model's `Question`
+    # carries no `due_on`, and the flag it left behind is `--blocking-only`.
+    "gaps": (["gaps"], ["--kind", "--owner", "--blocking-only", "--blocking", "--format"]),
     "trace": (["trace", "component:x"], ["--to", "--up", "--down", "--format"]),
     # `render` is one command behind two tasks: the site half landed with
     # docs/tasks/26-render-site.md, the diagram half with 27-render-diagrams.md.
@@ -84,6 +86,9 @@ SURFACE: dict[str, tuple[list[str], list[str]]] = {
         ["--out", "--serve", "--port", "--overlay", "--format", "--scope"],
     ),
     "layout": (["layout"], ["--recompute", "--recompute-all", "--seed", "--check"]),
+    # `--include` and `--exclude` are gone: a hand-narrowed packet verifies
+    # against a slice nobody designed, so the milestone's own selection is
+    # the only selection.
     "packet": (
         ["packet", "milestone:m1"],
         [
@@ -91,8 +96,6 @@ SURFACE: dict[str, tuple[list[str], list[str]]] = {
             "--stdout",
             "--format",
             "--horizon",
-            "--include",
-            "--exclude",
             "--features",
             "--no-features",
             "--features-dir",
@@ -202,11 +205,11 @@ def test_command_parses_its_arguments_and_reports_no_body_yet(argv: list[str]) -
     assert result.stdout == ""
 
 
-def test_version_reports_the_package_and_schema_version() -> None:
+def test_version_reports_the_package_and_format_version() -> None:
     result = runner.invoke(app, ["--version"])
 
     assert result.exit_code == ExitCode.OK
-    assert result.output.strip() == f"absicht {__version__} (schema {SCHEMA_VERSION})"
+    assert result.output.strip() == f"absicht {__version__} (format {FORMAT_VERSION})"
 
 
 def test_bare_invocation_prints_help_and_succeeds() -> None:

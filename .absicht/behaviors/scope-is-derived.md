@@ -5,8 +5,6 @@ state: specified
 lifecycle: active
 owner: vfeenstr
 trigger: A behavior's observations change.
-realizes:
-- requirement:model-elements
 observations:
 - id: behavior:scope-is-derived#obs-1
   statement: The local-or-system classification recomputes with no stored
@@ -24,4 +22,7 @@ observations:
   statement: A derived value is written back into a store file
   at: resource:store-tree
   outcome: must_not
+relates:
+- to: req:model-elements
+  type: realizes
 ---

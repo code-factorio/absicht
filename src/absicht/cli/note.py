@@ -30,7 +30,7 @@ from absicht.cli._common import (
 from absicht.codec import dump_element
 from absicht.findings import ExitCode
 from absicht.load import StoreResolutionError, resolve_store
-from absicht.models import SCHEMA_VERSION, Note
+from absicht.models.design import FORMAT_VERSION, Note
 
 PANEL = "Step 1 — author and validate"
 """Where this group appears in `ab --help`: capture is authoring."""
@@ -62,13 +62,13 @@ def add(
     opts = options(ctx)
     try:
         written = notes.add(opts.store, body, created=date.today(), ref=ref, edit=edit)
-        path = resolve_store(opts.store) / written.source
+        path = resolve_store(opts.store) / "notes" / f"{written.id.removeprefix('note:')}.md"
     except (notes.NoteError, StoreResolutionError) as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(ExitCode.USAGE) from exc
     if opts.json_output:
         typer.echo(
-            json.dumps({"schema_version": SCHEMA_VERSION, "id": written.id, "path": str(path)})
+            json.dumps({"format_version": FORMAT_VERSION, "id": written.id, "path": str(path)})
         )
     else:
         typer.echo(f"wrote {written.id} to {path}")
@@ -119,7 +119,7 @@ def list_notes(
         typer.echo(
             json.dumps(
                 {
-                    "schema_version": SCHEMA_VERSION,
+                    "format_version": FORMAT_VERSION,
                     "notes": [_entry(note, today) for note in selected],
                 }
             )
@@ -138,26 +138,25 @@ def list_notes(
 
 
 def _line(note: Note, today: date) -> str:
-    """One line per note: id, age, the anchor and the promotion when present, then the gist."""
-    parts = [note.id, notes.age_text(note.created, today)]
-    if note.ref is not None:
-        parts.append(f"-> {note.ref}")
+    """One line per note: id, age, the anchors and the promotion when present, then the gist."""
+    parts = [note.id, notes.age_text(note.created_on, today)]
+    parts += [f"-> {about}" for about in note.about]
     if note.promoted_to is not None:
         parts.append(f"promoted to {note.promoted_to}")
-    if gist := next((line.strip() for line in note.body.splitlines() if line.strip()), ""):
+    if gist := next((line.strip() for line in note.text.splitlines() if line.strip()), ""):
         parts.append(gist)
     return "  ".join(parts)
 
 
 def _entry(note: Note, today: date) -> dict[str, object]:
-    """The machine view of one entry: everything but the body — whose home is
+    """The machine view of one entry: everything but the text — whose home is
     `show` — plus the exact age the header humanizes."""
     return {
         "id": note.id,
-        "ref": note.ref,
-        "created": note.created.isoformat(),
+        "about": list(note.about),
+        "created_on": note.created_on.isoformat(),
         "promoted_to": note.promoted_to,
-        "age_days": (today - note.created).days,
+        "age_days": (today - note.created_on).days,
     }
 
 
@@ -176,7 +175,7 @@ def show(
         raise typer.Exit(ExitCode.USAGE) from exc
     if opts.json_output:
         typer.echo(
-            json.dumps({"schema_version": SCHEMA_VERSION, "note": found.model_dump(mode="json")})
+            json.dumps({"format_version": FORMAT_VERSION, "note": found.model_dump(mode="json")})
         )
     else:
         typer.echo(dump_element(found))
@@ -203,7 +202,7 @@ def promote(
         typer.echo(
             json.dumps(
                 {
-                    "schema_version": SCHEMA_VERSION,
+                    "format_version": FORMAT_VERSION,
                     "note": note_id,
                     "promoted_to": element.id,
                 }
@@ -227,6 +226,6 @@ def drop(
         typer.echo(str(exc), err=True)
         raise typer.Exit(ExitCode.USAGE) from exc
     if opts.json_output:
-        typer.echo(json.dumps({"schema_version": SCHEMA_VERSION, "dropped": note_id}))
+        typer.echo(json.dumps({"format_version": FORMAT_VERSION, "dropped": note_id}))
     else:
         typer.echo(f"dropped {note_id}")

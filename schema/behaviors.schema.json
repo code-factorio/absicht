@@ -11,7 +11,7 @@
       "type": "string"
     },
     "Lifecycle": {
-      "description": "Whether an element is still how the system works.\n\nA second axis to `state`, which says how well specified it is: a\nbehavior can be perfectly `specified` and no longer true.",
+      "description": "Whether an element is still how the system works.\n\nA second axis to `state`, which says how well specified it is: an\ninterface can be perfectly `specified` and no longer true.",
       "enum": [
         "active",
         "superseded"
@@ -21,7 +21,7 @@
     },
     "Observation": {
       "additionalProperties": false,
-      "description": "One expectation about how the system acts, anchored to its behavior.\n\nThe counterpart of `Criterion`: a criterion says when a story is done,\nan observation says how you would know the system acted. `at` names what\nit points at — a component, a resource, a seam, or another behavior\n(composition); which of those are legitimate targets is `check`'s to\nsay, not this file's.",
+      "description": "One expectation about how the system acts, anchored to its behavior.\n\nA negative observation is the reason this type exists. \"No row appears in\nthe audit log\" catches the double write, the leak and the side effect\nnobody wanted, and it never survives being written as prose.",
       "properties": {
         "id": {
           "pattern": "^[a-z]+:[a-z0-9][a-z0-9-]*#obs-\\d+$",
@@ -34,6 +34,7 @@
           "type": "string"
         },
         "at": {
+          "description": "A component, an interface, a resource, or another behavior. `check`\nsays which targets are legal; a dangling `at` is a report line, not an\nexception.",
           "pattern": "^[a-z]+:[a-z0-9][a-z0-9-]*$",
           "title": "At",
           "type": "string"
@@ -52,7 +53,7 @@
             }
           ],
           "default": null,
-          "description": "Optional on purpose: the effective timing is computed, never defaulted\nhere — an authored value wins, else the default follows what `at` points\nat (`effective_timing`). Storing a default would make \"not said\" and\n\"deliberately immediate\" indistinguishable."
+          "description": "Optional on purpose: the effective timing is computed, never stored,\nso \"not said\" and \"deliberately immediate\" stay different."
         }
       },
       "required": [
@@ -73,8 +74,73 @@
       "title": "Outcome",
       "type": "string"
     },
+    "Relates": {
+      "additionalProperties": false,
+      "description": "One outgoing edge, as the element that owns it spells it.\n\nNo `source_id`: the file the edge is written in is the source, and saying\nso twice invites the two to disagree.",
+      "properties": {
+        "to": {
+          "pattern": "^[a-z]+:[a-z0-9][a-z0-9-]*$",
+          "title": "To",
+          "type": "string"
+        },
+        "type": {
+          "$ref": "#/$defs/RelationshipType"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        },
+        "technology": {
+          "default": "",
+          "title": "Technology",
+          "type": "string"
+        }
+      },
+      "required": [
+        "to",
+        "type"
+      ],
+      "title": "Relates",
+      "type": "object"
+    },
+    "RelationshipType": {
+      "description": "The edge kinds a checker branches on. Add one only if it does.\n\nThe architecture side owns the trace: a component says which requirement\nit implements, never the reverse. The architecture changes more often, so\nthe edge moves with the side that moves.",
+      "enum": [
+        "relates_to",
+        "implements",
+        "satisfies",
+        "constrained_by",
+        "realizes",
+        "calls",
+        "depends_on",
+        "specifies",
+        "derives_from",
+        "refines",
+        "conflicts_with"
+      ],
+      "title": "RelationshipType",
+      "type": "string"
+    },
+    "Reversibility": {
+      "description": "The cost of being wrong. It sets how far an agent may go alone.",
+      "enum": [
+        "cheap",
+        "costly",
+        "one_way"
+      ],
+      "title": "Reversibility",
+      "type": "string"
+    },
     "State": {
-      "description": "How complete an element is, and what an agent may do about it.",
+      "description": "How complete an element is, and what an agent may do about it.\n\nThis is the field that lets a gap be deliberate. `specified` and\n`unknown` are both legal, and they instruct the agent differently, so\nsilence never has to stand for either one.",
       "enum": [
         "specified",
         "constrained",
@@ -87,7 +153,7 @@
       "type": "string"
     },
     "Timing": {
-      "description": "When an observation's outcome becomes true.",
+      "description": "When the outcome becomes true.",
       "enum": [
         "immediate",
         "eventual"
@@ -97,7 +163,6 @@
     }
   },
   "additionalProperties": false,
-  "description": "An expectation about how the system acts.\n\nThe counterpart to a requirement: a requirement is what and why, a\nbehavior is how you would know. Behaviors are permanent — not owned by\na milestone, not expiring when one completes (§5). Supersession is\nrecorded on the replacement (`supersedes`) and never mirrored as a\nstored `superseded_by`: same inversion as `parent` with no `children[]`.\n\nAn empty `observations` tuple is valid here. A behavior mid-authoring is\nlegitimate on disk; whether a finished one needs observations is\n`policy/behavior-needs-observations`'s report line, not an exception.",
   "properties": {
     "id": {
       "pattern": "^[a-z]+:[a-z0-9][a-z0-9-]*$",
@@ -111,11 +176,38 @@
     },
     "state": {
       "$ref": "#/$defs/State",
-      "default": "unknown"
+      "default": "unknown",
+      "description": "`unknown` by default, so an element nobody finished never reads as\nsettled. Saying nothing and saying \"implement as written\" must differ."
     },
     "confidence": {
       "$ref": "#/$defs/Confidence",
       "default": "assumed"
+    },
+    "reversibility": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Reversibility"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Set it where the agent decides. `check` warns on a `constrained` or\n`delegated` element without one: the agent cannot judge how far to go."
+    },
+    "lifecycle": {
+      "$ref": "#/$defs/Lifecycle",
+      "default": "active"
+    },
+    "supersedes": {
+      "default": [],
+      "description": "Recorded on the replacement only. A stored `superseded_by` would be a\nsecond copy of one fact, and the two would disagree.",
+      "items": {
+        "pattern": "^[a-z]+:[a-z0-9][a-z0-9-]*$",
+        "type": "string"
+      },
+      "title": "Supersedes",
+      "type": "array"
     },
     "owner": {
       "anyOf": [
@@ -139,7 +231,7 @@
     },
     "source": {
       "default": "",
-      "description": "Path within the store. Written by the loader.",
+      "description": "Path within the store.",
       "title": "Source",
       "type": "string"
     },
@@ -150,32 +242,10 @@
       "type": "string"
     },
     "trigger": {
-      "description": "Prose — a sentence naming what happened. Not a condition, not Gherkin.",
+      "description": "Prose. A sentence that names what happened, not a condition.",
       "minLength": 1,
       "title": "Trigger",
       "type": "string"
-    },
-    "realizes": {
-      "default": [],
-      "items": {
-        "pattern": "^[a-z]+:[a-z0-9][a-z0-9-]*$",
-        "type": "string"
-      },
-      "title": "Realizes",
-      "type": "array"
-    },
-    "lifecycle": {
-      "$ref": "#/$defs/Lifecycle",
-      "default": "active"
-    },
-    "supersedes": {
-      "default": [],
-      "items": {
-        "pattern": "^[a-z]+:[a-z0-9][a-z0-9-]*$",
-        "type": "string"
-      },
-      "title": "Supersedes",
-      "type": "array"
     },
     "observations": {
       "default": [],
@@ -183,6 +253,14 @@
         "$ref": "#/$defs/Observation"
       },
       "title": "Observations",
+      "type": "array"
+    },
+    "relates": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/Relates"
+      },
+      "title": "Relates",
       "type": "array"
     }
   },

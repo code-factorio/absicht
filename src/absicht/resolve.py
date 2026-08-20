@@ -1,51 +1,87 @@
-"""Fold a ``LoadedStore`` into the ``Design`` artifact and index its references.
+"""Fold a store into a `Design`, and index the graph that comes out of it.
 
-`resolve` is the seam between "the store as files" and "the design as a
-graph": `load` walks a directory into per-kind tuples, this module folds them
-into the `Design` everything downstream reads, and `Index` adds the lookups
-that `show`, `list`, `gaps` and `trace` all need and should not each rebuild —
-an element by id, and each direction of its references ("what points at this
-ref", "what this ref points at"), which `Element`'s own fields cannot answer
-because references are one-directional by design.
+Two jobs, and they belong together because both are the seam between "the
+store as files" and "the design as a graph": `load` walks a directory into
+per-kind tuples, `resolve` folds them into the one record everything
+downstream reads, and `Index` adds the lookups that `check`, `packet`,
+`render`, `diff` and the query commands all need and none should rebuild.
 
-This is deliberately not validation. A dangling ref simply never becomes a
-key in the index (`check` turns it into a finding via `iter_references`), a
-`contains` cycle resolves like any other edge, and the one refusal is a store
-with no `System` element — a `Design` without one would be a design of
-nothing. Deciding what a broken store means is `build`'s and `check`'s job,
-one layer up.
+Nothing here judges anything. A dangling ref is a fact this module reports
+and `check` grades. The one refusal is a store with no design header: a
+`Design` without an id, a title and a version is a design of nothing.
 """
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
-from types import UnionType
-from typing import get_args, get_origin, get_type_hints
+from enum import StrEnum
+from functools import cache
+from typing import get_args
+
+from pydantic import ValidationError
 
 from absicht.load import LoadedStore
-from absicht.models import (
+from absicht.models.design import (
     Behavior,
     Design,
     Element,
     Observation,
+    ObservationId,
     Outcome,
     Record,
     Ref,
+    RelationshipType,
     Resource,
-    Scope,
     State,
-    Story,
     Timing,
 )
+
+_REF_PATTERN: str = get_args(Ref)[1].pattern
+_OBSERVATION_PATTERN: str = get_args(ObservationId)[1].pattern
+_ANCHORED = frozenset({_REF_PATTERN, _OBSERVATION_PATTERN})
+"""Read off the model itself, so a reader cannot drift from it.
+
+An observation id is a reference too. It matches a different pattern, which is
+why `Milestone.done_when` went unchecked until both patterns were listed here.
+"""
+
+COLLECTIONS: tuple[str, ...] = (
+    "glossary",
+    "actors",
+    "goals",
+    "requirements",
+    "qualities",
+    "constraints",
+    "behaviors",
+    "components",
+    "interfaces",
+    "data_entities",
+    "resources",
+    "libraries",
+    "external_services",
+    "assumptions",
+    "decisions",
+    "questions",
+    "rejections",
+    "milestones",
+    "relationships",
+    "notes",
+)
+"""The `Design` fields a store holds as files, in the model's own order.
+
+Named rather than walked off the annotations, because `load` turns the same
+list into directory names and a walk that also caught `exports` or
+`revisions` would ask for directories that do not exist.
+"""
 
 
 class ResolveError(Exception):
     """The store parsed but cannot be folded into a `Design`.
 
     Distinct from a `LoadError` on purpose: "this file did not parse" is a
-    fact about one file, "the store has no System element" is a fact about
-    the whole store, and only the second makes folding impossible.
+    fact about one file, "the store has no design.yaml" is a fact about the
+    whole store, and only the second makes folding impossible.
     """
 
 
@@ -56,36 +92,86 @@ def resolve(loaded: LoadedStore) -> Design:
     function's business: `build` refuses a store with load errors rather than
     emitting a partial artifact, `check` reports them — `resolve` folds
     whatever parsed.
+
+    The fold revalidates rather than copying fields across, because two of
+    `Design`'s invariants — unique ids, contract-only exports — are only
+    decidable once every file sits in one record.
     """
-    if loaded.system is None:
+    if loaded.header is None:
         raise ResolveError(
-            "the store has no usable system.yaml: a Design is built around its one System element"
+            "the store has no usable design.yaml: a Design is built around its "
+            "own id, title and version"
         )
-    return Design(
-        system=loaded.system,
-        externals=loaded.externals,
-        requirements=loaded.requirements,
-        non_functionals=loaded.non_functionals,
-        stories=loaded.stories,
-        components=loaded.components,
-        seams=loaded.seams,
-        data=loaded.data,
-        resources=loaded.resources,
-        behaviors=loaded.behaviors,
-        decisions=loaded.decisions,
-        rejections=loaded.rejections,
-        questions=loaded.questions,
-        milestones=loaded.milestones,
-    )
+    fields = loaded.header.model_dump() | {name: getattr(loaded, name) for name in COLLECTIONS}
+    try:
+        return Design.model_validate(fields)
+    except ValidationError as exc:
+        problems = "; ".join(
+            f"{'.'.join(str(part) for part in error['loc']) or '(root)'}: {error['msg']}"
+            for error in exc.errors(include_url=False)
+        )
+        raise ResolveError(f"the store does not fold into one design: {problems}") from exc
+
+
+# ------------------------------------------------------------------- the walk
+
+
+def kind(ref: str) -> str:
+    return ref.split(":", 1)[0]
+
+
+def _carries_ref(annotation: object) -> bool:
+    for meta in getattr(annotation, "__metadata__", ()):
+        if getattr(meta, "pattern", None) in _ANCHORED:
+            return True
+    return any(_carries_ref(arg) for arg in get_args(annotation))
+
+
+@cache
+def ref_fields(record_type: type[Record]) -> tuple[str, ...]:
+    """Which fields of a record hold refs, found from the model, not a table.
+
+    A hand-written list would go stale on the first new field, and a field
+    nobody walks is a trace nobody follows.
+    """
+    names = []
+    for name, field in record_type.model_fields.items():
+        if name == "id":  # an id defines, it does not reference
+            continue
+        if any(getattr(m, "pattern", None) in _ANCHORED for m in field.metadata) or _carries_ref(
+            field.annotation
+        ):
+            names.append(name)
+    return tuple(names)
+
+
+def references(record: Record) -> Iterator[tuple[str, str]]:
+    """Every `(field, ref)` a record names, whatever shape the field has."""
+    for name in ref_fields(type(record)):
+        value = getattr(record, name)
+        if value is None:
+            continue
+        if isinstance(value, str):
+            yield name, value
+        else:
+            yield from ((name, item) for item in value)
+
+
+def carriers(element: Element) -> Iterator[Record]:
+    """The element, plus the records nested inside it that hold refs."""
+    yield element
+    if isinstance(element, Behavior):
+        yield from element.observations
 
 
 @dataclass(frozen=True, slots=True)
 class Reference:
     """One edge in the design: `source` points at `target` through `field`.
 
-    `field` is why this is an object rather than a bare source ref: `trace`
-    labels its paths with relation names, and `check`'s dangling-ref rule
-    names the field a missing target was reached through.
+    `field` is why this is an object rather than a bare pair: `trace` labels
+    its paths with the relation name, and `check`'s dangling-ref rule names
+    the field a missing target was reached through. A `Relationship` lands
+    here under its own type name, so one walk sees one kind of edge.
     """
 
     source: Ref
@@ -93,277 +179,259 @@ class Reference:
     target: Ref
 
 
-def iter_references(design: Design) -> Iterator[Reference]:
-    """Every reference edge in the design, in `Design` field order.
+# ------------------------------------------------------------------ behaviors
 
-    Walking the annotations on `models.py`'s records rather than a hand-copied
-    field list means a ref-typed field added to a model is indexed — and
-    checked, and traceable — without this module learning about it. The spec's
-    own field list already misses `Rejection.milestone` and
-    `Milestone.unresolved`; the drift it warns about has precedent.
+
+def observed(behavior: Behavior) -> tuple[Ref, ...]:
+    """What a behavior's observations point at, deduplicated and id-ordered.
+
+    Composition targets ride along, because they are `at` refs; they are
+    never followed. A composed behavior's touches stay its own.
     """
-    for element in _elements(design):
-        yield from _references_of(element, source=element.id)
-        if isinstance(element, Story):
-            # A criterion is not an element: its id is a `CriterionId`, not a
-            # `Ref`, so it gets no `by_id` entry of its own and its `touches`
-            # are attributed to the story that carries it.
-            for criterion in element.acceptance:
-                yield from _references_of(criterion, source=element.id)
-        if isinstance(element, Behavior):
-            # An observation is the same shape of nested record: its `at` is
-            # attributed to the behavior that carries it, which is what lets
-            # the generic dangling-ref sweep and the index's reverse lookups
-            # cover observation refs with no rule of their own.
-            for observation in element.observations:
-                yield from _references_of(observation, source=element.id)
+    return tuple(sorted({observation.at for observation in behavior.observations}))
 
 
-def _elements(design: Design) -> tuple[Element, ...]:
-    """Every addressable element, the system first and kinds in `Design` field
-    order — the order `load` produced them in, so `by_id` and
-    `iter_references` walk deterministically."""
-    return (
-        design.system,
-        *design.externals,
-        *design.requirements,
-        *design.non_functionals,
-        *design.stories,
-        *design.components,
-        *design.seams,
-        *design.data,
-        *design.resources,
-        *design.behaviors,
-        *design.decisions,
-        *design.rejections,
-        *design.questions,
-        *design.milestones,
-    )
+def touches(behavior: Behavior, scope: frozenset[str]) -> bool:
+    return any(observation.at in scope for observation in behavior.observations)
 
 
-def _references_of(record: Record, *, source: Ref) -> Iterator[Reference]:
-    """The reference edges on one record's own ref-typed fields.
+def composes(behavior: Behavior) -> tuple[Ref, ...]:
+    """The behaviors this one is built from: an observation pointing at one."""
+    return tuple(ref for ref in observed(behavior) if kind(ref) == "behavior")
 
-    Works for any `Record`, which is how a nested `Criterion` — a `Record`
-    but not an `Element` — is walked under its story's id. `id` is skipped:
-    it is identity, not a reference, and indexing it would make every element
-    its own neighbour. `System.units` holds `Unit` records, not refs: units
-    are not elements, nothing resolves them through `by_id`, and the
-    multi-repo commands read `system.units` directly.
+
+class Scope(StrEnum):
+    """A behavior's reach, computed from its observations.
+
+    `local` — one component and nothing else; `system` — anything else,
+    including nothing observed anywhere. Never a field: the author states
+    observations and the classification follows, so a behavior that grows an
+    observation on a second component becomes a system behavior with no edit
+    to say so.
     """
-    # `include_extras` is load-bearing: without it `get_type_hints` strips the
-    # `Annotated` pattern off `Ref` and every field degrades to plain `str`,
-    # which would make the walk see no references at all.
-    for name, annotation in get_type_hints(type(record), include_extras=True).items():
-        if name == "id" or not _holds_refs(annotation):
-            continue
-        value = getattr(record, name)
-        targets = value if isinstance(value, tuple) else (value,) if value is not None else ()
-        for target in targets:
-            yield Reference(source=source, field=name, target=target)
+
+    LOCAL = "local"
+    SYSTEM = "system"
 
 
-def _holds_refs(annotation: object) -> bool:
-    """True for `Ref`, `Ref | None` and `tuple[Ref, ...]` — the shapes a
-    ref-typed field takes in `models.py`."""
-    origin = get_origin(annotation)
-    if origin is UnionType:
-        members = [arg for arg in get_args(annotation) if arg is not type(None)]
-        return len(members) == 1 and _holds_refs(members[0])
-    if origin is tuple:
-        args = get_args(annotation)
-        return bool(args) and _holds_refs(args[0])
-    return annotation is Ref
+def scope_of(behavior: Behavior) -> Scope:
+    """`local` iff the direct non-behavior touches are exactly one component."""
+    outside = tuple(ref for ref in observed(behavior) if kind(ref) != "behavior")
+    if len(outside) == 1 and kind(outside[0]) == "component":
+        return Scope.LOCAL
+    return Scope.SYSTEM
 
 
-@dataclass(frozen=True, slots=True)
+def effective_timing(observation: Observation, index: Index) -> Timing | None:
+    """The timing that governs, resolved through whatever `at` names.
+
+    `None` exactly for `must_not`, which carries no when at all. A dangling
+    `at` resolves to no resource kind and so reads `immediate` — the same
+    "resolves to nothing" policy the rest of this module holds.
+    """
+    if observation.outcome is Outcome.MUST_NOT:
+        return None
+    target = index.get(observation.at)
+    resource_kind = target.resource_kind if isinstance(target, Resource) else None
+    return observation.effective_timing(resource_kind)
+
+
+# --------------------------------------------------------------------- index
+
+
 class Index:
-    """The lookups over a resolved `Design` that several commands need and
-    none should rebuild.
+    """One lookup over a design and the designs it imports.
 
-    Not a graph library — the project's graphs are small and the need is
-    narrow, so `trace` does its own traversal over exactly these mappings
-    rather than this module growing one.
+    Not a graph library — the graphs here are small and the need is narrow,
+    so `trace` does its own traversal over exactly these mappings rather than
+    this module growing one.
     """
 
-    by_id: dict[Ref, Element]
-    referenced_by: dict[Ref, tuple[Reference, ...]]
-    references_from: dict[Ref, tuple[Reference, ...]]
-    """The mirror of `referenced_by`: what each element points at, which
-    `show` walks for its outgoing side. It keeps edges `referenced_by` cannot
-    hold — a source is always an element, so a dangling target still has its
-    outgoing edge here, where `check`'s readers can find it."""
+    def __init__(self, design: Design, imports: Mapping[str, Design] | None = None) -> None:
+        self.design = design
+        self.imports = dict(imports or {})
+        self.local: dict[str, Element] = {e.id: e for e in design.elements()}
+        self.observations: dict[str, Observation] = {
+            observation.id: observation
+            for behavior in design.elements()
+            if isinstance(behavior, Behavior)
+            for observation in behavior.observations
+        }
+        self.foreign: dict[str, str] = {}
+        self.public: set[str] = set()
+        self.exported: dict[str, Element] = {}
+        for design_id, other in self.imports.items():
+            self.public.update(other.exports)
+            for element in other.elements():
+                self.foreign[element.id] = design_id
+                if element.id in other.exports:
+                    self.exported[element.id] = element
 
-    @classmethod
-    def from_design(cls, design: Design) -> Index:
-        by_id = {element.id: element for element in _elements(design)}
-        incoming: dict[Ref, list[Reference]] = {}
-        outgoing: dict[Ref, list[Reference]] = {}
-        for reference in iter_references(design):
-            # A target that is not an element is a dangling ref: it gets no
-            # entry, because nothing that exists was pointed at. The edge
-            # stays in `iter_references` for `check` to report.
-            if reference.target in by_id:
-                incoming.setdefault(reference.target, []).append(reference)
-            outgoing.setdefault(reference.source, []).append(reference)
-        return cls(
-            by_id=by_id,
-            referenced_by={target: tuple(refs) for target, refs in incoming.items()},
-            references_from={source: tuple(refs) for source, refs in outgoing.items()},
+        self._out: dict[str, list[Reference]] = {}
+        self._in: dict[str, list[Reference]] = {}
+        for element in self.local.values():
+            for carrier in carriers(element):
+                for field, ref in references(carrier):
+                    self._link(Reference(source=element.id, field=field, target=ref))
+        for edge in design.relationships:
+            self._link(
+                Reference(source=edge.source_id, field=edge.type.value, target=edge.target_id)
+            )
+
+    def _link(self, edge: Reference) -> None:
+        self._out.setdefault(edge.source, []).append(edge)
+        # A target nothing defines is a dangling ref: it gets no incoming
+        # entry, because nothing that exists was pointed at. The outgoing edge
+        # stays, which is where `check`'s readers find it.
+        if edge.target in self.local or edge.target in self.exported:
+            self._in.setdefault(edge.target, []).append(edge)
+
+    # ------------------------------------------------------------- resolution
+
+    def get(self, ref: str) -> Element | None:
+        return self.local.get(ref) or self.exported.get(ref)
+
+    def resolves(self, ref: str) -> bool:
+        return (
+            ref in self.local
+            or ref in self.public
+            or ref in self.imports
+            or ref in self.observations
         )
 
-    def orphaned(self, kind: str | None = None) -> tuple[Ref, ...]:
-        """Ids with no entry in `referenced_by`, in `Design` field order.
+    def is_private_foreign(self, ref: str) -> bool:
+        return ref in self.foreign and ref not in self.public
 
-        `kind` is the `kind:` prefix of a ref. The CLI passes the `Kind` value
-        from its own surface — a plain string here, because `absicht.cli` sits
-        above this layer in the import stack and must not be imported from it.
-        The system element is included when no kind filters it out: it is the
-        root of a design, being unpointed-at is its job, and the callers that
-        care (`ab list --orphaned`, `ab gaps`) always name a kind.
+    def elements(self) -> Iterator[Element]:
+        return iter(self.local.values())
+
+    def of_type[T: Element](self, element_type: type[T]) -> Iterator[T]:
+        return (e for e in self.local.values() if isinstance(e, element_type))
+
+    # ------------------------------------------------------------------ edges
+
+    def edges(self, edge_type: RelationshipType) -> Iterator[tuple[str, str]]:
+        for edge in self.design.relationships:
+            if edge.type is edge_type:
+                yield edge.source_id, edge.target_id
+
+    def targets_of(self, edge_type: RelationshipType) -> set[str]:
+        return {target for _, target in self.edges(edge_type)}
+
+    def sources_of(self, edge_type: RelationshipType) -> set[str]:
+        return {source for source, _ in self.edges(edge_type)}
+
+    def references_from(self, ref: str) -> tuple[Reference, ...]:
+        """What `ref` points at, dangling targets included."""
+        return tuple(self._out.get(ref, ()))
+
+    def referenced_by(self, ref: str) -> tuple[Reference, ...]:
+        """What points at `ref`. Only edges onto something that exists."""
+        return tuple(self._in.get(ref, ()))
+
+    # ------------------------------------------------------------------ graph
+
+    def neighbours(self, ref: str) -> set[str]:
+        """Both directions: what it names, and what names it.
+
+        One direction would be arbitrary. An agent changing a component needs
+        what the component calls and what calls the component, and neither is
+        more its business than the other.
         """
-        prefix = f"{kind}:" if kind is not None else None
+        return {edge.target for edge in self._out.get(ref, ())} | {
+            edge.source for edge in self._in.get(ref, ())
+        }
+
+    def ring(self, seed: frozenset[str], hops: int) -> set[str]:
+        """Everything within `hops` steps of the seed, seed excluded."""
+        seen = set(seed)
+        frontier = set(seed)
+        for _ in range(hops):
+            nxt: set[str] = set()
+            for ref in frontier:
+                nxt |= self.neighbours(ref) - seen
+            if not nxt:
+                break
+            seen |= nxt
+            frontier = nxt
+        return seen - set(seed)
+
+    def orphaned(self, kind_prefix: str | None = None) -> tuple[Ref, ...]:
+        """Ids nothing points at, in `Design` field order.
+
+        `kind_prefix` is the `kind:` prefix of a ref. The CLI passes the
+        `Kind` value from its own surface — a plain string here, because
+        `absicht.cli` sits above this layer in the import stack and must not
+        be imported from it.
+        """
+        prefix = f"{kind_prefix}:" if kind_prefix is not None else None
         return tuple(
             ref
-            for ref in self.by_id
-            if ref not in self.referenced_by and (prefix is None or ref.startswith(prefix))
+            for ref in self.local
+            if ref not in self._in and (prefix is None or ref.startswith(prefix))
         )
 
 
 def subtree(index: Index, ref: Ref) -> frozenset[Ref]:
-    """The subtree a ``--scope`` selects: ``ref`` plus everything reachable
-    from it by following refs outward. Dangling targets resolve to nothing
-    here either — they are ``ab check``'s to report, and on a page they stay
-    plain text rather than becoming links to nowhere.
+    """`ref` plus everything reachable from it by following refs outward.
 
-    Lives here, beside the ``Index`` it walks, because three commands scope
-    their output the same way — the site and diagram halves of ``ab render``
-    and ``ab diff`` — and one ``--scope`` flag should mean one thing wherever
-    it appears.
+    A dangling target resolves to nothing here either — it is `check`'s to
+    report, and on a page it stays plain text rather than becoming a link to
+    nowhere. Lives beside the `Index` it walks because three commands scope
+    their output the same way, and one `--scope` flag should mean one thing
+    wherever it appears.
     """
     seen = {ref}
     pending = [ref]
     while pending:
-        for edge in index.references_from.get(pending.pop(), ()):
-            if edge.target in index.by_id and edge.target not in seen:
+        for edge in index.references_from(pending.pop()):
+            if index.get(edge.target) is not None and edge.target not in seen:
                 seen.add(edge.target)
                 pending.append(edge.target)
     return frozenset(seen)
 
 
 def inherited_owners(index: Index) -> dict[Ref, str]:
-    """§7's owner inheritance, as a query over one index: each unowned
-    ``unknown`` mapped to the owner of the element that references it.
+    """Each unowned `unknown` mapped to the owner of the element referencing it.
 
     Exactly one referencing element must carry an owner — two referencing
     owners are an ambiguity, and ambiguity is not a guess — and the level is
-    one: a referencing element's own ``owner`` field is read, never an owner
-    it would itself inherit, so chains stop here. Computed, never stored
-    (same inversion as ``parent`` with no ``children[]``).
-
-    Lives here, beside the ``Index`` it reads, because two commands group
-    unknowns by owner — ``ab gaps``' worklist and ``ab list --owner`` — and
-    one inheritance rule should mean one thing wherever it appears.
+    one: a referencing element's own `owner` field is read, never an owner it
+    would itself inherit, so chains stop here. Computed, never stored.
     """
     owners: dict[Ref, str] = {}
-    for ref, element in index.by_id.items():
+    for ref, element in index.local.items():
         if element.state is not State.UNKNOWN or element.owner is not None:
             continue
         candidates = [
             owner
-            for edge in index.referenced_by.get(ref, ())
-            if (owner := index.by_id[edge.source].owner) is not None
+            for edge in index.referenced_by(ref)
+            if (source := index.get(edge.source)) is not None and (owner := source.owner)
         ]
         if len(candidates) == 1:
             owners[ref] = candidates[0]
     return owners
 
 
-# --- the addendum's derived behavior facts (§4.1, §4.2, §5) ----------------------
-
-
-def touches(behavior: Behavior) -> tuple[Ref, ...]:
-    """The union of a behavior's observations' ``at`` refs — §4.1's primitive —
-    deduplicated and id-ordered, so the same store always derives the same
-    tuple whatever order the observations were authored in.
-
-    Composition targets (``behavior:`` refs) ride along, because they are
-    ``at`` refs; they are never followed. A composed behavior's own touches
-    stay its own — the one-hop discipline §4.2 pins for the packet walk,
-    applied to scope — which is why this reads one behavior's observations
-    and walks nothing.
-    """
-    return tuple(sorted({observation.at for observation in behavior.observations}))
-
-
-def scope_of(behavior: Behavior) -> Scope:
-    """§4.1's classification: ``local`` iff the behavior's direct non-behavior
-    touches are exactly one component ref and nothing else — no resource, no
-    seam, no second component — and ``system`` otherwise, including zero
-    touches: nothing observed anywhere is not local, and the policy rule
-    already flags the behavior that observes nothing.
-    """
-    non_behaviors = tuple(ref for ref in touches(behavior) if not ref.startswith("behavior:"))
-    if len(non_behaviors) == 1 and non_behaviors[0].startswith("component:"):
-        return Scope.LOCAL
-    return Scope.SYSTEM
-
-
-def composes(behavior: Behavior) -> tuple[Ref, ...]:
-    """The behavior-to-behavior edges out of ``behavior``: its observations
-    whose ``at`` is a behavior ref (§4.2) — the same behavior-prefix filter
-    that says what the composition graph *is* in ``check``'s cycle rule."""
-    return tuple(ref for ref in touches(behavior) if ref.startswith("behavior:"))
-
-
 def composed_by(index: Index, ref: Ref) -> tuple[Ref, ...]:
-    """The behavior-to-behavior edges into ``ref``: the behaviors whose
-    observations assert that it occurs. An ``at`` edge onto anything else is
-    an observation, not composition, so a non-behavior answers empty — the
-    prefix guard is the definition, not a filter bolted on. Sources are
-    deduplicated (two observations of the same behavior are one edge) and
-    id-ordered.
+    """The behaviors whose observations assert that `ref` occurs.
+
+    An `at` edge onto anything else is an observation, not composition, so a
+    non-behavior answers empty — the prefix guard is the definition, not a
+    filter bolted on.
     """
-    if not ref.startswith("behavior:"):
+    if kind(ref) != "behavior":
         return ()
-    return tuple(
-        sorted({edge.source for edge in index.referenced_by.get(ref, ()) if edge.field == "at"})
-    )
+    return tuple(sorted({edge.source for edge in index.referenced_by(ref) if edge.field == "at"}))
 
 
 def superseded_by(index: Index, ref: Ref) -> tuple[Ref, ...]:
-    """The reverse of stored ``supersedes`` (§5): who replaced ``ref``.
+    """The reverse of stored `supersedes`: who replaced `ref`.
 
-    Only behaviors are answered — ``Decision.supersedes`` is the pre-addendum
-    ADR relation, with no lifecycle of its own — and the answer is one hop
-    per edge, never the transitive closure of a chain. Wrapped with the name
-    rather than read as "referrers filtered by field": the call sites say
-    what they mean.
+    One hop per edge, never the transitive closure of a chain. Wrapped with
+    the name rather than read as "referrers filtered by field", so the call
+    sites say what they mean.
     """
     return tuple(
-        sorted(
-            {
-                edge.source
-                for edge in index.referenced_by.get(ref, ())
-                if edge.field == "supersedes" and isinstance(index.by_id[edge.source], Behavior)
-            }
-        )
+        sorted({edge.source for edge in index.referenced_by(ref) if edge.field == "supersedes"})
     )
-
-
-def effective_timing(index: Index, observation: Observation) -> Timing | None:
-    """The timing that governs one observation over a resolved design:
-    §1.2's table as ``Observation.effective_timing`` spells it, fed by what
-    ``at`` resolved to — and ``None`` exactly for ``must_not``, which carries
-    no when at all.
-
-    One home for the plumbing so the views (``show``) and the packet spell
-    the same answer instead of two reimplementations: a dangling ``at``
-    resolves to no resource kind and defaults ``immediate``, the same
-    "resolves to nothing" policy the rest of this module holds.
-    """
-    if observation.outcome is Outcome.MUST_NOT:
-        return None
-    target = index.by_id.get(observation.at)
-    resource_kind = target.resource_kind if isinstance(target, Resource) else None
-    return observation.effective_timing(resource_kind)

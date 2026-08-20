@@ -57,7 +57,8 @@ from pathlib import Path, PurePosixPath
 
 from absicht.codec import CodecError, dump_singleton, parse_singleton
 from absicht.findings import RULES, Finding, Severity, finding
-from absicht.models import Component, Design, Marker, Ref, UnitWatermark
+from absicht.models.design import Component, Design, Ref
+from absicht.models.marker import Marker, Watermark
 
 _MARKER = ".absicht"
 """The discovery file's name, overloaded by filesystem type per the README:
@@ -214,7 +215,7 @@ def _expected(design: Design, repo: Path, *, design_url: str, previous: Marker |
     and entry order, with watermarks carried over from `previous` by id."""
     exact = {(unit.id, unit.path): unit for unit in previous.units} if previous else {}
     by_id = {unit.id: unit for unit in previous.units} if previous else {}
-    units: dict[tuple[str, str], UnitWatermark] = {}
+    units: dict[tuple[str, str], Watermark] = {}
     for component in design.components:
         for path in _speaks_for(component, repo):
             # Keyed by (id, path), so a repeated entry collapses instead of
@@ -226,7 +227,7 @@ def _expected(design: Design, repo: Path, *, design_url: str, previous: Marker |
             units[(component.id, path)] = (
                 old.model_copy(update={"path": path})
                 if old is not None
-                else UnitWatermark(id=component.id, path=path)
+                else Watermark(id=component.id, path=path)
             )
     return Marker(design=design_url, units=tuple(units.values()))
 
@@ -256,7 +257,7 @@ def _speaks_for(component: Component, repo: Path) -> tuple[str, ...]:
 
 
 def _disagreements(
-    marked: tuple[UnitWatermark, ...], expected: tuple[UnitWatermark, ...]
+    marked: tuple[Watermark, ...], expected: tuple[Watermark, ...]
 ) -> tuple[Finding, ...]:
     """The findings between the units a marker carries and the units the store
     says it should carry.
@@ -316,7 +317,7 @@ def _disagreements(
     return tuple(findings)
 
 
-def _paths_by_id(units: tuple[UnitWatermark, ...]) -> dict[str, list[str]]:
+def _paths_by_id(units: tuple[Watermark, ...]) -> dict[str, list[str]]:
     """Each unit named, with its paths in the order written — the shape
     `check` compares, watermarks dropped on purpose (they are drift, `ab
     status`'s subject, not marker correctness)."""

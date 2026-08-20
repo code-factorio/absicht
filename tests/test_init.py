@@ -7,7 +7,7 @@ working directory.
 
 The one subtle rule (docs/tasks/10-init.md): ``--force`` relaxes the
 already-exists check only for a store nothing has been authored into. A
-scaffolded ``system.yaml`` is not an element, so ``init --force`` over a fresh
+scaffolded ``design.yaml`` is not an element, so ``init --force`` over a fresh
 scaffold succeeds — but any ``<kind>/<slug>.md`` file makes the store
 non-empty and ``--force`` refuses all the same.
 """
@@ -23,26 +23,30 @@ from typer.testing import CliRunner
 from absicht.cli import app
 from absicht.cli._common import ExitCode
 from absicht.codec import parse_singleton
-from absicht.models import SCHEMA_VERSION, Marker, System
+from absicht.models.design import FORMAT_VERSION, Design
+from absicht.models.marker import Marker
 
 runner = CliRunner()
 
 DESIGN = "https://example.com/design"
 
+FIRST_VERSION = "0.1.0"
+"""What `init` stamps a design at: `absicht.init._FIRST_VERSION`."""
 
-def test_embedded_init_scaffolds_a_system_and_nothing_else(tmp_path: Path) -> None:
+
+def test_embedded_init_scaffolds_a_design_and_nothing_else(tmp_path: Path) -> None:
     store = tmp_path / "store"
 
     result = runner.invoke(app, ["--store", str(store), "init", "--name", "ACME Orders"])
 
     assert result.exit_code == ExitCode.OK
     assert [path.name for path in tmp_path.iterdir()] == ["store"]
-    assert [path.name for path in store.iterdir()] == ["system.yaml"]
+    assert [path.name for path in store.iterdir()] == ["design.yaml"]
     # The kind directories are not created: load reads a missing one as empty,
     # and the id is the slugified name per 00-conventions.md's identity rule.
     assert parse_singleton(
-        (store / "system.yaml").read_text(encoding="utf-8"), model=System
-    ) == System(id="system:acme-orders", title="ACME Orders")
+        (store / "design.yaml").read_text(encoding="utf-8"), model=Design
+    ) == Design(id="design:acme-orders", title="ACME Orders", version=FIRST_VERSION)
 
 
 @pytest.mark.parametrize("name", ["", "   ", "!!!"])
@@ -72,7 +76,7 @@ def test_force_writes_into_a_scaffolded_but_empty_store(tmp_path: Path) -> None:
     again = runner.invoke(app, [*argv, "--force"])
 
     assert again.exit_code == ExitCode.OK
-    assert [path.name for path in store.iterdir()] == ["system.yaml"]
+    assert [path.name for path in store.iterdir()] == ["design.yaml"]
 
 
 def test_force_still_refuses_once_the_store_has_elements(tmp_path: Path) -> None:
@@ -157,12 +161,12 @@ def test_json_output_names_the_mode_and_the_path_created(tmp_path: Path) -> None
     assert embedded.exit_code == ExitCode.OK
     assert reference.exit_code == ExitCode.OK
     assert json.loads(embedded.stdout) == {
-        "schema_version": SCHEMA_VERSION,
+        "format_version": FORMAT_VERSION,
         "mode": "embedded",
-        "path": str(store / "system.yaml"),
+        "path": str(store / "design.yaml"),
     }
     assert json.loads(reference.stdout) == {
-        "schema_version": SCHEMA_VERSION,
+        "format_version": FORMAT_VERSION,
         "mode": "reference",
         "path": str(marker),
     }

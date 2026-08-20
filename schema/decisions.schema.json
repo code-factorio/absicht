@@ -10,17 +10,72 @@
       "title": "Confidence",
       "type": "string"
     },
-    "DecisionStatus": {
+    "Lifecycle": {
+      "description": "Whether an element is still how the system works.\n\nA second axis to `state`, which says how well specified it is: an\ninterface can be perfectly `specified` and no longer true.",
       "enum": [
-        "proposed",
-        "accepted",
+        "active",
         "superseded"
       ],
-      "title": "DecisionStatus",
+      "title": "Lifecycle",
+      "type": "string"
+    },
+    "Relates": {
+      "additionalProperties": false,
+      "description": "One outgoing edge, as the element that owns it spells it.\n\nNo `source_id`: the file the edge is written in is the source, and saying\nso twice invites the two to disagree.",
+      "properties": {
+        "to": {
+          "pattern": "^[a-z]+:[a-z0-9][a-z0-9-]*$",
+          "title": "To",
+          "type": "string"
+        },
+        "type": {
+          "$ref": "#/$defs/RelationshipType"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        },
+        "technology": {
+          "default": "",
+          "title": "Technology",
+          "type": "string"
+        }
+      },
+      "required": [
+        "to",
+        "type"
+      ],
+      "title": "Relates",
+      "type": "object"
+    },
+    "RelationshipType": {
+      "description": "The edge kinds a checker branches on. Add one only if it does.\n\nThe architecture side owns the trace: a component says which requirement\nit implements, never the reverse. The architecture changes more often, so\nthe edge moves with the side that moves.",
+      "enum": [
+        "relates_to",
+        "implements",
+        "satisfies",
+        "constrained_by",
+        "realizes",
+        "calls",
+        "depends_on",
+        "specifies",
+        "derives_from",
+        "refines",
+        "conflicts_with"
+      ],
+      "title": "RelationshipType",
       "type": "string"
     },
     "Reversibility": {
-      "description": "Cost of being wrong. The delegation axis that actually matters.",
+      "description": "The cost of being wrong. It sets how far an agent may go alone.",
       "enum": [
         "cheap",
         "costly",
@@ -30,7 +85,7 @@
       "type": "string"
     },
     "State": {
-      "description": "How complete an element is, and what an agent may do about it.",
+      "description": "How complete an element is, and what an agent may do about it.\n\nThis is the field that lets a gap be deliberate. `specified` and\n`unknown` are both legal, and they instruct the agent differently, so\nsilence never has to stand for either one.",
       "enum": [
         "specified",
         "constrained",
@@ -44,7 +99,6 @@
     }
   },
   "additionalProperties": false,
-  "description": "ADR. Context and consequences live in `body` — the argument is the point.",
   "properties": {
     "id": {
       "pattern": "^[a-z]+:[a-z0-9][a-z0-9-]*$",
@@ -58,11 +112,38 @@
     },
     "state": {
       "$ref": "#/$defs/State",
-      "default": "unknown"
+      "default": "unknown",
+      "description": "`unknown` by default, so an element nobody finished never reads as\nsettled. Saying nothing and saying \"implement as written\" must differ."
     },
     "confidence": {
       "$ref": "#/$defs/Confidence",
       "default": "assumed"
+    },
+    "reversibility": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Reversibility"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Set it where the agent decides. `check` warns on a `constrained` or\n`delegated` element without one: the agent cannot judge how far to go."
+    },
+    "lifecycle": {
+      "$ref": "#/$defs/Lifecycle",
+      "default": "active"
+    },
+    "supersedes": {
+      "default": [],
+      "description": "Recorded on the replacement only. A stored `superseded_by` would be a\nsecond copy of one fact, and the two would disagree.",
+      "items": {
+        "pattern": "^[a-z]+:[a-z0-9][a-z0-9-]*$",
+        "type": "string"
+      },
+      "title": "Supersedes",
+      "type": "array"
     },
     "owner": {
       "anyOf": [
@@ -86,7 +167,7 @@
     },
     "source": {
       "default": "",
-      "description": "Path within the store. Written by the loader.",
+      "description": "Path within the store.",
       "title": "Source",
       "type": "string"
     },
@@ -96,9 +177,40 @@
       "title": "Body",
       "type": "string"
     },
-    "status": {
-      "$ref": "#/$defs/DecisionStatus",
-      "default": "proposed"
+    "context": {
+      "default": "",
+      "title": "Context",
+      "type": "string"
+    },
+    "choice": {
+      "minLength": 1,
+      "title": "Choice",
+      "type": "string"
+    },
+    "consequences": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "title": "Consequences",
+      "type": "array"
+    },
+    "alternatives": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "title": "Alternatives",
+      "type": "array"
+    },
+    "applies_to": {
+      "default": [],
+      "items": {
+        "pattern": "^[a-z]+:[a-z0-9][a-z0-9-]*$",
+        "type": "string"
+      },
+      "title": "Applies To",
+      "type": "array"
     },
     "decided_on": {
       "anyOf": [
@@ -113,32 +225,19 @@
       "default": null,
       "title": "Decided On"
     },
-    "reversibility": {
-      "$ref": "#/$defs/Reversibility",
-      "default": "cheap"
-    },
-    "applies_to": {
+    "relates": {
       "default": [],
       "items": {
-        "pattern": "^[a-z]+:[a-z0-9][a-z0-9-]*$",
-        "type": "string"
+        "$ref": "#/$defs/Relates"
       },
-      "title": "Applies To",
-      "type": "array"
-    },
-    "supersedes": {
-      "default": [],
-      "items": {
-        "pattern": "^[a-z]+:[a-z0-9][a-z0-9-]*$",
-        "type": "string"
-      },
-      "title": "Supersedes",
+      "title": "Relates",
       "type": "array"
     }
   },
   "required": [
     "id",
-    "title"
+    "title",
+    "choice"
   ],
   "title": "Decision",
   "type": "object"

@@ -1,0 +1,23 @@
+format_version: 1
+id: design:acme
+title: ACME orders
+version: 1.0.0
+purpose: Sell things, honestly.
+scope:
+- Taking an order, and cancelling one that has not shipped.
+out_of_scope:
+- Shipping, warehousing, and anything after the parcel leaves.
+exports:
+- interface:order-events
+- data:order
+- term:order
+revisions:
+- version: 1.0.0
+  changed_on: 2026-01-05
+  author: dana
+  summary: The first complete cut.
+imports: []
+repositories:
+- id: acme
+  url: https://example.invalid/acme
+  ref: main

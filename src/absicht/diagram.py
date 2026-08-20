@@ -42,7 +42,8 @@ from pathlib import Path
 
 from absicht.git import GitError, commit_count, repo_root
 from absicht.layout import LayoutError, nodes, read_layout
-from absicht.models import Component, Design, Element, Position, Ref, Resource, Seam, State
+from absicht.models.design import Component, Design, Element, Interface, Ref, Resource, State
+from absicht.models.layout import Position
 from absicht.render import UnknownRefError, mermaid, node_key
 from absicht.resolve import Index, subtree
 
@@ -99,11 +100,11 @@ class Diagram:
     """The picture every format renders: the boxes ``ab layout`` positions,
     the directed edges between them, and each node's pinned coordinates.
 
-    Nodes sit in id order and edges in the order ``build`` derived them — a
-    component at a time in id order, each one's ``contains``/``consumes``/
-    ``provides`` refs in authored order. The renderers walk both as given:
-    that order, not any sorting of their own, is what makes the output
-    deterministic.
+    Nodes sit in id order and edges in the order ``build`` derived them —
+    nesting first, then who declares which interface, then the design's own
+    relationships in the order they were assembled. The renderers walk both
+    as given: that order, not any sorting of their own, is what makes the
+    output deterministic.
     """
 
     nodes: tuple[Element, ...]
@@ -272,8 +273,8 @@ def build(design: Design, root: Path, *, scope: str | None = None) -> Diagram:
     Raises ``UnknownRefError`` for a scope ref no element has, like ``show``,
     ``trace`` and the site's own scope do.
     """
-    index = Index.from_design(design)
-    if scope is not None and scope not in index.by_id:
+    index = Index(design)
+    if scope is not None and scope not in index.local:
         raise UnknownRefError(
             f"unknown --scope ref {scope!r}: no element in this store has that id"
         )
@@ -283,27 +284,41 @@ def build(design: Design, root: Path, *, scope: str | None = None) -> Diagram:
     positioned = {position.ref for position in pinned.positions}
     if lacking := sorted(node_ids - positioned):
         raise LayoutError(f"no pinned position for {', '.join(lacking)}; run ab layout to pin them")
-    # dict.fromkeys over the triples: a ref repeated in one field draws once.
-    # Both ends must be in scope — an edge whose source box is absent would
-    # dangle out of the picture.
+    # dict.fromkeys over the triples: an edge stated twice draws once. Both
+    # ends must be in scope — an edge whose source box is absent would dangle
+    # out of the picture.
     edges = dict.fromkeys(
-        (component.id, field, target)
-        for component in sorted(design.components, key=lambda component: component.id)
-        if component.id in node_ids
-        for field, refs in (
-            ("contains", component.contains),
-            ("consumes", component.consumes),
-            ("provides", component.provides),
-        )
-        for target in refs
-        if target in node_ids
+        triple for triple in _edges(design) if triple[0] in node_ids and triple[2] in node_ids
     )
     return Diagram(
-        nodes=tuple(sorted((index.by_id[ref] for ref in node_ids), key=lambda e: e.id)),
+        nodes=tuple(sorted((index.local[ref] for ref in node_ids), key=lambda e: e.id)),
         edges=tuple(edges),
         positions={
             position.ref: position for position in pinned.positions if position.ref in node_ids
         },
+    )
+
+
+def _edges(design: Design) -> tuple[tuple[Ref, str, Ref], ...]:
+    """Every arrow the picture can draw, in a fixed order.
+
+    The two links a field owns come first — nesting, and who declares an
+    interface — drawn from the container outward so the arrow reads the way
+    C4 does. Everything many-to-many is a `Relationship`, and arrives in the
+    order the store assembled it.
+    """
+    return (
+        *(
+            (component.parent, "contains", component.id)
+            for component in sorted(design.components, key=lambda component: component.id)
+            if component.parent is not None
+        ),
+        *(
+            (interface.declared_by, "declares", interface.id)
+            for interface in sorted(design.interfaces, key=lambda interface: interface.id)
+            if interface.declared_by is not None
+        ),
+        *((edge.source_id, edge.type.value, edge.target_id) for edge in design.relationships),
     )
 
 
@@ -328,9 +343,9 @@ def overlay_colours(overlay: str, design: Design, *, root: Path | None = None) -
     milestone's ``scope`` — the flag carries no companion value, so the
     colouring answers "which milestone, if any" across all of them, ties
     going to the first milestone in id order; ``coverage`` by whether an
-    element has an implementation-side reference (``implemented_by`` on a
-    component, ``verified_by`` on a seam; externals are assumed, never
-    implemented); ``churn`` by how many commits touched the element's
+    element names the code that implements it (``implemented_by`` on a
+    component or an interface; an external service is somebody else's, never
+    ours to implement); ``churn`` by how many commits touched the element's
     ``source`` path.
 
     ``churn`` is the one overlay that leaves the design: it reads the git
@@ -344,12 +359,12 @@ def overlay_colours(overlay: str, design: Design, *, root: Path | None = None) -
     error, not a user-facing verdict (the CLI's own choice enum already
     refuses those before this is reached).
     """
-    index = Index.from_design(design)
+    index = Index(design)
     node_ids = nodes(design)
     if overlay == "state":
         return Colouring(
-            fill={ref: _STATE_FILL.get(index.by_id[ref].state, _NEUTRAL) for ref in node_ids},
-            caption={ref: index.by_id[ref].state.value for ref in node_ids},
+            fill={ref: _STATE_FILL.get(index.local[ref].state, _NEUTRAL) for ref in node_ids},
+            caption={ref: index.local[ref].state.value for ref in node_ids},
         )
     if overlay == "milestone":
         milestones = sorted(design.milestones, key=lambda milestone: milestone.id)
@@ -372,14 +387,12 @@ def overlay_colours(overlay: str, design: Design, *, root: Path | None = None) -
     if overlay == "coverage":
 
         def covered(element: Element) -> bool:
-            if isinstance(element, Component):
-                return bool(element.implemented_by)
-            return isinstance(element, Seam) and bool(element.verified_by)
+            return isinstance(element, Component | Interface) and bool(element.implemented_by)
 
         return Colouring(
-            fill={ref: _COVERED if covered(index.by_id[ref]) else _NEUTRAL for ref in node_ids},
+            fill={ref: _COVERED if covered(index.local[ref]) else _NEUTRAL for ref in node_ids},
             caption={
-                ref: "covered" if covered(index.by_id[ref]) else "not covered" for ref in node_ids
+                ref: "covered" if covered(index.local[ref]) else "not covered" for ref in node_ids
             },
         )
     if overlay == "churn":
@@ -404,7 +417,7 @@ def _commit_counts(root: Path | None, index: Index, node_ids: tuple[Ref, ...]) -
     except GitError:
         return dict.fromkeys(node_ids, 0)
     return {
-        ref: commit_count((store / index.by_id[ref].source).relative_to(repo), repo=repo)
+        ref: commit_count((store / index.local[ref].source).relative_to(repo), repo=repo)
         for ref in node_ids
     }
 

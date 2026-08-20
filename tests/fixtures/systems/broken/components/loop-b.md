@@ -1,8 +1,11 @@
 ---
-# The other half of the contains cycle; see loop-a.md.
 id: component:loop-b
-title: Loop B
+title: Nested in loop-a
 state: specified
-contains:
-- component:loop-a
+confidence: reviewed
+owner: dana
+level: container
+parent: component:loop-a
 ---
+The other half of the nesting cycle: one finding for the one loop, not one per
+edge.

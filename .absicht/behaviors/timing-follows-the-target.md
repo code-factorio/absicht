@@ -5,8 +5,6 @@ state: specified
 lifecycle: active
 owner: vfeenstr
 trigger: An observation is authored without a timing.
-realizes:
-- requirement:model-elements
 observations:
 - id: behavior:timing-follows-the-target#obs-1
   statement: Pointing at a stream defaults to eventual and everything else to
@@ -18,4 +16,7 @@ observations:
   statement: An authored timing survives on a must_not observation
   at: component:models
   outcome: must_not
+relates:
+- to: req:model-elements
+  type: realizes
 ---

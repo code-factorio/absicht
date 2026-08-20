@@ -5,8 +5,6 @@ state: specified
 lifecycle: active
 owner: vfeenstr
 trigger: A store that violates a rule is checked.
-realizes:
-- requirement:validate-store
 observations:
 - id: behavior:check-flags-broken-store#obs-1
   statement: The run exits FINDINGS when any finding is at error severity
@@ -23,4 +21,12 @@ observations:
   statement: A store file is modified by running check
   at: resource:store-tree
   outcome: must_not
+- id: behavior:check-flags-broken-store#obs-4
+  statement: '--strict promotes warnings for the exit decision only'
+  at: component:check
+  outcome: must
+  timing: immediate
+relates:
+- to: req:validate-store
+  type: realizes
 ---

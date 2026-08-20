@@ -1,0 +1,20 @@
+format_version: 1
+id: design:legacy
+title: Legacy billing
+version: 0.4.0
+purpose: Bill what was sold, the way it has always been billed.
+scope:
+- Reconciling what the payment provider says against what we recorded.
+out_of_scope:
+- Rewriting the billing engine.
+exports: []
+revisions:
+- version: 0.4.0
+  changed_on: 2026-02-10
+  author: sam
+  summary: Written down from the code, not from anyone's memory.
+imports: []
+repositories:
+- id: acme
+  url: https://example.invalid/acme
+  ref: main

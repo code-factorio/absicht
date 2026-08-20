@@ -1,103 +1,160 @@
 # serializer version: 1
 # name: test_each_fixture_builds_to_its_snapshot[brownfield]
   dict({
+    'actors': list([
+    ]),
+    'assumptions': list([
+    ]),
     'behaviors': list([
       dict({
-        'body': '',
+        'body': '''
+          This is what the code does. Why it runs at 02:00, and who reads the report,
+          nobody could say.
+        ''',
         'confidence': 'assumed',
         'id': 'behavior:reconciliation-fires',
         'lifecycle': 'active',
         'observations': list([
           dict({
-            'at': 'component:shadow-report',
+            'at': 'component:legacy-billing',
             'id': 'behavior:reconciliation-fires#obs-1',
             'outcome': 'must',
-            'statement': 'A mismatch row is written to the shadow report',
-            'timing': 'immediate',
+            'statement': 'Every bill from the day before is compared against the provider.',
+            'timing': None,
           }),
           dict({
-            'at': 'component:legacy-billing',
+            'at': 'component:shadow-report',
             'id': 'behavior:reconciliation-fires#obs-2',
             'outcome': 'must',
-            'statement': 'The legacy billing job retries three times before giving up',
+            'statement': 'A row lands in the shadow report for each mismatch.',
             'timing': None,
           }),
         ]),
-        'owner': None,
-        'realizes': list([
-        ]),
+        'owner': 'sam',
+        'reversibility': None,
         'source': 'behaviors/reconciliation-fires.md',
         'state': 'observed',
         'supersedes': list([
         ]),
         'tags': list([
         ]),
-        'title': 'Nightly reconciliation fires',
-        'trigger': 'The nightly reconciliation job runs.',
+        'title': 'Nightly reconciliation',
+        'trigger': 'The clock reaches 02:00 in the billing region.',
       }),
     ]),
     'components': list([
       dict({
-        'body': '''
-          Invoicing as it runs today. Nobody remembers why the nightly job retries
-          three times.
-        ''',
+        'body': '',
         'confidence': 'assumed',
-        'consumes': list([
-        ]),
-        'contains': list([
-        ]),
         'id': 'component:legacy-billing',
         'implemented_by': list([
+          'acme#billing',
         ]),
-        'owner': None,
-        'owns_data': list([
-        ]),
-        'provides': list([
-        ]),
-        'responsibility': '',
+        'level': 'container',
+        'lifecycle': 'active',
+        'owner': 'sam',
+        'parent': 'component:legacy',
+        'responsibility': 'Turn orders into bills. Read from the code, not from a spec.',
+        'reversibility': None,
         'source': 'components/legacy-billing.md',
         'state': 'observed',
+        'supersedes': list([
+        ]),
         'tags': list([
         ]),
+        'technology': 'Perl 5',
+        'title': 'Billing engine',
+      }),
+      dict({
+        'body': '',
+        'confidence': 'assumed',
+        'id': 'component:legacy',
+        'implemented_by': list([
+        ]),
+        'level': 'system',
+        'lifecycle': 'active',
+        'owner': 'sam',
+        'parent': None,
+        'responsibility': 'Bill what was sold.',
+        'reversibility': None,
+        'source': 'components/legacy.md',
+        'state': 'observed',
+        'supersedes': list([
+        ]),
+        'tags': list([
+        ]),
+        'technology': '',
         'title': 'Legacy billing',
       }),
       dict({
         'body': '',
         'confidence': 'assumed',
-        'consumes': list([
-        ]),
-        'contains': list([
-        ]),
         'id': 'component:shadow-report',
         'implemented_by': list([
+          'acme#reports/shadow',
         ]),
-        'owner': None,
-        'owns_data': list([
-        ]),
-        'provides': list([
-        ]),
-        'responsibility': 'Mirror billing events into the reporting warehouse.',
+        'level': 'container',
+        'lifecycle': 'active',
+        'owner': 'sam',
+        'parent': 'component:legacy',
+        'responsibility': 'Nobody knows who reads this, only that it runs nightly.',
+        'reversibility': None,
         'source': 'components/shadow-report.md',
         'state': 'observed',
+        'supersedes': list([
+        ]),
         'tags': list([
         ]),
-        'title': 'Shadow reporting',
+        'technology': '',
+        'title': 'Shadow report',
       }),
     ]),
-    'data': list([
+    'constraints': list([
+    ]),
+    'data_entities': list([
       dict({
-        'body': '',
+        'body': '''
+          Nothing in this store points at it: no component claims to own it, and no
+          observation watches it. That is the orphan `ab list --orphaned` is for.
+        ''',
         'confidence': 'assumed',
         'fields': list([
+          dict({
+            'name': 'at',
+            'note': '',
+            'optional': False,
+            'type': 'datetime',
+          }),
+          dict({
+            'name': 'actor',
+            'note': '',
+            'optional': False,
+            'type': 'str',
+          }),
+          dict({
+            'name': 'before',
+            'note': '',
+            'optional': False,
+            'type': 'json',
+          }),
+          dict({
+            'name': 'after',
+            'note': '',
+            'optional': False,
+            'type': 'json',
+          }),
         ]),
         'id': 'data:audit-log',
         'identity': list([
         ]),
-        'owner': None,
+        'lifecycle': 'active',
+        'owner': 'sam',
         'owner_component': None,
-        'source': 'data/audit-log.md',
+        'reversibility': None,
+        'source': 'data_entities/audit-log.md',
         'state': 'observed',
+        'supersedes': list([
+        ]),
         'tags': list([
         ]),
         'title': 'Audit log',
@@ -105,169 +162,303 @@
     ]),
     'decisions': list([
     ]),
-    'externals': list([
+    'exports': list([
+    ]),
+    'external_services': list([
       dict({
         'assumptions': list([
-          'Idempotency keys are honoured for 24 hours.',
-          'Webhook retries continue for a week.',
+          'A refund settles within one business day.',
+          'The idempotency key is honoured for 24 hours.',
         ]),
-        'body': '',
+        'body': '''
+          The assumptions lapsed. Nobody re-checked, which is exactly what the expiry
+          date exists to say out loud.
+        ''',
         'confidence': 'assumed',
-        'expires_on': '2026-01-01',
-        'external_kind': 'service',
+        'contract': 'https://example.invalid/payments/openapi.yaml',
+        'design': None,
+        'expires_on': '2025-01-15',
+        'failure_modes': list([
+          'A settled charge is reported as pending for minutes.',
+        ]),
         'id': 'external:payment-api',
-        'owner': 'ops',
-        'source': 'externals/payment-api.md',
-        'state': 'specified',
+        'lifecycle': 'active',
+        'owner': 'sam',
+        'reversibility': 'one_way',
+        'source': 'external_services/payment-api.md',
+        'state': 'delegated',
+        'supersedes': list([
+        ]),
         'tags': list([
         ]),
-        'title': 'Payment provider API',
-        'verified_by': 'ops',
-        'verified_on': '2025-06-01',
-        'version': '2025-04',
+        'technology': 'REST/JSON',
+        'title': 'Payment API',
+        'verified_on': '2024-01-15',
       }),
+    ]),
+    'format_version': 1,
+    'glossary': list([
+    ]),
+    'goals': list([
+      dict({
+        'body': 'Nobody wrote this down; it is what finance has always assumed.',
+        'confidence': 'assumed',
+        'horizon': None,
+        'id': 'goal:trustworthy-books',
+        'lifecycle': 'active',
+        'measure': 'manual corrections per month',
+        'outcome': 'The books can be trusted at close of month',
+        'owner': 'sam',
+        'reversibility': None,
+        'source': 'goals/trustworthy-books.md',
+        'stakeholders': list([
+        ]),
+        'state': 'observed',
+        'supersedes': list([
+        ]),
+        'tags': list([
+        ]),
+        'target': '0',
+        'title': 'The books can be trusted at close of month',
+      }),
+    ]),
+    'id': 'design:legacy',
+    'imports': list([
+    ]),
+    'interfaces': list([
+    ]),
+    'libraries': list([
     ]),
     'milestones': list([
       dict({
         'body': '',
         'confidence': 'assumed',
-        'depends_on': list([
-        ]),
         'done_when': list([
+          'behavior:reconciliation-fires#obs-2',
         ]),
         'id': 'milestone:reconcile-mvp',
         'includes': list([
-          'story:reconcile-billing',
+          'behavior:reconciliation-fires',
         ]),
+        'lifecycle': 'active',
         'may_decide': list([
+          'How the mismatch report is delivered.',
         ]),
         'must_hold': list([
         ]),
-        'outcome': 'Nightly reconciliation runs on the replacement, not the legacy job.',
-        'owner': 'engineering',
+        'outcome': 'Mismatches are found the morning after, not at close of month.',
+        'owner': 'sam',
+        'reversibility': 'cheap',
         'scope': list([
+          'component:legacy-billing',
         ]),
         'source': 'milestones/reconcile-mvp.md',
-        'state': 'unknown',
+        'state': 'constrained',
+        'supersedes': list([
+        ]),
         'tags': list([
         ]),
-        'title': 'Reconciliation MVP',
+        'title': 'Reconciliation, first cut',
         'unresolved': list([
           'question:refund-window',
         ]),
       }),
     ]),
-    'non_functionals': list([
+    'notes': list([
+      dict({
+        'about': list([
+          'component:shadow-report',
+        ]),
+        'created_on': '2026-02-11',
+        'done_on': None,
+        'id': 'note:a1b2c3',
+        'promoted_to': None,
+        'text': 'Ask ops whether anybody actually opens the shadow report.',
+      }),
+    ]),
+    'out_of_scope': list([
+      'Rewriting the billing engine.',
+    ]),
+    'purpose': 'Bill what was sold, the way it has always been billed.',
+    'qualities': list([
     ]),
     'questions': list([
+      dict({
+        'blocks': list([
+        ]),
+        'body': 'Open, and blocking nothing: the answer changes a detail, not a slice.',
+        'confidence': 'assumed',
+        'id': 'question:nightly-retry',
+        'lifecycle': 'active',
+        'method': 'spike',
+        'owner': 'sam',
+        'question': "When a night's reconciliation fails, should the next run redo it?",
+        'resolved_by': None,
+        'reversibility': None,
+        'source': 'questions/nightly-retry.md',
+        'state': 'unknown',
+        'supersedes': list([
+        ]),
+        'tags': list([
+        ]),
+        'title': 'Should reconciliation retry a failed night?',
+      }),
       dict({
         'blocks': list([
           'milestone:reconcile-mvp',
         ]),
         'body': '''
-          `component:legacy-billing` retries the nightly run three times and nobody
-          remembers why. Ask billing ops before designing the replacement.
+          Finance and legal answer this differently. The slice cannot be sized until one
+          of them wins.
         ''',
         'confidence': 'assumed',
-        'due_on': '2026-01-10',
-        'id': 'question:nightly-retry',
-        'method': 'ask',
-        'owner': 'finance',
-        'resolved_by': None,
-        'source': 'questions/nightly-retry.md',
-        'state': 'unknown',
-        'tags': list([
-        ]),
-        'title': 'Why does the nightly job retry three times?',
-      }),
-      dict({
-        'blocks': list([
-          'story:reconcile-billing',
-        ]),
-        'body': 'Nightly reconciliation cannot be designed until the refund window is known.',
-        'confidence': 'assumed',
-        'due_on': '2099-01-01',
         'id': 'question:refund-window',
-        'method': 'spike',
-        'owner': 'engineering',
+        'lifecycle': 'active',
+        'method': 'ask',
+        'owner': 'sam',
+        'question': 'How long after a purchase may a customer still claim a refund?',
         'resolved_by': None,
+        'reversibility': None,
         'source': 'questions/refund-window.md',
         'state': 'unknown',
+        'supersedes': list([
+        ]),
         'tags': list([
         ]),
-        'title': 'How long is the refund window?',
+        'title': 'How long may a refund be claimed?',
       }),
     ]),
     'rejections': list([
     ]),
+    'relationships': list([
+      dict({
+        'description': None,
+        'source_id': 'req:audit-trail',
+        'target_id': 'goal:trustworthy-books',
+        'technology': '',
+        'type': 'derives_from',
+      }),
+      dict({
+        'description': None,
+        'source_id': 'behavior:reconciliation-fires',
+        'target_id': 'req:audit-trail',
+        'technology': '',
+        'type': 'realizes',
+      }),
+      dict({
+        'description': None,
+        'source_id': 'component:legacy-billing',
+        'target_id': 'req:audit-trail',
+        'technology': '',
+        'type': 'implements',
+      }),
+      dict({
+        'description': 'settles and refunds',
+        'source_id': 'component:legacy-billing',
+        'target_id': 'external:payment-api',
+        'technology': 'HTTPS/JSON',
+        'type': 'calls',
+      }),
+    ]),
+    'repositories': list([
+      dict({
+        'id': 'acme',
+        'ref': 'main',
+        'url': 'https://example.invalid/acme',
+      }),
+    ]),
     'requirements': list([
       dict({
-        'body': 'Nobody has confirmed this is actually a requirement.',
+        'actors': list([
+        ]),
+        'body': 'The code does this. Nobody knows which regulation asked for it.',
         'confidence': 'assumed',
-        'constrains': list([
-        ]),
-        'derived_from': list([
-        ]),
-        'id': 'requirement:audit-trail',
-        'owner': None,
-        'realized_by': list([
-        ]),
+        'id': 'req:audit-trail',
+        'lifecycle': 'active',
+        'owner': 'sam',
+        'priority': 'must',
+        'rationale': '',
+        'reversibility': None,
         'source': 'requirements/audit-trail.md',
-        'state': 'unknown',
+        'state': 'observed',
+        'statement': 'Every change to a bill must be reconstructable from the audit log.',
+        'supersedes': list([
+        ]),
         'tags': list([
         ]),
-        'title': 'Every charge is auditable',
+        'title': 'Every billing change is auditable',
+      }),
+      dict({
+        'actors': list([
+        ]),
+        'body': '''
+          No owner: nobody has been found who can say what the rule is. This is the gap
+          `ab gaps` exists to surface, and the one thing in this store `ab check` reports
+          as an error rather than a warning.
+        ''',
+        'confidence': 'assumed',
+        'id': 'req:refund-parity',
+        'lifecycle': 'active',
+        'owner': None,
+        'priority': 'must',
+        'rationale': '',
+        'reversibility': None,
+        'source': 'requirements/refund-parity.md',
+        'state': 'unknown',
+        'statement': 'A refund we record must match what the payment provider recorded.',
+        'supersedes': list([
+        ]),
+        'tags': list([
+        ]),
+        'title': 'Refunds match the provider',
       }),
     ]),
     'resources': list([
     ]),
-    'schema_version': 1,
-    'seams': list([
-    ]),
-    'stories': list([
+    'revisions': list([
       dict({
-        'acceptance': list([
-        ]),
-        'actor': 'finance',
-        'body': '',
-        'confidence': 'assumed',
-        'id': 'story:reconcile-billing',
-        'outcome': 'the books balance',
-        'owner': None,
-        'satisfies': list([
-          'requirement:audit-trail',
-        ]),
-        'source': 'stories/reconcile-billing.md',
-        'state': 'observed',
-        'tags': list([
-        ]),
-        'title': 'Reconcile billing nightly',
+        'author': 'sam',
+        'changed_on': '2026-02-10',
+        'summary': "Written down from the code, not from anyone's memory.",
+        'version': '0.4.0',
       }),
     ]),
-    'system': dict({
-      'body': '',
-      'confidence': 'assumed',
-      'externals': list([
-      ]),
-      'id': 'system:legacy',
-      'owner': None,
-      'purpose': 'Kept alive while its replacement is designed.',
-      'source': '',
-      'state': 'observed',
-      'tags': list([
-      ]),
-      'title': 'Legacy billing',
-      'units': list([
-      ]),
-    }),
+    'scope': list([
+      'Reconciling what the payment provider says against what we recorded.',
+    ]),
+    'title': 'Legacy billing',
+    'version': '0.4.0',
   })
 # ---
 # name: test_each_fixture_builds_to_its_snapshot[clean]
   dict({
+    'actors': list([
+      dict({
+        'actor_kind': 'person',
+        'body': '',
+        'confidence': 'reviewed',
+        'goals': list([
+          'Buy a thing without talking to anybody.',
+        ]),
+        'id': 'actor:customer',
+        'lifecycle': 'active',
+        'owner': 'dana',
+        'reversibility': None,
+        'source': 'actors/customer.md',
+        'state': 'specified',
+        'supersedes': list([
+        ]),
+        'tags': list([
+        ]),
+        'title': 'Customer',
+      }),
+    ]),
+    'assumptions': list([
+    ]),
     'behaviors': list([
       dict({
         'body': '',
-        'confidence': 'assumed',
+        'confidence': 'reviewed',
         'id': 'behavior:catalog-browsable',
         'lifecycle': 'active',
         'observations': list([
@@ -275,69 +466,83 @@
             'at': 'component:catalog',
             'id': 'behavior:catalog-browsable#obs-1',
             'outcome': 'must',
-            'statement': 'The catalog page lists the current products',
+            'statement': 'The catalog answers with the items that are for sale.',
             'timing': None,
           }),
         ]),
-        'owner': None,
-        'realizes': list([
-          'requirement:browse-catalog',
-        ]),
+        'owner': 'dana',
+        'reversibility': None,
         'source': 'behaviors/catalog-browsable.md',
         'state': 'specified',
         'supersedes': list([
         ]),
         'tags': list([
         ]),
-        'title': 'The catalog answers a browse',
-        'trigger': 'A customer opens the catalog.',
+        'title': 'Browsing the catalog signed out',
+        'trigger': 'A visitor opens the catalog without a session.',
       }),
       dict({
         'body': '',
-        'confidence': 'assumed',
+        'confidence': 'reviewed',
+        'id': 'behavior:order-cancelled',
+        'lifecycle': 'active',
+        'observations': list([
+          dict({
+            'at': 'component:orders',
+            'id': 'behavior:order-cancelled#obs-1',
+            'outcome': 'must',
+            'statement': 'The order reads cancelled.',
+            'timing': 'immediate',
+          }),
+          dict({
+            'at': 'resource:order-cache',
+            'id': 'behavior:order-cancelled#obs-2',
+            'outcome': 'must_not',
+            'statement': 'No entry for the order remains in the cache.',
+            'timing': None,
+          }),
+          dict({
+            'at': 'resource:order-stream',
+            'id': 'behavior:order-cancelled#obs-3',
+            'outcome': 'should',
+            'statement': 'An OrderCancelled event carries the reason the customer gave.',
+            'timing': None,
+          }),
+        ]),
+        'owner': 'dana',
+        'reversibility': None,
+        'source': 'behaviors/order-cancelled.md',
+        'state': 'specified',
+        'supersedes': list([
+        ]),
+        'tags': list([
+        ]),
+        'title': 'Cancelling an unshipped order',
+        'trigger': 'The customer clicks Cancel on an order that has not shipped.',
+      }),
+      dict({
+        'body': '',
+        'confidence': 'reviewed',
         'id': 'behavior:order-placed-v2',
         'lifecycle': 'active',
         'observations': list([
           dict({
-            'at': 'resource:order-cache',
+            'at': 'behavior:order-placed',
             'id': 'behavior:order-placed-v2#obs-1',
             'outcome': 'must',
-            'statement': 'The order appears in the order cache',
-            'timing': 'immediate',
+            'statement': 'The order is written before the payment is attempted.',
+            'timing': None,
           }),
           dict({
-            'at': 'component:orders',
+            'at': 'resource:order-stream',
             'id': 'behavior:order-placed-v2#obs-2',
             'outcome': 'must',
-            'statement': "The order shows in the customer's order list",
-            'timing': 'eventual',
-          }),
-          dict({
-            'at': 'resource:order-cache',
-            'id': 'behavior:order-placed-v2#obs-3',
-            'outcome': 'must_not',
-            'statement': 'No order is cached before payment clears',
-            'timing': None,
-          }),
-          dict({
-            'at': 'behavior:order-placed',
-            'id': 'behavior:order-placed-v2#obs-4',
-            'outcome': 'must',
-            'statement': 'The superseded order-placed behavior still fires while readers migrate',
-            'timing': 'eventual',
-          }),
-          dict({
-            'at': 'component:orders',
-            'id': 'behavior:order-placed-v2#obs-5',
-            'outcome': 'should',
-            'statement': 'The cache warms before the first read',
+            'statement': 'An OrderPlaced event is emitted once the payment settles.',
             'timing': None,
           }),
         ]),
-        'owner': None,
-        'realizes': list([
-          'requirement:cancel-orders',
-        ]),
+        'owner': 'dana',
+        'reversibility': None,
         'source': 'behaviors/order-placed-v2.md',
         'state': 'specified',
         'supersedes': list([
@@ -345,135 +550,183 @@
         ]),
         'tags': list([
         ]),
-        'title': 'Order placed through checkout',
-        'trigger': 'A customer places an order through the new checkout.',
+        'title': 'Placing an order',
+        'trigger': 'The customer confirms a basket.',
       }),
       dict({
-        'body': '',
-        'confidence': 'assumed',
+        'body': '''
+          Kept because it is the record of what was expected before. It is not how the
+          system works any more.
+        ''',
+        'confidence': 'reviewed',
         'id': 'behavior:order-placed',
         'lifecycle': 'superseded',
         'observations': list([
           dict({
-            'at': 'resource:order-cache',
+            'at': 'component:orders',
             'id': 'behavior:order-placed#obs-1',
             'outcome': 'must',
-            'statement': 'The order appears in the order cache',
-            'timing': 'immediate',
+            'statement': 'The order is written with state placed.',
+            'timing': None,
           }),
         ]),
-        'owner': None,
-        'realizes': list([
-          'requirement:cancel-orders',
-        ]),
+        'owner': 'dana',
+        'reversibility': None,
         'source': 'behaviors/order-placed.md',
         'state': 'specified',
         'supersedes': list([
         ]),
         'tags': list([
         ]),
-        'title': 'Order placed',
-        'trigger': 'A customer places an order.',
+        'title': 'Placing an order (the first cut)',
+        'trigger': 'The customer confirms a basket.',
       }),
     ]),
     'components': list([
       dict({
         'body': '',
-        'confidence': 'assumed',
-        'consumes': list([
-          'seam:order-events',
-        ]),
-        'contains': list([
-        ]),
-        'id': 'component:cancellation',
+        'confidence': 'reviewed',
+        'id': 'component:acme',
         'implemented_by': list([
         ]),
-        'owner': None,
-        'owns_data': list([
+        'level': 'system',
+        'lifecycle': 'active',
+        'owner': 'dana',
+        'parent': None,
+        'responsibility': 'The whole of what we design.',
+        'reversibility': None,
+        'source': 'components/acme.md',
+        'state': 'specified',
+        'supersedes': list([
         ]),
-        'provides': list([
-        ]),
-        'responsibility': 'Decide whether an order can still be cancelled, and start the refund.',
-        'source': 'components/cancellation.md',
-        'state': 'constrained',
         'tags': list([
         ]),
+        'technology': '',
+        'title': 'ACME',
+      }),
+      dict({
+        'body': '',
+        'confidence': 'reviewed',
+        'id': 'component:cancellation',
+        'implemented_by': list([
+          'acme#src/orders/cancel.py',
+        ]),
+        'level': 'component',
+        'lifecycle': 'active',
+        'owner': 'dana',
+        'parent': 'component:orders',
+        'responsibility': 'Decide whether an order may still be cancelled, and do it.',
+        'reversibility': None,
+        'source': 'components/cancellation.md',
+        'state': 'specified',
+        'supersedes': list([
+        ]),
+        'tags': list([
+        ]),
+        'technology': '',
         'title': 'Cancellation',
       }),
       dict({
         'body': '',
-        'confidence': 'assumed',
-        'consumes': list([
-        ]),
-        'contains': list([
-        ]),
+        'confidence': 'reviewed',
         'id': 'component:catalog',
         'implemented_by': list([
+          'acme#src/catalog',
         ]),
-        'owner': None,
-        'owns_data': list([
-        ]),
-        'provides': list([
-        ]),
-        'responsibility': 'List what can be ordered, with prices.',
+        'level': 'container',
+        'lifecycle': 'active',
+        'owner': 'dana',
+        'parent': 'component:acme',
+        'responsibility': 'Answer what is for sale.',
+        'reversibility': None,
         'source': 'components/catalog.md',
         'state': 'specified',
+        'supersedes': list([
+        ]),
         'tags': list([
         ]),
+        'technology': 'Python 3.14',
         'title': 'Catalog',
       }),
       dict({
         'body': '',
-        'confidence': 'assumed',
-        'consumes': list([
-        ]),
-        'contains': list([
-          'component:catalog',
-        ]),
+        'confidence': 'reviewed',
         'id': 'component:orders',
         'implemented_by': list([
+          'acme#src/orders',
         ]),
-        'owner': None,
-        'owns_data': list([
-          'data:order',
-        ]),
-        'provides': list([
-          'seam:order-events',
-        ]),
+        'level': 'container',
+        'lifecycle': 'active',
+        'owner': 'dana',
+        'parent': 'component:acme',
         'responsibility': 'Take orders and record what happened to them.',
+        'reversibility': None,
         'source': 'components/orders.md',
         'state': 'specified',
+        'supersedes': list([
+        ]),
         'tags': list([
         ]),
+        'technology': 'Python 3.14',
         'title': 'Orders',
       }),
     ]),
-    'data': list([
+    'constraints': list([
       dict({
         'body': '',
-        'confidence': 'assumed',
+        'confidence': 'reviewed',
+        'constraint_kind': 'regulatory',
+        'id': 'constraint:gdpr-erasure',
+        'imposed_by': 'GDPR Art. 17',
+        'lifecycle': 'active',
+        'owner': 'dana',
+        'reversibility': None,
+        'source': 'constraints/gdpr-erasure.md',
+        'state': 'specified',
+        'statement': 'Personal data must be erasable within 30 days of a request.',
+        'supersedes': list([
+        ]),
+        'tags': list([
+        ]),
+        'title': "A customer's data is erasable on request",
+      }),
+    ]),
+    'data_entities': list([
+      dict({
+        'body': '',
+        'confidence': 'reviewed',
         'fields': list([
           dict({
             'name': 'id',
             'note': '',
             'optional': False,
-            'type': 'uuid',
+            'type': 'str',
           }),
           dict({
-            'name': 'status',
-            'note': 'lifecycle state',
+            'name': 'state',
+            'note': 'placed, cancelled, shipped',
             'optional': False,
-            'type': 'string',
+            'type': 'str',
+          }),
+          dict({
+            'name': 'placed-at',
+            'note': '',
+            'optional': False,
+            'type': 'datetime',
           }),
         ]),
         'id': 'data:order',
         'identity': list([
           'id',
         ]),
-        'owner': None,
+        'lifecycle': 'active',
+        'owner': 'dana',
         'owner_component': 'component:orders',
-        'source': 'data/order.md',
+        'reversibility': None,
+        'source': 'data_entities/order.md',
         'state': 'specified',
+        'supersedes': list([
+        ]),
         'tags': list([
         ]),
         'title': 'Order',
@@ -481,312 +734,559 @@
     ]),
     'decisions': list([
       dict({
+        'alternatives': list([
+          "A shared table, which makes every reader a writer's problem.",
+        ]),
         'applies_to': list([
           'component:orders',
         ]),
-        'body': '''
-          ## Context
-          
-          The audit trail is the product; in-place updates erase it.
-          
-          ## Consequences
-          
-          Read models project from the log. Undoing this means a migration, so changes
-          land as new events.
-        ''',
-        'confidence': 'assumed',
-        'decided_on': '2026-01-15',
+        'body': '',
+        'choice': 'Orders publishes every state change as an event; nobody reads its tables.',
+        'confidence': 'reviewed',
+        'consequences': list([
+          'A reader can be added without touching Orders.',
+          'Every reader has to cope with an event arriving twice.',
+        ]),
+        'context': 'Cancellation and the catalog both need to know an order moved.',
+        'decided_on': '2026-01-04',
         'id': 'decision:event-log',
-        'owner': None,
+        'lifecycle': 'active',
+        'owner': 'dana',
         'reversibility': 'costly',
         'source': 'decisions/event-log.md',
         'state': 'specified',
-        'status': 'accepted',
         'supersedes': list([
         ]),
         'tags': list([
         ]),
-        'title': 'Event log over in-place updates',
+        'title': 'Orders publish an event log',
       }),
     ]),
-    'externals': list([
+    'exports': list([
+      'interface:order-events',
+      'data:order',
+      'term:order',
+    ]),
+    'external_services': list([
+    ]),
+    'format_version': 1,
+    'glossary': list([
+      dict({
+        'aliases': list([
+          'basket',
+        ]),
+        'body': '',
+        'confidence': 'reviewed',
+        'definition': "A customer's request to buy one or more items, before it ships.",
+        'id': 'term:order',
+        'lifecycle': 'active',
+        'owner': 'dana',
+        'reversibility': None,
+        'source': 'glossary/order.md',
+        'state': 'specified',
+        'supersedes': list([
+        ]),
+        'tags': list([
+        ]),
+        'title': 'Order',
+      }),
+    ]),
+    'goals': list([
+      dict({
+        'body': 'Every contact about an order is an order the system failed to explain.',
+        'confidence': 'reviewed',
+        'horizon': '2026-12-31',
+        'id': 'goal:cheap-orders',
+        'lifecycle': 'active',
+        'measure': 'support contacts per 100 orders',
+        'outcome': 'Ordering costs less to support',
+        'owner': 'dana',
+        'reversibility': None,
+        'source': 'goals/cheap-orders.md',
+        'stakeholders': list([
+          'actor:customer',
+        ]),
+        'state': 'specified',
+        'supersedes': list([
+        ]),
+        'tags': list([
+        ]),
+        'target': '< 3',
+        'title': 'Ordering costs less to support',
+      }),
+    ]),
+    'id': 'design:acme',
+    'imports': list([
+    ]),
+    'interfaces': list([
+      dict({
+        'body': '',
+        'confidence': 'reviewed',
+        'contract': 'docs/order-events.md',
+        'declared_by': 'component:orders',
+        'failure_modes': list([
+          'The bus is unreachable and the event is dropped.',
+        ]),
+        'id': 'interface:order-events',
+        'implemented_by': list([
+          'acme#src/orders/events.py',
+        ]),
+        'lifecycle': 'active',
+        'operations': list([
+          dict({
+            'errors': list([
+            ]),
+            'idempotent': True,
+            'name': 'order-cancelled',
+            'signature': 'OrderCancelled { order_id: str, at: datetime }',
+          }),
+        ]),
+        'owner': 'dana',
+        'reversibility': None,
+        'source': 'interfaces/order-events.md',
+        'state': 'specified',
+        'style': 'event',
+        'supersedes': list([
+        ]),
+        'tags': list([
+        ]),
+        'title': 'Order events',
+      }),
+    ]),
+    'libraries': list([
+      dict({
+        'body': "The records are the model, and the model is pydantic's shape.",
+        'confidence': 'reviewed',
+        'ecosystem': 'pypi',
+        'id': 'library:pydantic',
+        'license': 'MIT',
+        'lifecycle': 'active',
+        'owner': 'dana',
+        'package': 'pydantic',
+        'replaceable': False,
+        'reversibility': None,
+        'source': 'libraries/pydantic.md',
+        'state': 'specified',
+        'supersedes': list([
+        ]),
+        'tags': list([
+        ]),
+        'title': 'pydantic',
+        'version_range': '>=2.13',
+      }),
     ]),
     'milestones': list([
       dict({
         'body': '',
-        'confidence': 'assumed',
-        'depends_on': list([
-        ]),
+        'confidence': 'reviewed',
         'done_when': list([
-          'story:cancel-order#ac-1',
+          'behavior:order-cancelled#obs-1',
         ]),
         'id': 'milestone:m1',
         'includes': list([
-          'story:cancel-order',
+          'behavior:order-cancelled',
         ]),
+        'lifecycle': 'active',
         'may_decide': list([
+          'The retry policy behind publishing the cancellation event.',
         ]),
         'must_hold': list([
+          'decision:event-log',
+          'quality:cancel-latency',
         ]),
-        'outcome': 'A customer can cancel a refundable order.',
-        'owner': None,
+        'outcome': 'A customer can cancel an order that has not shipped.',
+        'owner': 'dana',
+        'reversibility': None,
         'scope': list([
+          'component:orders',
           'component:cancellation',
         ]),
         'source': 'milestones/m1.md',
         'state': 'specified',
+        'supersedes': list([
+        ]),
         'tags': list([
         ]),
-        'title': 'Cancellation MVP',
+        'title': 'Cancellation',
         'unresolved': list([
         ]),
       }),
     ]),
-    'non_functionals': list([
+    'notes': list([
+    ]),
+    'out_of_scope': list([
+      'Shipping, warehousing, and anything after the parcel leaves.',
+    ]),
+    'purpose': 'Sell things, honestly.',
+    'qualities': list([
+      dict({
+        'attribute': 'latency',
+        'body': '',
+        'confidence': 'reviewed',
+        'evidence': list([
+          'bench/cancel.py',
+        ]),
+        'id': 'quality:cancel-latency',
+        'lifecycle': 'active',
+        'measure': 'p99 response time',
+        'owner': 'dana',
+        'priority': 'must',
+        'reversibility': None,
+        'scope': list([
+          'component:cancellation',
+        ]),
+        'source': 'qualities/cancel-latency.md',
+        'state': 'specified',
+        'stimulus': '1000 concurrent cancellations',
+        'supersedes': list([
+        ]),
+        'tags': list([
+        ]),
+        'target': '< 200 ms',
+        'title': 'Cancelling is immediate to a human',
+      }),
     ]),
     'questions': list([
     ]),
     'rejections': list([
     ]),
+    'relationships': list([
+      dict({
+        'description': None,
+        'source_id': 'req:browse-catalog',
+        'target_id': 'goal:cheap-orders',
+        'technology': '',
+        'type': 'derives_from',
+      }),
+      dict({
+        'description': None,
+        'source_id': 'req:cancel-orders',
+        'target_id': 'goal:cheap-orders',
+        'technology': '',
+        'type': 'derives_from',
+      }),
+      dict({
+        'description': None,
+        'source_id': 'behavior:catalog-browsable',
+        'target_id': 'req:browse-catalog',
+        'technology': '',
+        'type': 'realizes',
+      }),
+      dict({
+        'description': None,
+        'source_id': 'behavior:order-cancelled',
+        'target_id': 'req:cancel-orders',
+        'technology': '',
+        'type': 'realizes',
+      }),
+      dict({
+        'description': 'publishes the cancellation',
+        'source_id': 'component:cancellation',
+        'target_id': 'interface:order-events',
+        'technology': 'JSON over the event bus',
+        'type': 'calls',
+      }),
+      dict({
+        'description': None,
+        'source_id': 'component:cancellation',
+        'target_id': 'quality:cancel-latency',
+        'technology': '',
+        'type': 'satisfies',
+      }),
+      dict({
+        'description': None,
+        'source_id': 'component:catalog',
+        'target_id': 'req:browse-catalog',
+        'technology': '',
+        'type': 'implements',
+      }),
+      dict({
+        'description': None,
+        'source_id': 'component:orders',
+        'target_id': 'req:cancel-orders',
+        'technology': '',
+        'type': 'implements',
+      }),
+      dict({
+        'description': None,
+        'source_id': 'component:orders',
+        'target_id': 'constraint:gdpr-erasure',
+        'technology': '',
+        'type': 'constrained_by',
+      }),
+      dict({
+        'description': None,
+        'source_id': 'component:orders',
+        'target_id': 'library:pydantic',
+        'technology': '',
+        'type': 'depends_on',
+      }),
+      dict({
+        'description': 'caches the open orders',
+        'source_id': 'component:orders',
+        'target_id': 'resource:order-cache',
+        'technology': 'Redis protocol',
+        'type': 'depends_on',
+      }),
+      dict({
+        'description': None,
+        'source_id': 'component:orders',
+        'target_id': 'resource:order-stream',
+        'technology': '',
+        'type': 'depends_on',
+      }),
+    ]),
+    'repositories': list([
+      dict({
+        'id': 'acme',
+        'ref': 'main',
+        'url': 'https://example.invalid/acme',
+      }),
+    ]),
     'requirements': list([
       dict({
+        'actors': list([
+          'actor:customer',
+        ]),
         'body': '',
-        'confidence': 'assumed',
-        'constrains': list([
-        ]),
-        'derived_from': list([
-        ]),
-        'id': 'requirement:browse-catalog',
-        'owner': None,
-        'realized_by': list([
-          'component:catalog',
-        ]),
+        'confidence': 'reviewed',
+        'id': 'req:browse-catalog',
+        'lifecycle': 'active',
+        'owner': 'dana',
+        'priority': 'must',
+        'rationale': '',
+        'reversibility': None,
         'source': 'requirements/browse-catalog.md',
         'state': 'specified',
+        'statement': 'A customer must be able to browse the catalog without signing in.',
+        'supersedes': list([
+        ]),
         'tags': list([
         ]),
-        'title': 'The catalog is browsable',
+        'title': 'Browse the catalog',
       }),
       dict({
-        'body': 'A customer may cancel an order while it can still be refunded.',
+        'actors': list([
+          'actor:customer',
+        ]),
+        'body': '',
         'confidence': 'reviewed',
-        'constrains': list([
-        ]),
-        'derived_from': list([
-        ]),
-        'id': 'requirement:cancel-orders',
-        'owner': None,
-        'realized_by': list([
-          'component:cancellation',
-        ]),
+        'id': 'req:cancel-orders',
+        'lifecycle': 'active',
+        'owner': 'dana',
+        'priority': 'must',
+        'rationale': 'A cancellation nobody can do themselves becomes a support contact.',
+        'reversibility': None,
         'source': 'requirements/cancel-orders.md',
         'state': 'specified',
-        'tags': list([
+        'statement': 'A customer must be able to cancel an order that has not shipped.',
+        'supersedes': list([
         ]),
-        'title': 'Orders can be cancelled',
-      }),
-    ]),
-    'resources': list([
-      dict({
-        'body': '',
-        'confidence': 'assumed',
-        'id': 'resource:order-cache',
-        'owner': None,
-        'resource_kind': 'store',
-        'source': 'resources/order-cache.md',
-        'state': 'specified',
-        'tags': list([
-        ]),
-        'technology': 'Redis',
-        'title': 'Order cache',
-      }),
-    ]),
-    'schema_version': 1,
-    'seams': list([
-      dict({
-        'body': '',
-        'carries': list([
-          'data:order',
-        ]),
-        'confidence': 'assumed',
-        'consumers': list([
-          'component:cancellation',
-        ]),
-        'contract': '',
-        'failure_modes': list([
-        ]),
-        'id': 'seam:order-events',
-        'owner': None,
-        'provider': 'component:orders',
-        'source': 'seams/order-events.md',
-        'state': 'specified',
-        'style': 'event',
-        'tags': list([
-        ]),
-        'title': 'Order events',
-        'verified_by': list([
-        ]),
-      }),
-    ]),
-    'stories': list([
-      dict({
-        'acceptance': list([
-          dict({
-            'given': list([
-            ]),
-            'id': 'story:cancel-order#ac-1',
-            'kind': 'behavioural',
-            'statement': '',
-            'then': list([
-              'the order is cancelled',
-              'the refund starts',
-            ]),
-            'touches': list([
-            ]),
-            'when': 'the customer cancels a refundable order',
-          }),
-          dict({
-            'given': list([
-              'an order that has already shipped',
-            ]),
-            'id': 'story:cancel-order#ac-2',
-            'kind': 'behavioural',
-            'statement': '',
-            'then': list([
-              'cancellation is refused',
-            ]),
-            'touches': list([
-            ]),
-            'when': 'the customer asks to cancel it',
-          }),
-          dict({
-            'given': list([
-            ]),
-            'id': 'story:cancel-order#ac-3',
-            'kind': 'structural',
-            'statement': 'cancellation only consumes the order-events seam',
-            'then': list([
-            ]),
-            'touches': list([
-              'seam:order-events',
-            ]),
-            'when': '',
-          }),
-        ]),
-        'actor': 'customer',
-        'body': 'A customer may cancel while the order can still be refunded.',
-        'confidence': 'assumed',
-        'id': 'story:cancel-order',
-        'outcome': 'the order is cancelled and the refund starts',
-        'owner': None,
-        'satisfies': list([
-          'requirement:cancel-orders',
-        ]),
-        'source': 'stories/cancel-order.md',
-        'state': 'specified',
         'tags': list([
         ]),
         'title': 'Cancel an order',
       }),
     ]),
-    'system': dict({
-      'body': '',
-      'confidence': 'assumed',
-      'externals': list([
-      ]),
-      'id': 'system:acme',
-      'owner': None,
-      'purpose': 'Sell things, honestly.',
-      'source': '',
-      'state': 'specified',
-      'tags': list([
-      ]),
-      'title': 'ACME orders',
-      'units': list([
-      ]),
-    }),
+    'resources': list([
+      dict({
+        'body': '',
+        'confidence': 'reviewed',
+        'id': 'resource:order-cache',
+        'lifecycle': 'active',
+        'owner': 'dana',
+        'resource_kind': 'store',
+        'reversibility': None,
+        'source': 'resources/order-cache.md',
+        'state': 'specified',
+        'supersedes': list([
+        ]),
+        'tags': list([
+        ]),
+        'technology': 'Redis',
+        'title': 'Order cache',
+      }),
+      dict({
+        'body': '',
+        'confidence': 'reviewed',
+        'id': 'resource:order-stream',
+        'lifecycle': 'active',
+        'owner': 'dana',
+        'resource_kind': 'stream',
+        'reversibility': None,
+        'source': 'resources/order-stream.md',
+        'state': 'specified',
+        'supersedes': list([
+        ]),
+        'tags': list([
+        ]),
+        'technology': 'Kafka',
+        'title': 'Order stream',
+      }),
+    ]),
+    'revisions': list([
+      dict({
+        'author': 'dana',
+        'changed_on': '2026-01-05',
+        'summary': 'The first complete cut.',
+        'version': '1.0.0',
+      }),
+    ]),
+    'scope': list([
+      'Taking an order, and cancelling one that has not shipped.',
+    ]),
+    'title': 'ACME orders',
+    'version': '1.0.0',
   })
 # ---
 # name: test_each_fixture_builds_to_its_snapshot[composite]
   dict({
+    'actors': list([
+    ]),
+    'assumptions': list([
+    ]),
     'behaviors': list([
+      dict({
+        'body': '',
+        'confidence': 'reviewed',
+        'id': 'behavior:order-settles',
+        'lifecycle': 'active',
+        'observations': list([
+          dict({
+            'at': 'interface:invoice-events',
+            'id': 'behavior:order-settles#obs-1',
+            'outcome': 'must',
+            'statement': 'An OrderSettled event is published.',
+            'timing': None,
+          }),
+          dict({
+            'at': 'component:billing-worker',
+            'id': 'behavior:order-settles#obs-2',
+            'outcome': 'must',
+            'statement': 'An invoice exists for the order.',
+            'timing': None,
+          }),
+        ]),
+        'owner': 'kim',
+        'reversibility': None,
+        'source': 'behaviors/order-settles.md',
+        'state': 'specified',
+        'supersedes': list([
+        ]),
+        'tags': list([
+        ]),
+        'title': 'An order settles',
+        'trigger': 'The payment provider reports a charge as settled.',
+      }),
     ]),
     'components': list([
       dict({
         'body': '',
-        'confidence': 'assumed',
-        'consumes': list([
-          'seam:invoice-events',
-        ]),
-        'contains': list([
-        ]),
-        'id': 'component:billing-worker',
+        'confidence': 'reviewed',
+        'id': 'component:acme',
         'implemented_by': list([
-          'acme/billing#worker',
         ]),
-        'owner': None,
-        'owns_data': list([
-        ]),
-        'provides': list([
-        ]),
-        'responsibility': 'Charge for completed orders.',
-        'source': 'components/billing-worker.md',
+        'level': 'system',
+        'lifecycle': 'active',
+        'owner': 'kim',
+        'parent': None,
+        'responsibility': 'The whole of what we design, across both repositories.',
+        'reversibility': None,
+        'source': 'components/acme.md',
         'state': 'specified',
+        'supersedes': list([
+        ]),
         'tags': list([
         ]),
+        'technology': '',
+        'title': 'ACME',
+      }),
+      dict({
+        'body': '''
+          The consumer of the seam lives in the other repository: unit membership is
+          derivable from `implemented_by` alone, which is what the multi-repo commands
+          lean on.
+        ''',
+        'confidence': 'reviewed',
+        'id': 'component:billing-worker',
+        'implemented_by': list([
+          'billing#worker',
+        ]),
+        'level': 'container',
+        'lifecycle': 'active',
+        'owner': 'kim',
+        'parent': 'component:acme',
+        'responsibility': 'Turn a settled order into an invoice.',
+        'reversibility': None,
+        'source': 'components/billing-worker.md',
+        'state': 'specified',
+        'supersedes': list([
+        ]),
+        'tags': list([
+        ]),
+        'technology': 'Python 3.14',
         'title': 'Billing worker',
       }),
       dict({
         'body': '',
-        'confidence': 'assumed',
-        'consumes': list([
-        ]),
-        'contains': list([
-        ]),
+        'confidence': 'reviewed',
         'id': 'component:orders-api',
         'implemented_by': list([
-          'acme/orders#api',
+          'orders#api',
         ]),
-        'owner': None,
-        'owns_data': list([
-        ]),
-        'provides': list([
-          'seam:invoice-events',
-        ]),
-        'responsibility': 'Take orders and emit what happened.',
+        'level': 'container',
+        'lifecycle': 'active',
+        'owner': 'kim',
+        'parent': 'component:acme',
+        'responsibility': 'Take orders and say when one settles.',
+        'reversibility': None,
         'source': 'components/orders-api.md',
         'state': 'specified',
+        'supersedes': list([
+        ]),
         'tags': list([
         ]),
+        'technology': 'Python 3.14',
         'title': 'Orders API',
       }),
     ]),
-    'data': list([
+    'constraints': list([
+    ]),
+    'data_entities': list([
       dict({
         'body': '',
-        'confidence': 'assumed',
+        'confidence': 'reviewed',
         'fields': list([
           dict({
-            'name': 'id',
+            'name': 'number',
             'note': '',
             'optional': False,
-            'type': 'uuid',
+            'type': 'str',
+          }),
+          dict({
+            'name': 'order-id',
+            'note': '',
+            'optional': False,
+            'type': 'str',
           }),
           dict({
             'name': 'amount',
             'note': '',
             'optional': False,
-            'type': 'decimal',
+            'type': 'Money',
           }),
         ]),
         'id': 'data:invoice',
         'identity': list([
-          'id',
+          'number',
         ]),
-        'owner': None,
-        'owner_component': 'component:orders-api',
-        'source': 'data/invoice.md',
+        'lifecycle': 'active',
+        'owner': 'kim',
+        'owner_component': 'component:billing-worker',
+        'reversibility': None,
+        'source': 'data_entities/invoice.md',
         'state': 'specified',
+        'supersedes': list([
+        ]),
         'tags': list([
         ]),
         'title': 'Invoice',
@@ -794,96 +1294,238 @@
     ]),
     'decisions': list([
     ]),
-    'externals': list([
+    'exports': list([
+      'interface:invoice-events',
+    ]),
+    'external_services': list([
       dict({
         'assumptions': list([
-          'idempotency keys are honored',
+          'A charge settles within two hours.',
+          'The idempotency key is honoured for 24 hours.',
         ]),
-        'body': '',
-        'confidence': 'assumed',
-        'expires_on': None,
-        'external_kind': 'service',
+        'body': "Checked, and current: the counterpart to `brownfield/`'s lapsed one.",
+        'confidence': 'verified',
+        'contract': 'https://example.invalid/payments/openapi.yaml',
+        'design': None,
+        'expires_on': '2099-02-20',
+        'failure_modes': list([
+          'A settled charge is reported as pending for minutes.',
+        ]),
         'id': 'external:payment-provider',
-        'owner': None,
-        'source': 'externals/payment-provider.md',
-        'state': 'specified',
+        'lifecycle': 'active',
+        'owner': 'kim',
+        'reversibility': 'one_way',
+        'source': 'external_services/payment-provider.md',
+        'state': 'delegated',
+        'supersedes': list([
+        ]),
         'tags': list([
         ]),
+        'technology': 'REST/JSON',
         'title': 'Payment provider',
-        'verified_by': None,
-        'verified_on': '2026-08-01',
-        'version': None,
+        'verified_on': '2026-02-20',
       }),
     ]),
-    'milestones': list([
+    'format_version': 1,
+    'glossary': list([
     ]),
-    'non_functionals': list([
+    'goals': list([
+      dict({
+        'body': '',
+        'confidence': 'reviewed',
+        'horizon': None,
+        'id': 'goal:invoices-on-time',
+        'lifecycle': 'active',
+        'measure': 'hours from settlement to invoice',
+        'outcome': 'Invoices go out the day an order settles',
+        'owner': 'kim',
+        'reversibility': None,
+        'source': 'goals/invoices-on-time.md',
+        'stakeholders': list([
+        ]),
+        'state': 'specified',
+        'supersedes': list([
+        ]),
+        'tags': list([
+        ]),
+        'target': '< 24',
+        'title': 'Invoices go out the day an order settles',
+      }),
+    ]),
+    'id': 'design:acme-composite',
+    'imports': list([
+    ]),
+    'interfaces': list([
+      dict({
+        'body': '''
+          Declared in one repository, consumed in the other: the seam the multi-repo
+          commands are about.
+        ''',
+        'confidence': 'reviewed',
+        'contract': '',
+        'declared_by': 'component:orders-api',
+        'failure_modes': list([
+        ]),
+        'id': 'interface:invoice-events',
+        'implemented_by': list([
+          'orders#api/events.py',
+        ]),
+        'lifecycle': 'active',
+        'operations': list([
+          dict({
+            'errors': list([
+            ]),
+            'idempotent': True,
+            'name': 'order-settled',
+            'signature': 'OrderSettled { order_id: str, amount: Money }',
+          }),
+        ]),
+        'owner': 'kim',
+        'reversibility': None,
+        'source': 'interfaces/invoice-events.md',
+        'state': 'specified',
+        'style': 'event',
+        'supersedes': list([
+        ]),
+        'tags': list([
+        ]),
+        'title': 'Invoice events',
+      }),
+    ]),
+    'libraries': list([
+    ]),
+    'milestones': list([
+      dict({
+        'body': '',
+        'confidence': 'reviewed',
+        'done_when': list([
+          'behavior:order-settles#obs-2',
+        ]),
+        'id': 'milestone:invoicing',
+        'includes': list([
+          'behavior:order-settles',
+        ]),
+        'lifecycle': 'active',
+        'may_decide': list([
+          'Where the invoice number comes from.',
+        ]),
+        'must_hold': list([
+        ]),
+        'outcome': 'A settled order produces an invoice, in the other repository.',
+        'owner': 'kim',
+        'reversibility': None,
+        'scope': list([
+          'component:orders-api',
+          'component:billing-worker',
+        ]),
+        'source': 'milestones/invoicing.md',
+        'state': 'specified',
+        'supersedes': list([
+        ]),
+        'tags': list([
+        ]),
+        'title': 'Invoicing',
+        'unresolved': list([
+        ]),
+      }),
+    ]),
+    'notes': list([
+    ]),
+    'out_of_scope': list([
+      'The ledger itself.',
+    ]),
+    'purpose': 'One design, two things we deploy, two repositories that hold them.',
+    'qualities': list([
     ]),
     'questions': list([
     ]),
     'rejections': list([
     ]),
+    'relationships': list([
+      dict({
+        'description': None,
+        'source_id': 'req:issue-invoice',
+        'target_id': 'goal:invoices-on-time',
+        'technology': '',
+        'type': 'derives_from',
+      }),
+      dict({
+        'description': None,
+        'source_id': 'behavior:order-settles',
+        'target_id': 'req:issue-invoice',
+        'technology': '',
+        'type': 'realizes',
+      }),
+      dict({
+        'description': None,
+        'source_id': 'component:billing-worker',
+        'target_id': 'req:issue-invoice',
+        'technology': '',
+        'type': 'implements',
+      }),
+      dict({
+        'description': 'consumes settlements',
+        'source_id': 'component:billing-worker',
+        'target_id': 'interface:invoice-events',
+        'technology': 'JSON over the event bus',
+        'type': 'calls',
+      }),
+      dict({
+        'description': 'takes the payment',
+        'source_id': 'component:orders-api',
+        'target_id': 'external:payment-provider',
+        'technology': 'HTTPS/JSON',
+        'type': 'calls',
+      }),
+    ]),
+    'repositories': list([
+      dict({
+        'id': 'orders',
+        'ref': 'main',
+        'url': 'https://example.invalid/acme/orders',
+      }),
+      dict({
+        'id': 'billing',
+        'ref': 'main',
+        'url': 'https://example.invalid/acme/billing',
+      }),
+    ]),
     'requirements': list([
+      dict({
+        'actors': list([
+        ]),
+        'body': '',
+        'confidence': 'reviewed',
+        'id': 'req:issue-invoice',
+        'lifecycle': 'active',
+        'owner': 'kim',
+        'priority': 'must',
+        'rationale': '',
+        'reversibility': None,
+        'source': 'requirements/issue-invoice.md',
+        'state': 'specified',
+        'statement': 'An invoice must be issued once the payment for an order settles.',
+        'supersedes': list([
+        ]),
+        'tags': list([
+        ]),
+        'title': 'Issue an invoice on settlement',
+      }),
     ]),
     'resources': list([
     ]),
-    'schema_version': 1,
-    'seams': list([
+    'revisions': list([
       dict({
-        'body': '',
-        'carries': list([
-          'data:invoice',
-        ]),
-        'confidence': 'assumed',
-        'consumers': list([
-          'component:billing-worker',
-        ]),
-        'contract': '',
-        'failure_modes': list([
-        ]),
-        'id': 'seam:invoice-events',
-        'owner': None,
-        'provider': 'component:orders-api',
-        'source': 'seams/invoice-events.md',
-        'state': 'specified',
-        'style': 'event',
-        'tags': list([
-        ]),
-        'title': 'Invoice events',
-        'verified_by': list([
-        ]),
+        'author': 'kim',
+        'changed_on': '2026-03-02',
+        'summary': "Split billing out of the API's repository.",
+        'version': '2.1.0',
       }),
     ]),
-    'stories': list([
+    'scope': list([
+      'Issuing an invoice when an order settles.',
     ]),
-    'system': dict({
-      'body': '',
-      'confidence': 'assumed',
-      'externals': list([
-        'external:payment-provider',
-      ]),
-      'id': 'system:platform',
-      'owner': None,
-      'purpose': 'Orders and billing, one design.',
-      'source': '',
-      'state': 'specified',
-      'tags': list([
-      ]),
-      'title': 'Two-unit platform',
-      'units': list([
-        dict({
-          'design': None,
-          'id': 'unit:orders',
-          'ref': 'main',
-          'repo': 'acme/orders',
-        }),
-        dict({
-          'design': None,
-          'id': 'unit:billing',
-          'ref': 'main',
-          'repo': 'acme/billing',
-        }),
-      ]),
-    }),
+    'title': 'ACME, across two repositories',
+    'version': '2.1.0',
   })
 # ---

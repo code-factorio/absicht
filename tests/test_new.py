@@ -25,7 +25,14 @@ from absicht.cli import app
 from absicht.cli._common import ExitCode, Kind
 from absicht.codec import dump_element, parse_element
 from absicht.load import load_store
-from absicht.models import SCHEMA_VERSION, Behavior, Component, Resource, ResourceKind
+from absicht.models.design import (
+    FORMAT_VERSION,
+    Behavior,
+    Component,
+    ComponentLevel,
+    Resource,
+    ResourceKind,
+)
 from absicht.new import NewError, scaffold
 from absicht.resolve import Index, resolve
 
@@ -36,12 +43,28 @@ runner = CliRunner()
 # where an enum is involved, an obviously-replaceable string where the field
 # is free text — each named again in a comment in the element's body.
 PLACEHOLDER: dict[str, tuple[tuple[str, str], ...]] = {
-    "seam": (("style", "call"),),
-    "nfr": (("attribute", "latency"),),
-    "external": (("external_kind", "service"),),
-    "resource": (("resource_kind", "store"), ("technology", "replace me")),
+    "term": (("definition", "replace me"),),
+    "goal": (("outcome", "replace me"),),
+    "req": (("statement", "replace me"),),
+    "quality": (("attribute", "latency"),),
+    "constraint": (("statement", "replace me"), ("constraint_kind", "regulatory")),
     "behavior": (("trigger", "replace me"),),
+    "component": (("level", "system"),),
+    "interface": (("style", "call"),),
+    "resource": (("resource_kind", "store"), ("technology", "replace me")),
+    "library": (("package", "replace me"), ("ecosystem", "replace me")),
+    "assumption": (("statement", "replace me"),),
+    "decision": (("choice", "replace me"),),
+    "question": (("question", "replace me"),),
 }
+
+COMPONENT_BODY = (
+    "<!-- level: system — placeholders `ab new` chose because the model has no "
+    "defaults for them; replace them before this element is trusted. -->"
+)
+"""The body a scaffolded component carries: `Component.level` has no default,
+so the template guesses the first `ComponentLevel` and owns up to it. Spelled
+out here rather than imported, so the text is pinned and not mirrored."""
 
 
 @pytest.fixture
@@ -65,18 +88,24 @@ def test_new_writes_exactly_one_file_with_the_expected_front_matter(store: Path)
     )
 
     assert result.exit_code == ExitCode.OK
-    assert sorted(path.name for path in store.iterdir()) == ["components", "system.yaml"]
+    assert sorted(path.name for path in store.iterdir()) == ["components", "design.yaml"]
     written = store / "components" / "cancellation-flow.md"
     assert [path.name for path in (store / "components").iterdir()] == ["cancellation-flow.md"]
+    # A scaffold declares no relationships either: `relates` is the author's.
     assert parse_element(
         written.read_text(encoding="utf-8"),
         model=Component,
         source="components/cancellation-flow.md",
-    ) == Component(
-        id="component:cancellation-flow",
-        title="Cancellation flow",
-        owner="vinz",
-        source="components/cancellation-flow.md",
+    ) == (
+        Component(
+            id="component:cancellation-flow",
+            title="Cancellation flow",
+            owner="vinz",
+            level=ComponentLevel.SYSTEM,
+            body=COMPONENT_BODY,
+            source="components/cancellation-flow.md",
+        ),
+        (),
     )
 
 
@@ -85,7 +114,7 @@ def test_the_title_falls_back_to_the_slug_and_the_state_to_unknown(store: Path) 
     result = new(store, "component", "orders")
 
     assert result.exit_code == ExitCode.OK
-    element = parse_element(
+    element, _ = parse_element(
         (store / "components" / "orders.md").read_text(encoding="utf-8"),
         model=Component,
         source="components/orders.md",
@@ -100,8 +129,18 @@ def test_print_renders_to_stdout_and_leaves_the_store_alone(store: Path) -> None
     assert result.exit_code == ExitCode.OK
     # typer.echo appends the newline; the rendering itself is exactly the file
     # text, so the command pipes into anything that reads the format.
-    assert result.stdout == dump_element(Component(id="component:orders", title="orders")) + "\n"
-    assert [path.name for path in store.iterdir()] == ["system.yaml"]
+    assert result.stdout == (
+        dump_element(
+            Component(
+                id="component:orders",
+                title="orders",
+                level=ComponentLevel.SYSTEM,
+                body=COMPONENT_BODY,
+            )
+        )
+        + "\n"
+    )
+    assert [path.name for path in store.iterdir()] == ["design.yaml"]
 
 
 def test_a_slug_the_store_already_holds_is_a_usage_error_not_an_overwrite(
@@ -120,7 +159,9 @@ def test_an_id_held_by_a_differently_named_file_still_blocks(store: Path) -> Non
     """Store drift, first half: the index knows the id, the path does not exist."""
     drifted = store / "components" / "renamed.md"
     drifted.parent.mkdir()
-    drifted.write_text("---\nid: component:orders\ntitle: Orders\n---\n", encoding="utf-8")
+    drifted.write_text(
+        "---\nid: component:orders\ntitle: Orders\nlevel: system\n---\n", encoding="utf-8"
+    )
 
     result = new(store, "component", "orders")
 
@@ -155,7 +196,7 @@ def test_every_kind_scaffolds_a_loadable_round_trippable_file(store: Path, kind:
     assert result.exit_code == ExitCode.OK
     loaded = load_store(store)
     assert loaded.errors == ()
-    element = Index.from_design(resolve(loaded)).by_id[f"{kind.value}:probe"]
+    element = Index(resolve(loaded)).local[f"{kind.value}:probe"]
     assert element.title == "Probe"
     placeholders = PLACEHOLDER.get(kind.value, ())
     for field, value in placeholders:
@@ -229,12 +270,12 @@ def test_new_without_a_usable_store_is_a_usage_error(tmp_path: Path) -> None:
     missing = new(tmp_path / "missing", "component", "orders")
     empty = tmp_path / "empty"
     empty.mkdir()
-    systemless = new(empty, "component", "orders")
+    designless = new(empty, "component", "orders")
 
     assert missing.exit_code == ExitCode.USAGE
     assert "no store" in missing.stderr
-    assert systemless.exit_code == ExitCode.USAGE
-    assert "system.yaml" in systemless.stderr
+    assert designless.exit_code == ExitCode.USAGE
+    assert "design.yaml" in designless.stderr
     assert list(empty.iterdir()) == []
 
 
@@ -259,7 +300,7 @@ def test_json_output_names_the_id_and_the_path(store: Path) -> None:
 
     assert result.exit_code == ExitCode.OK
     assert json.loads(result.stdout) == {
-        "schema_version": SCHEMA_VERSION,
+        "format_version": FORMAT_VERSION,
         "id": "component:orders",
         "path": str(store / "components" / "orders.md"),
     }
@@ -270,9 +311,16 @@ def test_print_and_json_wrap_the_rendered_element(store: Path) -> None:
 
     assert result.exit_code == ExitCode.OK
     assert json.loads(result.stdout) == {
-        "schema_version": SCHEMA_VERSION,
+        "format_version": FORMAT_VERSION,
         "id": "component:orders",
-        "element": dump_element(Component(id="component:orders", title="orders")),
+        "element": dump_element(
+            Component(
+                id="component:orders",
+                title="orders",
+                level=ComponentLevel.SYSTEM,
+                body=COMPONENT_BODY,
+            )
+        ),
     }
 
 
@@ -312,7 +360,7 @@ def test_new_resource_lands_in_resources_with_both_placeholders(store: Path) -> 
 
     assert result.exit_code == ExitCode.OK
     assert [path.name for path in (store / "resources").iterdir()] == ["session-cache.md"]
-    element = parse_element(
+    element, _ = parse_element(
         (store / "resources" / "session-cache.md").read_text(encoding="utf-8"),
         model=Resource,
         source="resources/session-cache.md",
@@ -327,12 +375,12 @@ def test_new_behavior_carries_the_worked_observation_example(store: Path) -> Non
     worked example from addendum §3.3, commented out in the body, anchored to
     THIS behavior's id so the `#obs-1` pattern is shown rather than described.
     Observation ids are authored inline, never generated — the file starts
-    with zero observations, exactly as a story starts with no criteria."""
+    with zero observations, exactly as a behavior starts unobserved."""
     result = new(store, "behavior", "new-chat-session")
 
     assert result.exit_code == ExitCode.OK
     assert [path.name for path in (store / "behaviors").iterdir()] == ["new-chat-session.md"]
-    element = parse_element(
+    element, _ = parse_element(
         (store / "behaviors" / "new-chat-session.md").read_text(encoding="utf-8"),
         model=Behavior,
         source="behaviors/new-chat-session.md",
@@ -349,12 +397,8 @@ def test_the_scaffolded_kinds_are_what_ab_check_accepts(store: Path) -> None:
     an owner for each (`unknown` asks for one), and the observations the
     behavior template deliberately does not generate — the one finding a
     fresh behavior owes its authoring-not-being-done-yet, excluded here.
-    The store's own system element is completed by hand first: `ab init`
-    scaffolds it `unknown` and unowned, which is its own finding, not the
-    templates'."""
-    (store / "system.yaml").write_text(
-        "id: system:acme\ntitle: ACME\nstate: specified\n", encoding="utf-8"
-    )
+    The scaffolded `design.yaml` needs no completing by hand: a design is not
+    an element, so it carries no state and nothing asks it for an owner."""
     assert new(store, "resource", "state-store", "--owner", "platform").exit_code == ExitCode.OK
 
     result = runner.invoke(app, ["--store", str(store), "check"])
@@ -366,7 +410,7 @@ def test_the_scaffolded_kinds_are_what_ab_check_accepts(store: Path) -> None:
 
     result = runner.invoke(
         app,
-        ["--store", str(store), "check", "--exclude-rule", "policy/behavior-needs-observations"],
+        ["--store", str(store), "check", "--exclude-rule", "policy/behavior-unobserved"],
     )
 
     assert result.exit_code == ExitCode.OK

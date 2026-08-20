@@ -1,0 +1,300 @@
+{
+  "$defs": {
+    "Confidence": {
+      "description": "How much we trust this, independent of how complete it is.",
+      "enum": [
+        "assumed",
+        "reviewed",
+        "verified"
+      ],
+      "title": "Confidence",
+      "type": "string"
+    },
+    "InterfaceStyle": {
+      "enum": [
+        "call",
+        "http",
+        "event",
+        "queue",
+        "file",
+        "ui"
+      ],
+      "title": "InterfaceStyle",
+      "type": "string"
+    },
+    "Lifecycle": {
+      "description": "Whether an element is still how the system works.\n\nA second axis to `state`, which says how well specified it is: an\ninterface can be perfectly `specified` and no longer true.",
+      "enum": [
+        "active",
+        "superseded"
+      ],
+      "title": "Lifecycle",
+      "type": "string"
+    },
+    "Operation": {
+      "additionalProperties": false,
+      "description": "One call an interface offers. The shape only, never the body.",
+      "properties": {
+        "name": {
+          "pattern": "^[a-z0-9][a-z0-9-]*$",
+          "title": "Name",
+          "type": "string"
+        },
+        "signature": {
+          "default": "",
+          "description": "Free text: `charge(amount: Money) -> ChargeId`. A parameter model here\nwould be a second type system, and it would always trail the real one.",
+          "title": "Signature",
+          "type": "string"
+        },
+        "idempotent": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "`None` says nobody decided. A retry policy needs the answer.",
+          "title": "Idempotent"
+        },
+        "errors": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Errors",
+          "type": "array"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "Operation",
+      "type": "object"
+    },
+    "Relates": {
+      "additionalProperties": false,
+      "description": "One outgoing edge, as the element that owns it spells it.\n\nNo `source_id`: the file the edge is written in is the source, and saying\nso twice invites the two to disagree.",
+      "properties": {
+        "to": {
+          "pattern": "^[a-z]+:[a-z0-9][a-z0-9-]*$",
+          "title": "To",
+          "type": "string"
+        },
+        "type": {
+          "$ref": "#/$defs/RelationshipType"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        },
+        "technology": {
+          "default": "",
+          "title": "Technology",
+          "type": "string"
+        }
+      },
+      "required": [
+        "to",
+        "type"
+      ],
+      "title": "Relates",
+      "type": "object"
+    },
+    "RelationshipType": {
+      "description": "The edge kinds a checker branches on. Add one only if it does.\n\nThe architecture side owns the trace: a component says which requirement\nit implements, never the reverse. The architecture changes more often, so\nthe edge moves with the side that moves.",
+      "enum": [
+        "relates_to",
+        "implements",
+        "satisfies",
+        "constrained_by",
+        "realizes",
+        "calls",
+        "depends_on",
+        "specifies",
+        "derives_from",
+        "refines",
+        "conflicts_with"
+      ],
+      "title": "RelationshipType",
+      "type": "string"
+    },
+    "Reversibility": {
+      "description": "The cost of being wrong. It sets how far an agent may go alone.",
+      "enum": [
+        "cheap",
+        "costly",
+        "one_way"
+      ],
+      "title": "Reversibility",
+      "type": "string"
+    },
+    "State": {
+      "description": "How complete an element is, and what an agent may do about it.\n\nThis is the field that lets a gap be deliberate. `specified` and\n`unknown` are both legal, and they instruct the agent differently, so\nsilence never has to stand for either one.",
+      "enum": [
+        "specified",
+        "constrained",
+        "delegated",
+        "unknown",
+        "observed",
+        "out_of_scope"
+      ],
+      "title": "State",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "pattern": "^[a-z]+:[a-z0-9][a-z0-9-]*$",
+      "title": "Id",
+      "type": "string"
+    },
+    "title": {
+      "minLength": 1,
+      "title": "Title",
+      "type": "string"
+    },
+    "state": {
+      "$ref": "#/$defs/State",
+      "default": "unknown",
+      "description": "`unknown` by default, so an element nobody finished never reads as\nsettled. Saying nothing and saying \"implement as written\" must differ."
+    },
+    "confidence": {
+      "$ref": "#/$defs/Confidence",
+      "default": "assumed"
+    },
+    "reversibility": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Reversibility"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Set it where the agent decides. `check` warns on a `constrained` or\n`delegated` element without one: the agent cannot judge how far to go."
+    },
+    "lifecycle": {
+      "$ref": "#/$defs/Lifecycle",
+      "default": "active"
+    },
+    "supersedes": {
+      "default": [],
+      "description": "Recorded on the replacement only. A stored `superseded_by` would be a\nsecond copy of one fact, and the two would disagree.",
+      "items": {
+        "pattern": "^[a-z]+:[a-z0-9][a-z0-9-]*$",
+        "type": "string"
+      },
+      "title": "Supersedes",
+      "type": "array"
+    },
+    "owner": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Owner"
+    },
+    "tags": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "title": "Tags",
+      "type": "array"
+    },
+    "source": {
+      "default": "",
+      "description": "Path within the store.",
+      "title": "Source",
+      "type": "string"
+    },
+    "body": {
+      "default": "",
+      "description": "Prose, verbatim. Never parsed.",
+      "title": "Body",
+      "type": "string"
+    },
+    "style": {
+      "$ref": "#/$defs/InterfaceStyle"
+    },
+    "declared_by": {
+      "anyOf": [
+        {
+          "pattern": "^[a-z]+:[a-z0-9][a-z0-9-]*$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "The single owner of the shape. Components carry no `provides` list.",
+      "title": "Declared By"
+    },
+    "contract": {
+      "default": "",
+      "description": "Path or URL of the artifact (OpenAPI, schema), when one exists.",
+      "title": "Contract",
+      "type": "string"
+    },
+    "operations": {
+      "default": [],
+      "description": "Author these only where the shape is the design. An OpenAPI file in\n`contract` already carries them, and two copies disagree.",
+      "items": {
+        "$ref": "#/$defs/Operation"
+      },
+      "title": "Operations",
+      "type": "array"
+    },
+    "implemented_by": {
+      "default": [],
+      "description": "\"repo#path\". A duck-typed shape declares nothing in the code, so the\nlink back has to live here.",
+      "items": {
+        "type": "string"
+      },
+      "title": "Implemented By",
+      "type": "array"
+    },
+    "failure_modes": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "title": "Failure Modes",
+      "type": "array"
+    },
+    "relates": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/Relates"
+      },
+      "title": "Relates",
+      "type": "array"
+    }
+  },
+  "required": [
+    "id",
+    "title",
+    "style"
+  ],
+  "title": "Interface",
+  "type": "object"
+}

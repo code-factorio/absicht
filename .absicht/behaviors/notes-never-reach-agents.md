@@ -5,8 +5,6 @@ state: specified
 lifecycle: active
 owner: vfeenstr
 trigger: A note is captured against the store.
-realizes:
-- requirement:capture-notes
 observations:
 - id: behavior:notes-never-reach-agents#obs-1
   statement: The note is committed under .absicht/notes/
@@ -22,4 +20,12 @@ observations:
   at: component:notes
   outcome: must
   timing: immediate
+- id: behavior:notes-never-reach-agents#obs-4
+  statement: The note lists in the inbox with its age
+  at: component:notes
+  outcome: must
+  timing: immediate
+relates:
+- to: req:capture-notes
+  type: realizes
 ---

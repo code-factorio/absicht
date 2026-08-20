@@ -108,10 +108,14 @@ def test_an_issued_packet_round_trips(tmp_path: Path) -> None:
 def test_runs_round_trip_grouped_by_their_header(tmp_path: Path) -> None:
     pid = _issue(tmp_path)
     first = (
-        RunResult(criterion="story:cancel-order#ac-1", result="checked", evidence_ref="tests/a.py"),
-        RunResult(criterion="story:cancel-order#ac-2", result="no_check", evidence_ref=None),
+        RunResult(
+            observation="behavior:cancel-order#obs-1", result="checked", evidence_ref="tests/a.py"
+        ),
+        RunResult(observation="behavior:cancel-order#obs-2", result="no_check", evidence_ref=None),
     )
-    second = (RunResult(criterion="story:cancel-order#ac-1", result="no_check", evidence_ref=None),)
+    second = (
+        RunResult(observation="behavior:cancel-order#obs-1", result="no_check", evidence_ref=None),
+    )
     record_run(tmp_path, packet_id=pid, commit_sha="f" * 40, recorded_at=AT_ONE, results=first)
     record_run(tmp_path, packet_id=pid, commit_sha="0" * 40, recorded_at=AT_TWO, results=second)
 
@@ -182,7 +186,9 @@ def test_re_recording_a_packet_id_upserts(tmp_path: Path) -> None:
 
 def test_a_run_is_written_whole_or_not_at_all(tmp_path: Path) -> None:
     pid = _issue(tmp_path)
-    kept = (RunResult(criterion="story:cancel-order#ac-1", result="checked", evidence_ref="a.py"),)
+    kept = (
+        RunResult(observation="behavior:cancel-order#obs-1", result="checked", evidence_ref="a.py"),
+    )
     record_run(tmp_path, packet_id=pid, commit_sha="f" * 40, recorded_at=AT_ONE, results=kept)
 
     with pytest.raises(sqlite3.IntegrityError):
@@ -193,11 +199,13 @@ def test_a_run_is_written_whole_or_not_at_all(tmp_path: Path) -> None:
             recorded_at=AT_TWO,
             results=(
                 RunResult(
-                    criterion="story:cancel-order#ac-2", result="checked", evidence_ref="b.py"
+                    observation="behavior:cancel-order#obs-2",
+                    result="checked",
+                    evidence_ref="b.py",
                 ),
-                # The fault that rolls the run back: a NULL criterion, refused
+                # The fault that rolls the run back: a NULL observation, refused
                 # by the column's NOT NULL — any per-row constraint failure.
-                RunResult(criterion=None, result="checked", evidence_ref="c.py"),
+                RunResult(observation=None, result="checked", evidence_ref="c.py"),
             ),
         )
 

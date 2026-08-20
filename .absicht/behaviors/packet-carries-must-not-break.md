@@ -5,8 +5,6 @@ state: specified
 lifecycle: active
 owner: vfeenstr
 trigger: A packet is assembled while standing behaviors touch its scope.
-realizes:
-- requirement:bounded-handoff
 observations:
 - id: behavior:packet-carries-must-not-break#obs-1
   statement: Active behaviors touching scope are listed under must-not-break
@@ -23,4 +21,7 @@ observations:
   at: component:packet
   outcome: must
   timing: immediate
+relates:
+- to: req:bounded-handoff
+  type: realizes
 ---

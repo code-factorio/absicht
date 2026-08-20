@@ -2,13 +2,9 @@
 
 ``CONTEXT.md`` calls ``ab verify`` *"the entire premise of the project"* — the
 one check that asks whether the code is the code that was asked for, not just
-whether it is well-formed. This module is the frame around that question:
-``docs/tasks/40-verify-core.md``'s scaffolding up front, then
-``docs/tasks/41-verify-rules.md``'s seven rule bodies hanging off
-``VERIFY_RULES`` and ``VerifyContext``, with the judgement calls the rule
-spec leaves open written down beside them, and
-``docs/tasks/59-verify-observations.md``'s observation coverage over the
-packet's behaviors — the addendum §9 question, asked the same offline way.
+whether it is well-formed. This module is the frame around that question: the
+sealed packet and its lock, the repos' diffs, and the rules that judge them,
+with the judgement calls written down beside the bodies that make them.
 
 Two contracts worth naming out loud:
 
@@ -34,23 +30,21 @@ from pathlib import Path, PurePosixPath
 from typing import cast
 
 from absicht.findings import RULES, Finding, Report, Severity, finding
-from absicht.gherkin import scenario_digest
+from absicht.gherkin import observations_digest
 from absicht.git import GitError, changed_paths
-from absicht.models import (
+from absicht.models.design import (
     Component,
     Decision,
     Element,
-    Fidelity,
+    Interface,
     Observation,
     Outcome,
-    Packet,
-    PacketLock,
     Ref,
     Resource,
-    Seam,
     State,
     Timing,
 )
+from absicht.models.packet import Fidelity, Packet, PacketLock
 from absicht.runstore import RunResult
 
 
@@ -68,9 +62,7 @@ VERIFY_RULES: dict[str, VerifyRule] = {}
 """The rules ``ab verify`` runs, by id, in registration order.
 
 A plain dict, like ``absicht.findings.RULES``: a handful of rules is a lookup,
-not a plugin system. Populated at the bottom of this module with the seven
-bodies of ``docs/tasks/41-verify-rules.md``, in that spec's own order, plus
-``docs/tasks/59-verify-observations.md``'s observations rule; each rule's
+not a plugin system. Populated at the bottom of this module; each rule's
 ``--explain`` text registers in ``findings.RULES`` like every other
 rule-producing module's."""
 
@@ -205,56 +197,38 @@ def run_rules(
     return Report(findings=tuple(finding for rule in selected for finding in rule(ctx)))
 
 
-def criterion_results(ctx: VerifyContext) -> tuple[RunResult, ...]:
-    """The packet's criteria and observations as one run-store row each, for
+def run_results(ctx: VerifyContext) -> tuple[RunResult, ...]:
+    """The packet's observations as one run-store row each, for
     ``absicht.runstore``.
 
     ``checked`` with the first file that references the id as evidence,
-    ``no_check`` when nothing does — ``verify/done-when``'s own evidence walk,
+    ``no_check`` when nothing does — the same evidence walk the rules make,
     read as results rather than findings, so the record and the report cannot
-    disagree about what a run verified. The observations of the packet's
-    satisfy and must-not-break behaviors join after the criteria's rows
-    (docs/tasks/59-verify-observations.md), on the same evidence mechanism.
-    Computed from the context alone, not from the findings: a run with
-    ``--rule`` narrowed still records every criterion's and observation's
-    result.
+    disagree about what a run verified. Computed from the context alone, not
+    from the findings: a run with ``--rule`` narrowed still records every
+    observation's result.
     """
-    sources = sorted(_step_sources(ctx).items())
-    results: list[RunResult] = []
-    for criterion in ctx.packet.criteria:
-        evidence = next(
-            (path.as_posix() for (_repo, path), hits in sources if criterion.id in hits),
-            None,
-        )
-        results.append(
-            RunResult(
-                criterion=criterion.id,
-                result="no_check" if evidence is None else "checked",
-                evidence_ref=evidence,
-            )
-        )
-    results.extend(result.row() for result in observation_results(ctx))
-    return tuple(results)
+    return tuple(result.row() for result in observation_results(ctx))
 
 
-# --- the observations (docs/tasks/59-verify-observations.md) -------------------
+# --- the observations ----------------------------------------------------------
 #
-# The addendum §9 question over the packet's behaviors: for every observation
-# the packet carried, does *something* check it? Coverage of expectations, not
-# execution of tests — absicht never runs a check and never owns an assertion,
-# and this is the line that keeps it from becoming a BDD tool.
+# The question over the packet's behaviors: for every observation the packet
+# carried, does *something* check it? Coverage of expectations, not execution
+# of tests — absicht never runs a check and never owns an assertion, and this
+# is the line that keeps it from becoming a BDD tool.
 
 
 @dataclass(frozen=True, slots=True)
 class ObservationResult:
-    """One observation of the packet's behavior sets, verified — §9's row.
+    """One observation of the packet's behavior sets, verified.
 
     The one shape the observations rule, the run rows and the summary all
     read, so the report, the history and the count cannot disagree about what
-    a run verified. ``result`` is the addendum's vocabulary as plain text,
-    like the run store's column: ``checked``/``no_check`` for a required or
-    forbidden observation, ``advisory`` for a ``should`` whether or not
-    something checks it — the checked-ness rides in ``evidence_ref``.
+    a run verified. ``result`` is plain text, like the run store's column:
+    ``checked``/``no_check`` for a required or forbidden observation,
+    ``advisory`` for a ``should`` whether or not something checks it — the
+    checked-ness rides in ``evidence_ref``.
     """
 
     observation: str
@@ -270,9 +244,9 @@ class ObservationResult:
     timing: Timing | None
 
     def row(self) -> RunResult:
-        """The run-store row: §8's tuple over one observation."""
+        """The run-store row for this observation."""
         return RunResult(
-            criterion=self.observation, result=self.result, evidence_ref=self.evidence_ref
+            observation=self.observation, result=self.result, evidence_ref=self.evidence_ref
         )
 
 
@@ -280,9 +254,9 @@ class ObservationResult:
 class ObservationSummary:
     """The advisory half of the observation results — reported, never failed.
 
-    A ``should`` never becomes a finding; it lands here with its checked-ness,
-    and the unchecked count is the visibility §3.1 asks for rather than an
-    error the exit code could carry.
+    A ``should`` never becomes a finding; it lands here with its
+    checked-ness, and the unchecked count is the visibility an error the exit
+    code could carry would not give.
     """
 
     advisories: tuple[ObservationResult, ...]
@@ -298,13 +272,12 @@ def observation_results(ctx: VerifyContext) -> tuple[ObservationResult, ...]:
     one result each, satisfy set first.
 
     An observation is ``checked`` when a scannable repo file references its
-    id — ``verify/done-when``'s evidence mechanism, reached from the
-    observation anchor, which is exactly what anchored ids are for — and the
-    *quality* of that evidence stays out of scope, because absicht does not
-    run checks (§9). Composed behaviors ride in the packet as context and are
-    deliberately absent here: only the two lists the packet judges are
-    verified, the composed behavior's own guard being the packet that
-    includes it as work.
+    id — the evidence mechanism, reached from the observation anchor, which is
+    exactly what anchored ids are for — and the *quality* of that evidence
+    stays out of scope, because absicht does not run checks. Composed
+    behaviors ride in the packet as context and are deliberately absent here:
+    only the two lists the packet judges are verified, the composed
+    behavior's own guard being the packet that includes it as work.
     """
     sources = sorted(_step_sources(ctx).items())
     results: list[ObservationResult] = []
@@ -368,8 +341,8 @@ def _carried_observations(
         elif observation.outcome is Outcome.MUST_NOT:
             timing = None  # "at no point" carries no when
         else:
-            # §1.2's default over the resources the packet happens to carry:
-            # a stream is eventual, everything else immediate.
+            # The default over the resources the packet happens to carry: a
+            # stream is eventual, everything else immediate.
             timing = observation.effective_timing(kinds.get(observation.at))
         observations.append((observation, timing))
     return tuple(observations)
@@ -455,15 +428,15 @@ def summary_json(summary: ObservationSummary) -> dict[str, object]:
 #   derived into ``must_hold`` and pulled in as a ring — so the conjunction
 #   costs nothing real and stops a hand-narrowed packet laundering an unknown
 #   with a decision it merely happens to carry.
-# - **How deep "runs" goes.** ``verify/contract-tests`` checks that the named
+# - **How deep "runs" goes.** ``verify/interface-code`` checks that the named
 #   file exists in a ``--repo`` and contains something test-shaped. Executing
 #   the implementing repo's own test suite is a real design decision with
 #   sandboxing and trust implications, one the spec defers: when it is made,
 #   this rule's body is the one place the change lands.
 # - **What a step definition is.** Pragmatically, a repo file that references
-#   a criterion id — found by scanning the repos as text, skipping the
+#   an observation id — found by scanning the repos as text, skipping the
 #   generated ``.feature`` files and the ``.absicht/`` store, both of which
-#   name every criterion id without being step definitions. A search, not a
+#   name every observation id without being step definitions. A search, not a
 #   parse; the limitation is named where the heuristic is.
 
 RULES.update(
@@ -489,30 +462,31 @@ RULES.update(
             "applies to it — the README's 'ask, spike, or mark blocking; never "
             "invent', enforced after the fact. Always an error."
         ),
-        "verify/contract-tests": (
-            "A seam the packet carries at full fidelity whose verified_by is "
-            "empty, names a file no --repo holds, or names a file containing "
-            "nothing test-shaped. 'Runs' means exactly that existence-and-shape "
+        "verify/interface-code": (
+            "An interface the packet carries at full fidelity whose "
+            "implemented_by is empty, names a file no --repo holds, or names a "
+            "file containing nothing test-shaped. A duck-typed shape declares "
+            "nothing in the code, so this link back is the only evidence the "
+            "contract is met. 'Runs' means exactly that existence-and-shape "
             "check for now; actually executing the implementing repo's test "
             "suite is a separately-decided follow-up, deliberately not smuggled "
             "in here."
         ),
         "verify/done-when": (
-            "A criterion the packet carries that no file in any --repo "
-            "references: nothing verifies it. A pragmatic text search for the "
-            "criterion id, not a parse — it cannot tell a real check from a "
-            "comment naming the id, and structural or measured criteria are only "
-            "ever approximated by whatever source names them."
+            "An observation the milestone's done_when names that no file in any "
+            "--repo references: nothing verifies the slice is finished. A "
+            "pragmatic text search for the observation id, not a parse — it "
+            "cannot tell a real check from a comment naming the id."
         ),
         "verify/scenarios-unmodified": (
             "The .feature files across the repos, hashed together, do not match "
-            "packet.lock's scenarios_digest: a scenario was edited, added or "
+            "packet.lock's observations_digest: a scenario was edited, added or "
             "deleted since the packet was sealed. This is literally what sealing "
             "exists for. Always an error."
         ),
         "verify/step-assertions": (
-            "A file that references a criterion id — the working definition of a "
-            "step definition — but contains nothing that looks like an "
+            "A file that references an observation id — the working definition of "
+            "a step definition — but contains nothing that looks like an "
             "assertion: a test that cannot fail. Warn, not error, and a "
             "heuristic by design: the assertion shapes it recognizes are "
             "deliberately simple, and an unfamiliar framework's spelling should "
@@ -522,20 +496,19 @@ RULES.update(
             "A must or must_not observation of the packet's satisfy or "
             "must-not-break behaviors that no file in any --repo references: "
             "nothing verifies it, so the observation is unguarded. The evidence "
-            "is the same text search verify/done-when makes — a repo file "
-            "naming the observation id — and its quality is out of scope, "
-            "because absicht does not run checks. Unguarded new work is an "
-            "error; an unguarded standing expectation is drift, warned about "
-            "until --strict promotes it. A should is never failed: it is "
-            "reported as advisory in the summary, the unchecked count surfaced "
-            "as visibility."
+            "is a text search — a repo file naming the observation id — and its "
+            "quality is out of scope, because absicht does not run checks. "
+            "Unguarded new work is an error; an unguarded standing expectation "
+            "is drift, warned about until --strict promotes it. A should is "
+            "never failed: it is reported as advisory in the summary, the "
+            "unchecked count surfaced as visibility."
         ),
     }
 )
 
 _KIND_PREFIX: dict[type[Element], str] = {
     Component: "component:",
-    Seam: "seam:",
+    Interface: "interface:",
     Decision: "decision:",
     Resource: "resource:",
 }
@@ -705,15 +678,16 @@ def _asserts(text: str) -> bool:
     return any(shape in folded for shape in _ASSERTION_SHAPES)
 
 
-def _contract_tests_findings(ctx: VerifyContext) -> tuple[Finding, ...]:
-    """Every in-scope seam whose named contract tests are missing or hollow."""
+def _interface_code_findings(ctx: VerifyContext) -> tuple[Finding, ...]:
+    """Every in-scope interface whose named implementation is missing or hollow."""
     findings: list[Finding] = []
-    for seam in _carried(ctx, Seam, fidelity=Fidelity.FULL):
-        problems = ["verified_by names nothing"] if not seam.verified_by else []
-        for named in seam.verified_by:
+    for interface in _carried(ctx, Interface, fidelity=Fidelity.FULL):
+        problems = ["implemented_by names nothing"] if not interface.implemented_by else []
+        for named in interface.implemented_by:
             # A "::" suffix narrows to one test inside a file — pytest's id
             # spelling — and existence is a property of the file.
-            path = named.split("::", 1)[0]
+            path = named.partition("#")[2] or named
+            path = path.split("::", 1)[0]
             found = next((repo / path for repo in ctx.repos if (repo / path).is_file()), None)
             if found is None:
                 problems.append(f"{named} is no file in any --repo")
@@ -722,35 +696,34 @@ def _contract_tests_findings(ctx: VerifyContext) -> tuple[Finding, ...]:
         if problems:
             findings.append(
                 finding(
-                    "verify/contract-tests",
+                    "verify/interface-code",
                     severity=Severity.ERROR,
-                    message=f"{seam.id}: {'; '.join(problems)}",
-                    ref=seam.id,
-                    source=seam.source or None,
+                    message=f"{interface.id}: {'; '.join(problems)}",
+                    ref=interface.id,
+                    source=interface.source or None,
                 )
             )
     return tuple(findings)
 
 
 def _step_sources(ctx: VerifyContext) -> dict[tuple[Path, Path], frozenset[str]]:
-    """Every repo file that references at least one criterion or observation
-    id, as ``(repo, repo-relative file) -> the ids it references`` — the
-    working definition of a step definition, shared by the two criteria rules
-    and the observation walk: the observation id anchors evidence exactly as
-    a criterion id does.
+    """Every repo file that references at least one observation id, as
+    ``(repo, repo-relative file) -> the ids it references`` — the working
+    definition of a step definition, shared by the rules and the run rows.
 
     The generated ``.feature`` files are skipped: a scenario names its own
-    criterion in the ``Scenario:`` header, and counting that would make
+    observation in the ``Scenario:`` header, and counting that would make
     done-when vacuously pass. So is ``.absicht/``, which holds the packet body
-    itself — every criterion id in it — when design and code share a repo. A
+    itself — every observation id in it — when design and code share a repo. A
     file verify cannot read is skipped rather than fatal: unreadable does not
     make it a step definition."""
-    needles = tuple((criterion.id, criterion.id.encode()) for criterion in ctx.packet.criteria)
-    needles += tuple(
-        (observation.id, observation.id.encode())
+    ids = {
+        observation.id
         for behavior in (*ctx.packet.satisfy, *ctx.packet.must_not_break)
         for observation, _timing in _carried_observations(ctx, behavior)
-    )
+    }
+    ids.update(ctx.packet.done_when)
+    needles = tuple((text, text.encode()) for text in sorted(ids))
     sources: dict[tuple[Path, Path], frozenset[str]] = {}
     for repo in ctx.repos:
         for path in sorted(repo.glob("**/*")):
@@ -778,28 +751,28 @@ def _scannable(path: Path) -> bool:
 
 
 def _done_when_findings(ctx: VerifyContext) -> tuple[Finding, ...]:
-    """Every criterion the packet carries that nothing in the repos references."""
-    referenced = {criterion_id for hits in _step_sources(ctx).values() for criterion_id in hits}
+    """Every done_when observation that nothing in the repos references."""
+    referenced = {ref for hits in _step_sources(ctx).values() for ref in hits}
     return tuple(
         finding(
             "verify/done-when",
             severity=Severity.ERROR,
             message=(
-                f"nothing in the repos references {criterion.id}: "
-                "no step definition or check verifies it"
+                f"nothing in the repos references {observation_id}: "
+                "no step definition or check says this slice is done"
             ),
-            ref=criterion.id.split("#", 1)[0],
+            ref=observation_id.split("#", 1)[0],
         )
-        for criterion in ctx.packet.criteria
-        if criterion.id not in referenced
+        for observation_id in ctx.packet.done_when
+        if observation_id not in referenced
     )
 
 
 def _scenarios_unmodified_findings(ctx: VerifyContext) -> tuple[Finding, ...]:
     """The sealed scenarios, re-hashed from the repos as they stand now."""
     found = _feature_files(ctx)
-    digest = scenario_digest(found)
-    if digest == ctx.lock.scenarios_digest:
+    digest = observations_digest(found)
+    if digest == ctx.lock.observations_digest:
         return ()
     names = ", ".join(sorted(found)) or "no .feature files at all"
     return (
@@ -808,7 +781,7 @@ def _scenarios_unmodified_findings(ctx: VerifyContext) -> tuple[Finding, ...]:
             severity=Severity.ERROR,
             message=(
                 f"the .feature files in the repos hash to {digest}, "
-                f"not the sealed {ctx.lock.scenarios_digest} (found: {names})"
+                f"not the sealed {ctx.lock.observations_digest} (found: {names})"
             ),
         ),
     )
@@ -837,7 +810,7 @@ def _step_assertions_findings(ctx: VerifyContext) -> tuple[Finding, ...]:
                     "verify/step-assertions",
                     severity=Severity.WARN,
                     message=(
-                        f"{path.as_posix()} references criterion ids but nothing "
+                        f"{path.as_posix()} references observation ids but nothing "
                         "that looks like an assertion"
                     ),
                     source=path.as_posix(),
@@ -882,7 +855,7 @@ VERIFY_RULES.update(
         "verify/scope": _scope_findings,
         "verify/out-of-scope": _out_of_scope_findings,
         "verify/unknown-basis": _unknown_basis_findings,
-        "verify/contract-tests": _contract_tests_findings,
+        "verify/interface-code": _interface_code_findings,
         "verify/done-when": _done_when_findings,
         "verify/scenarios-unmodified": _scenarios_unmodified_findings,
         "verify/step-assertions": _step_assertions_findings,

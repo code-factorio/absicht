@@ -1,0 +1,35 @@
+format_version: 1
+id: design:absicht
+title: absicht
+version: 0.1.0
+purpose: Hold the part of a software system that does not survive the source —
+  why it is shaped this way, what it must not do, what was deliberately left
+  open, and who is allowed to decide the rest — and hand it to an implementer
+  as a bounded packet.
+scope:
+- 'Holding intent as files: what a system must do, must not do, and what is
+  deliberately still open.'
+- Assembling a bounded packet for one slice of work, and verifying what came
+  back against it.
+- Validating, folding, querying and rendering the store.
+out_of_scope:
+- Running the checks a packet asks for. absicht reports what was checked and
+  owns no assertions.
+- Tracking what is being done about the design. That is rohrpost's job.
+- Deriving structure from code. Structure is derivable, and it is not the
+  half this project holds.
+exports:
+- interface:record-format
+- interface:design-artifact
+- interface:json-envelope
+- term:packet
+revisions:
+- version: 0.1.0
+  changed_on: 2026-08-17
+  author: vfeenstr
+  summary: The store describes the system that builds the store.
+imports: []
+repositories:
+- id: absicht
+  url: https://github.com/vfeenstr/absicht
+  ref: main

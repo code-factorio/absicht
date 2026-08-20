@@ -27,10 +27,11 @@ from absicht.cli._common import (
 )
 from absicht.cli.query import _design
 from absicht.findings import ExitCode
-from absicht.gherkin import render_feature, scenario_digest
+from absicht.gherkin import observations_digest, render_feature
 from absicht.git import GitError, current_rev, repo_root, resolve_rev
-from absicht.models import SCHEMA_VERSION, Criterion, Design, Packet, PacketLock
-from absicht.packet import PacketFindingError, PacketUsageError, assemble
+from absicht.models.design import FORMAT_VERSION, Behavior, Design
+from absicht.models.packet import Packet, PacketLock
+from absicht.packet import PacketError, assemble
 from absicht.render import packet_markdown
 from absicht.resolve import Index
 from absicht.runstore import RunStoreError, packet_id, record_packet
@@ -56,18 +57,10 @@ def packet(
         int,
         typer.Option("--horizon", metavar="N", help="Rings of contract-fidelity neighbours."),
     ] = 1,
-    include: Annotated[
-        list[str] | None,
-        typer.Option("--include", metavar="REF", help="Force an element in; repeatable."),
-    ] = None,
-    exclude: Annotated[
-        list[str] | None,
-        typer.Option("--exclude", metavar="REF", help="Force an element out; repeatable."),
-    ] = None,
     features: Annotated[
         bool,
         typer.Option(
-            "--features/--no-features", help="Emit .feature files from behavioural criteria."
+            "--features/--no-features", help="Emit .feature files from the packet's behaviors."
         ),
     ] = True,
     features_dir: Annotated[
@@ -87,7 +80,7 @@ def packet(
         typer.Option(
             "--seal",
             help=(
-                "Write packet.lock (design rev, scenario digest) into --out for ab verify. "
+                "Write packet.lock (design rev, observations digest) into --out for ab verify. "
                 "Needs --features; refuses --stdout."
             ),
         ),
@@ -106,9 +99,13 @@ def packet(
 
     Milestone scope at full fidelity, one ring of neighbouring contracts, the
     behaviors this slice must newly satisfy and the active ones it must not
-    break (composition expanded one hop), the decisions and NFRs that must
-    hold, explicit freedoms, known unknowns, and the rejections that must not
-    be re-proposed.
+    break (composition expanded one hop), the decisions and quality
+    requirements that must hold, explicit freedoms, known unknowns, and the
+    rejections that must not be re-proposed.
+
+    `--include` and `--exclude` are gone: what a packet carries is the
+    milestone's own selection, and a hand-narrowed one verifies against a
+    slice nobody designed.
     """
     opts = options(ctx)
     _refuse(seal=seal, to_stdout=to_stdout, features=features, horizon=horizon)
@@ -117,10 +114,10 @@ def packet(
     # given and `_design` sees one resolved answer either way.
     at = rev if rev is not None else opts.rev
     root, design = _design(replace(opts, rev=at))
-    assembled = _assembled(design, milestone, horizon=horizon, include=include, exclude=exclude)
+    assembled = _assembled(design, milestone, horizon=horizon)
 
     out_dir = out if out is not None else DEFAULT_PACKET_DIR / milestone.removeprefix("milestone:")
-    rendered = _feature_files(design, assembled.criteria) if features else {}
+    rendered = _feature_files(design, assembled) if features else {}
     # Features are a real directory write even under --stdout: the packet body
     # is what goes to stdout, not the files the digest seals.
     features_root = features_dir if to_stdout else out_dir / features_dir
@@ -177,51 +174,35 @@ def _refuse(*, seal: bool, to_stdout: bool, features: bool, horizon: int) -> Non
         raise typer.Exit(ExitCode.USAGE)
 
 
-def _assembled(
-    design: Design,
-    milestone: str,
-    *,
-    horizon: int,
-    include: list[str] | None,
-    exclude: list[str] | None,
-) -> Packet:
+def _assembled(design: Design, milestone: str, *, horizon: int) -> Packet:
     """`absicht.packet.assemble` with its two failure vocabularies mapped to
-    the exit-code table: a broken invocation is `USAGE`, a milestone that
-    names no scope is `FINDINGS` — a true statement about the design."""
+    the exit-code table: a milestone nothing names is `USAGE`, a milestone
+    that names no scope is `FINDINGS` — a true statement about the design."""
     try:
-        return assemble(
-            design,
-            Index.from_design(design),
-            milestone,
-            horizon=horizon,
-            include=frozenset(include or ()),
-            exclude=frozenset(exclude or ()),
-        )
-    except PacketUsageError as exc:
+        return assemble(design, milestone, horizon=horizon)
+    except LookupError as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(ExitCode.USAGE) from exc
-    except PacketFindingError as exc:
-        typer.echo(str(exc), err=True)
+    except PacketError as exc:
+        typer.echo(exc.report.message, err=True)
         raise typer.Exit(ExitCode.FINDINGS) from exc
 
 
 def _sealed(packet: Packet, rendered: dict[str, str], at: str | None, root: Path) -> Packet:
-    """The packet stamped with what `packet.lock` will carry — the design rev
-    and the digest of the files just rendered — so the two cannot drift."""
+    """The packet stamped with the design rev `packet.lock` will carry, so the
+    two cannot drift."""
     try:
         repo = repo_root(root)
         design_rev = resolve_rev(at, repo) if at is not None else current_rev(repo)
     except GitError as exc:
         typer.echo(f"--seal needs the store's git history: {exc}", err=True)
         raise typer.Exit(ExitCode.USAGE) from exc
-    return packet.model_copy(
-        update={"design_rev": design_rev, "scenarios_digest": scenario_digest(rendered)}
-    )
+    return packet.model_copy(update={"design_rev": design_rev})
 
 
 def _record_issuance(root: Path, packet: Packet, target_agent: str | None) -> None:
-    """Packet issuance into the run store — addendum §8's first tuple, beside
-    the design store, never in git.
+    """Packet issuance into the run store — beside the design store, never in
+    git.
 
     Recorded for every assembly, sealed or not: an unsealed packet is still
     handed to an agent, and its empty design rev keeps the digest's id and
@@ -273,7 +254,8 @@ def _write_artifacts(
         lock_path = out_dir / "packet.lock"
         lock_path.write_text(
             PacketLock(
-                design_rev=packet.design_rev, scenarios_digest=packet.scenarios_digest
+                design_rev=packet.design_rev,
+                observations_digest=observations_digest(rendered),
             ).model_dump_json(indent=2)
             + "\n",
             encoding="utf-8",
@@ -281,7 +263,7 @@ def _write_artifacts(
         written.append(f"wrote {lock_path}")
     if json_output:
         envelope: dict[str, object] = {
-            "schema_version": SCHEMA_VERSION,
+            "format_version": FORMAT_VERSION,
             "out": str(out_dir),
             "packet": str(body_path),
         }
@@ -294,34 +276,32 @@ def _write_artifacts(
         typer.echo("\n".join(written))
 
 
-def _feature_files(design: Design, criteria: tuple[Criterion, ...]) -> dict[str, str]:
-    """The ``.feature`` files for a packet's criteria: one per story behind
-    them, named by the story's slug, criteria in the order the packet carries.
+def _feature_files(design: Design, packet: Packet) -> dict[str, str]:
+    """The ``.feature`` files for a packet's behaviors: one per behavior the
+    slice must satisfy or must not break, named by the behavior's slug.
 
-    The file names are part of what ``scenario_digest`` hashes, so they are
-    the contract ``packet.lock`` seals — ``ab features`` (docs/tasks/
-    33-features.md) walks its own milestone but must not spell them
-    differently. Every criterion a packet carries is anchored to a story of
-    the design, ``assemble``'s own selection rule."""
-    stories = {story.id: story for story in design.stories}
-    grouped: dict[str, list[Criterion]] = {}
-    for criterion in criteria:
-        grouped.setdefault(criterion.id.rsplit("#", 1)[0], []).append(criterion)
+    The file names are part of what ``observations_digest`` hashes, so they
+    are the contract ``packet.lock`` seals — ``ab features`` walks its own
+    milestone but must not spell them differently."""
+    index = Index(design)
+    behaviors = [
+        behavior
+        for ref in dict.fromkeys((*packet.satisfy, *packet.must_not_break))
+        if isinstance(behavior := index.get(ref), Behavior)
+    ]
     return {
-        f"{story_id.removeprefix('story:')}.feature": render_feature(
-            stories[story_id], tuple(group)
-        )
-        for story_id, group in grouped.items()
+        f"{behavior.id.removeprefix('behavior:')}.feature": render_feature(behavior, index)
+        for behavior in behaviors
     }
 
 
 def _write_features(out: Path, rendered: dict[str, str], *, json_output: bool) -> None:
-    """The durable half of ``features``: one file per rendered story under
+    """The durable half of ``features``: one file per rendered behavior under
     ``out``, the ``--json`` envelope of ``00-conventions.md`` when asked for.
 
-    A milestone with no behavioural criteria renders nothing and writes
-    nothing — no empty directory, and (like ``list``) no lone status line
-    where files would be.
+    A milestone with no behaviors renders nothing and writes nothing — no
+    empty directory, and (like ``list``) no lone status line where files
+    would be.
     """
     if rendered:
         out.mkdir(parents=True, exist_ok=True)
@@ -330,7 +310,7 @@ def _write_features(out: Path, rendered: dict[str, str], *, json_output: bool) -
     if json_output:
         typer.echo(
             json.dumps(
-                {"schema_version": SCHEMA_VERSION, "out": str(out), "files": sorted(rendered)}
+                {"format_version": FORMAT_VERSION, "out": str(out), "files": sorted(rendered)}
             )
         )
     elif rendered:
@@ -370,7 +350,7 @@ def _check_features(
         typer.echo(
             json.dumps(
                 {
-                    "schema_version": SCHEMA_VERSION,
+                    "format_version": FORMAT_VERSION,
                     "out": str(out),
                     "stale": bool(why),
                     "files": sorted(why),
@@ -400,7 +380,7 @@ def features(
     ] = False,
     json_output: JsonOption = False,
 ) -> None:
-    """Render behavioural criteria to Gherkin, without the rest of the packet.
+    """Render the milestone's behaviors to Gherkin, without the rest of the packet.
 
     Output is generated, never authored: an agent implements step definitions and
     may not touch these files.
@@ -408,11 +388,11 @@ def features(
     opts = options(ctx)
     _, design = _design(opts)
     # `ab packet`'s own selection with the horizon folded away: the same
-    # milestone resolution, the same criteria walk, the same refusals. This is
+    # milestone resolution, the same behavior walk, the same refusals. This is
     # the Gherkin slice of a packet — the files `--seal` digests — so a
     # milestone that qualifies for one command qualifies for the other.
-    assembled = _assembled(design, milestone, horizon=0, include=None, exclude=None)
-    rendered = _feature_files(design, assembled.criteria)
+    assembled = _assembled(design, milestone, horizon=0)
+    rendered = _feature_files(design, assembled)
 
     if to_stdout:
         # One `# path` header per file — a Gherkin comment, so the stream stays

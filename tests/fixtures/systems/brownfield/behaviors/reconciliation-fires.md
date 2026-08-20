@@ -1,16 +1,22 @@
 ---
 id: behavior:reconciliation-fires
-title: Nightly reconciliation fires
+title: Nightly reconciliation
 state: observed
-trigger: The nightly reconciliation job runs.
+confidence: assumed
+owner: sam
+trigger: The clock reaches 02:00 in the billing region.
 observations:
 - id: behavior:reconciliation-fires#obs-1
-  statement: A mismatch row is written to the shadow report
-  at: component:shadow-report
-  outcome: must
-  timing: immediate
-- id: behavior:reconciliation-fires#obs-2
-  statement: The legacy billing job retries three times before giving up
+  statement: Every bill from the day before is compared against the provider.
   at: component:legacy-billing
   outcome: must
+- id: behavior:reconciliation-fires#obs-2
+  statement: A row lands in the shadow report for each mismatch.
+  at: component:shadow-report
+  outcome: must
+relates:
+- to: req:audit-trail
+  type: realizes
 ---
+This is what the code does. Why it runs at 02:00, and who reads the report,
+nobody could say.

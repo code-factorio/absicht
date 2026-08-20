@@ -12,7 +12,7 @@
   <h1>Note inbox</h1>
   <p>2 notes, oldest 6 weeks</p>
   <h2><code>note:anchr1</code></h2>
-  <p>6 weeks · against <a href="elements/resource/order-cache.html">resource:order-cache</a></p>
+  <p>6 weeks · about <a href="elements/resource/order-cache.html">resource:order-cache</a></p>
   <p>The order cache needs a TTL.</p>
   <p>Measure before deciding.</p>
   <h2><code>note:plain01</code></h2>
@@ -20,7 +20,7 @@
   <p>Ask finance about refunds.</p>
   <h2>Promoted</h2>
   <ul>
-  <li><code>note:gone01</code> — became <a href="elements/requirement/cancel-orders.html">requirement:cancel-orders</a></li>
+  <li><code>note:gone01</code> — became <a href="elements/req/cancel-orders.html">req:cancel-orders</a></li>
   </ul>
   </body>
   </html>

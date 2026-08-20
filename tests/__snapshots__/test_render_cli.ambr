@@ -5,33 +5,26 @@
   <html lang="en">
   <head>
   <meta charset="utf-8">
-  <title>Order placed through checkout</title>
+  <title>Placing an order</title>
   </head>
   <body>
   <p><a href="../../index.html">index</a> · <a href="../../gaps.html">gaps</a> · <a href="../../trace.html">traceability</a> · <a href="../../notes.html">notes</a></p>
-  <h1>Order placed through checkout</h1>
+  <h1>Placing an order</h1>
   <p><code>behavior:order-placed-v2</code></p>
   <ul>
   <li>state: specified</li>
-  <li>confidence: assumed</li>
-  <li>trigger: A customer places an order through the new checkout.</li>
-  <li>realizes: requirement:cancel-orders</li>
+  <li>confidence: reviewed</li>
   <li>lifecycle: active</li>
   <li>supersedes: behavior:order-placed</li>
+  <li>owner: dana</li>
+  <li>trigger: The customer confirms a basket.</li>
   </ul>
   <h2>Observations</h2>
   <table>
   <tr><th>statement</th><th>at</th><th>outcome</th><th>effective timing</th></tr>
-  <tr><td>The order appears in the order cache</td><td><a href="../../elements/resource/order-cache.html">resource:order-cache</a></td><td>must</td><td>immediate</td></tr>
-  <tr><td>The order shows in the customer&#x27;s order list</td><td><a href="../../elements/component/orders.html">component:orders</a></td><td>must</td><td>eventual</td></tr>
-  <tr><td>No order is cached before payment clears</td><td><a href="../../elements/resource/order-cache.html">resource:order-cache</a></td><td>must_not</td><td>—</td></tr>
-  <tr><td>The superseded order-placed behavior still fires while readers migrate</td><td><a href="../../elements/behavior/order-placed.html">behavior:order-placed</a></td><td>must</td><td>eventual</td></tr>
-  <tr><td>The cache warms before the first read</td><td><a href="../../elements/component/orders.html">component:orders</a></td><td>should</td><td>immediate</td></tr>
+  <tr><td>The order is written before the payment is attempted.</td><td><a href="../../elements/behavior/order-placed.html">behavior:order-placed</a></td><td>must</td><td>immediate</td></tr>
+  <tr><td>An OrderPlaced event is emitted once the payment settles.</td><td><a href="../../elements/resource/order-stream.html">resource:order-stream</a></td><td>must</td><td>eventual</td></tr>
   </table>
-  <h2>Realizes</h2>
-  <ul>
-  <li><a href="../../elements/requirement/cancel-orders.html">requirement:cancel-orders</a></li>
-  </ul>
   <h2>Derived</h2>
   <ul>
   <li>scope: system</li>
@@ -42,21 +35,17 @@
   <line x1="0.00" y1="0.00" x2="5.60" y2="0.00" stroke="#767676" stroke-width="0.05"/>
   <polygon points="5.60,0.00 5.28,0.13 5.28,-0.13" fill="#767676"/>
   <text x="2.80" y="-0.08" text-anchor="middle" font-size="0.2" fill="#52514e">composes</text>
-  <a href="../../elements/behavior/order-placed-v2.html"><title>Order placed through checkout</title>
+  <a href="../../elements/behavior/order-placed-v2.html"><title>Placing an order</title>
   <rect x="-1.80" y="-0.60" width="3.60" height="1.20" rx="0.12" fill="#ffffff" stroke="#767676" stroke-width="0.05"/>
   <text x="0.00" y="0.08" text-anchor="middle" font-size="0.24" fill="#1a1a1a">behavior:order-placed-v2</text></a>
-  <a href="../../elements/behavior/order-placed.html"><title>Order placed</title>
+  <a href="../../elements/behavior/order-placed.html"><title>Placing an order (the first cut)</title>
   <rect x="3.80" y="-0.60" width="3.60" height="1.20" rx="0.12" fill="#ffffff" stroke="#767676" stroke-width="0.05"/>
   <text x="5.60" y="0.08" text-anchor="middle" font-size="0.24" fill="#1a1a1a">behavior:order-placed</text></a>
   </svg>
   <h2>Points at</h2>
-  <ul><li><a href="../../elements/requirement/cancel-orders.html">requirement:cancel-orders</a> — realizes</li>
-  <li><a href="../../elements/behavior/order-placed.html">behavior:order-placed</a> — supersedes</li>
-  <li><a href="../../elements/resource/order-cache.html">resource:order-cache</a> — at</li>
-  <li><a href="../../elements/component/orders.html">component:orders</a> — at</li>
-  <li><a href="../../elements/resource/order-cache.html">resource:order-cache</a> — at</li>
+  <ul><li><a href="../../elements/behavior/order-placed.html">behavior:order-placed</a> — supersedes</li>
   <li><a href="../../elements/behavior/order-placed.html">behavior:order-placed</a> — at</li>
-  <li><a href="../../elements/component/orders.html">component:orders</a> — at</li></ul>
+  <li><a href="../../elements/resource/order-stream.html">resource:order-stream</a> — at</li></ul>
   </body>
   </html>
   
@@ -76,20 +65,20 @@
   <p><code>resource:order-cache</code></p>
   <ul>
   <li>state: specified</li>
-  <li>confidence: assumed</li>
+  <li>confidence: reviewed</li>
+  <li>lifecycle: active</li>
+  <li>owner: dana</li>
   <li>resource_kind: store</li>
   <li>technology: Redis</li>
   </ul>
   <h2>Referenced by</h2>
   <ul>
-  <li><a href="../../elements/behavior/order-placed-v2.html">behavior:order-placed-v2</a> — at</li>
-  <li><a href="../../elements/behavior/order-placed-v2.html">behavior:order-placed-v2</a> — at</li>
-  <li><a href="../../elements/behavior/order-placed.html">behavior:order-placed</a> — at</li>
+  <li><a href="../../elements/behavior/order-cancelled.html">behavior:order-cancelled</a> — at</li>
+  <li><a href="../../elements/component/orders.html">component:orders</a> — depends_on</li>
   </ul>
   <h2>Observing behaviors</h2>
   <ul>
-  <li><a href="../../elements/behavior/order-placed.html">behavior:order-placed</a> [superseded] — Order placed</li>
-  <li><a href="../../elements/behavior/order-placed-v2.html">behavior:order-placed-v2</a> — Order placed through checkout</li>
+  <li><a href="../../elements/behavior/order-cancelled.html">behavior:order-cancelled</a> — Cancelling an unshipped order</li>
   </ul>
   </body>
   </html>

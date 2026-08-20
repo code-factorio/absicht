@@ -1,0 +1,24 @@
+format_version: 1
+id: design:acme-composite
+title: ACME, across two repositories
+version: 2.1.0
+purpose: One design, two things we deploy, two repositories that hold them.
+scope:
+- Issuing an invoice when an order settles.
+out_of_scope:
+- The ledger itself.
+exports:
+- interface:invoice-events
+revisions:
+- version: 2.1.0
+  changed_on: 2026-03-02
+  author: kim
+  summary: Split billing out of the API's repository.
+imports: []
+repositories:
+- id: orders
+  url: https://example.invalid/acme/orders
+  ref: main
+- id: billing
+  url: https://example.invalid/acme/billing
+  ref: main

@@ -15,7 +15,8 @@ from typing import Annotated
 
 import typer
 
-from absicht.check import integrity_findings, note_findings, policy_findings, schema_findings
+from absicht.check import check as check_design
+from absicht.check import store_findings
 from absicht.cli._app import app
 from absicht.cli._common import (
     DEFAULT_DIFF_BASE,
@@ -32,9 +33,9 @@ from absicht.git import GitError, changed_paths, repo_root
 from absicht.init import InitError, init_embedded, init_reference
 from absicht.load import StoreResolutionError, load_store, resolve_store
 from absicht.migrate import MigrationError, migrate_store
-from absicht.models import SCHEMA_VERSION, State
+from absicht.models.design import FORMAT_VERSION, State
 from absicht.new import NewError, create, scaffold
-from absicht.resolve import Index, ResolveError, resolve
+from absicht.resolve import ResolveError, resolve
 from absicht.schema import stale_schemas, write_schemas
 
 PANEL = "Step 1 — author and validate"
@@ -56,7 +57,7 @@ def init(
             help="Write an .absicht file pointing at the store at URL.",
         ),
     ] = None,
-    name: Annotated[str | None, typer.Option("--name", metavar="NAME", help="System name.")] = None,
+    name: Annotated[str | None, typer.Option("--name", metavar="NAME", help="Design name.")] = None,
     force: Annotated[
         bool,
         typer.Option("--force", help="Write into an existing .absicht/ that has no elements yet."),
@@ -80,7 +81,7 @@ def init(
     if opts.json_output:
         typer.echo(
             json.dumps(
-                {"schema_version": SCHEMA_VERSION, "mode": result.mode, "path": str(result.path)}
+                {"format_version": FORMAT_VERSION, "mode": result.mode, "path": str(result.path)}
             )
         )
     elif result.mode == "reference":
@@ -124,7 +125,7 @@ def new(
             typer.echo(
                 json.dumps(
                     {
-                        "schema_version": SCHEMA_VERSION,
+                        "format_version": FORMAT_VERSION,
                         "id": element.id,
                         "element": dump_element(element),
                     }
@@ -134,7 +135,7 @@ def new(
             typer.echo(dump_element(element))
     elif opts.json_output:
         typer.echo(
-            json.dumps({"schema_version": SCHEMA_VERSION, "id": element.id, "path": str(path)})
+            json.dumps({"format_version": FORMAT_VERSION, "id": element.id, "path": str(path)})
         )
     else:
         typer.echo(f"wrote {element.id} to {path}")
@@ -173,17 +174,15 @@ def check(
     ] = None,
     json_output: JsonOption = False,
 ) -> None:
-    """Validate the store: schema, integrity, policy.
+    """Validate the store: the files, the graph, the policy.
 
-    Schema is fields, types and patterns. Integrity is that every ref resolves,
-    that `contains` and `depends_on` hold no cycles, and that criteria are
-    anchored to their story; the model addendum adds that a seam names no
-    resource, an observation points at a component, resource, seam or behavior,
-    and composition and supersession hold no cycles. Policy is the judgement
-    layer: an `unknown` needs an owner, a requirement needs a realizing
-    component and an active behavior (a warning), a behavior needs
-    observations, a milestone selects no superseded behavior, a `one_way`
-    decision needs a rationale body, an external's assumptions have not expired.
+    The files are `codec`'s: a record pydantic refuses never reaches the
+    graph. Integrity asks whether the graph holds together — every ref
+    resolves, the C4 nesting is legal, an observation points at something
+    observable, nothing that must be acyclic loops. Policy passes judgement
+    on the same graph: an `unknown` needs an owner, a requirement needs a
+    component that implements it and a behavior that realizes it, a behavior
+    needs observations, an assumption has not expired.
     """
     opts = options(ctx)
     if explain is not None:
@@ -225,32 +224,27 @@ def _explain_rule(rule_id: str, *, json_output: bool) -> None:
         raise typer.Exit(ExitCode.USAGE) from None
     if json_output:
         typer.echo(
-            json.dumps({"schema_version": SCHEMA_VERSION, "rule": rule_id, "explain": explanation})
+            json.dumps({"format_version": FORMAT_VERSION, "rule": rule_id, "explain": explanation})
         )
     else:
         typer.echo(f"{rule_id}: {explanation}")
 
 
 def _report_for(root: Path) -> Report:
-    """The three layers over one store, schema findings first.
+    """The two layers over one store, the files first.
 
-    A store whose `system.yaml` is missing or unreadable cannot be folded
-    into a `Design` — `resolve`'s one refusal — and its schema findings
-    stand alone as the report: a system-wide problem is a result, not a
-    reason to say nothing. `today` is the run's clock, read here once.
+    A store whose `design.yaml` is missing or unreadable cannot be folded
+    into a `Design` — `resolve`'s one refusal — and its file findings stand
+    alone as the report: a store-wide problem is a result, not a reason to
+    say nothing. `today` is the run's clock, read here once.
     """
     loaded = load_store(root)
-    findings = list(schema_findings(loaded))
+    findings = store_findings(loaded)
     try:
         design = resolve(loaded)
     except ResolveError:
         return Report(findings=tuple(findings))
-    index = Index.from_design(design)
-    findings.extend(integrity_findings(design, index))
-    # The note rule reads the loaded collection, not the design — notes are
-    # exempt from the graph by construction, so they join the report here.
-    findings.extend(note_findings(loaded, index))
-    findings.extend(policy_findings(design, index, today=date.today()))
+    findings.extend(check_design(design, today=date.today()))
     return Report(findings=tuple(findings))
 
 
@@ -321,7 +315,7 @@ def schema(
         if opts.json_output:
             typer.echo(
                 json.dumps(
-                    {"schema_version": SCHEMA_VERSION, "out": str(out), "stale": list(stale)}
+                    {"format_version": FORMAT_VERSION, "out": str(out), "stale": list(stale)}
                 )
             )
         elif stale:
@@ -336,7 +330,7 @@ def schema(
     written = write_schemas(out)
     if opts.json_output:
         typer.echo(
-            json.dumps({"schema_version": SCHEMA_VERSION, "out": str(out), "wrote": list(written)})
+            json.dumps({"format_version": FORMAT_VERSION, "out": str(out), "wrote": list(written)})
         )
     else:
         typer.echo(f"wrote {len(written)} schema files to {out}")
@@ -349,7 +343,7 @@ def migrate(
     dry_run: Annotated[bool, typer.Option("--dry-run")] = False,
     json_output: JsonOption = False,
 ) -> None:
-    """Migrate the store to a newer schema version.
+    """Migrate the store to a newer format version.
 
     There is no newer version yet, so today this is the seam: a store at the
     running version is already current, and a target the registry cannot
@@ -372,11 +366,11 @@ def migrate(
         typer.echo(
             json.dumps(
                 {
-                    "schema_version": SCHEMA_VERSION,
+                    "format_version": FORMAT_VERSION,
                     "from": result.from_version,
                     "to": result.to_version,
                 }
             )
         )
     else:
-        typer.echo(f"already current at schema version {result.to_version}")
+        typer.echo(f"already current at format version {result.to_version}")

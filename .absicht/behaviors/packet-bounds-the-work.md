@@ -5,8 +5,6 @@ state: specified
 lifecycle: active
 owner: vfeenstr
 trigger: A packet is assembled for a milestone with scope.
-realizes:
-- requirement:bounded-handoff
 observations:
 - id: behavior:packet-bounds-the-work#obs-1
   statement: Scope elements ride at full fidelity and one ring of neighbours
@@ -28,8 +26,16 @@ observations:
   at: component:packet
   outcome: should
 - id: behavior:packet-bounds-the-work#obs-5
-  statement: Behavioural criteria arrive as generated .feature files
+  statement: Behavioural observations arrive as generated .feature files
   at: component:gherkin
   outcome: must
   timing: immediate
+- id: behavior:packet-bounds-the-work#obs-6
+  statement: The agent works from the sealed packet without the design store
+  at: component:packet
+  outcome: must
+  timing: immediate
+relates:
+- to: req:bounded-handoff
+  type: realizes
 ---

@@ -1,12 +1,13 @@
 ---
 id: question:refund-window
-title: How long is the refund window?
+title: How long may a refund be claimed?
 state: unknown
-owner: engineering
-method: spike
+confidence: assumed
+owner: sam
+question: How long after a purchase may a customer still claim a refund?
+method: ask
 blocks:
-- story:reconcile-billing
-due_on: 2099-01-01
+- milestone:reconcile-mvp
 ---
-
-Nightly reconciliation cannot be designed until the refund window is known.
+Finance and legal answer this differently. The slice cannot be sized until one
+of them wins.

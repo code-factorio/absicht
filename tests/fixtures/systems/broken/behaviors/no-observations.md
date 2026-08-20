@@ -1,6 +1,9 @@
 ---
 id: behavior:no-observations
-title: A behavior with nothing observable
+title: Says something happens and never says what
 state: specified
-trigger: A file exercises the behavior-needs-observations rule.
+confidence: reviewed
+owner: dana
+trigger: Something happens.
 ---
+`policy/behavior-unobserved`: verification has nothing to check.

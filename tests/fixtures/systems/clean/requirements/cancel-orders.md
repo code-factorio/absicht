@@ -1,10 +1,15 @@
 ---
-id: requirement:cancel-orders
-title: Orders can be cancelled
+id: req:cancel-orders
+title: Cancel an order
 state: specified
 confidence: reviewed
-realized_by:
-- component:cancellation
+owner: dana
+statement: A customer must be able to cancel an order that has not shipped.
+rationale: A cancellation nobody can do themselves becomes a support contact.
+priority: must
+actors:
+- actor:customer
+relates:
+- to: goal:cheap-orders
+  type: derives_from
 ---
-
-A customer may cancel an order while it can still be refunded.

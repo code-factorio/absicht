@@ -5,8 +5,6 @@ state: specified
 lifecycle: active
 owner: vfeenstr
 trigger: The same store is built twice from clean checkouts.
-realizes:
-- requirement:build-artifact
 observations:
 - id: behavior:build-is-deterministic#obs-1
   statement: The design artifact is byte-identical across the two builds
@@ -19,7 +17,10 @@ observations:
   outcome: must_not
 - id: behavior:build-is-deterministic#obs-3
   statement: The fold consumes the resolved store, never the files directly
-  at: seam:design-artifact
+  at: interface:design-artifact
   outcome: must
   timing: immediate
+relates:
+- to: req:build-artifact
+  type: realizes
 ---

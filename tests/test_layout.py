@@ -7,10 +7,11 @@ What these tests pin, per ``docs/tasks/25-layout.md``:
   different ``--seed`` really does move something, so the flag is not
   decorative;
 - the node set is the one ``docs/tasks/27-render-diagrams.md`` draws —
-  components, seams and externals, plus the resources
+  components, interfaces and external services, plus the resources
   ``docs/tasks/60-addendum-render.md`` adds at the boundary, never every
-  element — with the layered shape: a contained component ranks below its
-  parent, seams below every component, resources below the externals;
+  element — with the layered shape: a nested component ranks below its
+  parent, interfaces below every component, resources below the external
+  services;
 - ``--recompute`` (the default behaviour) only fills gaps: positions an
   earlier run pinned survive a new element verbatim, which is what "stable
   layout" means in practice;
@@ -37,15 +38,14 @@ from typer.testing import CliRunner
 from absicht.cli import app
 from absicht.cli._common import ExitCode
 from absicht.layout import compute, read_layout
-from absicht.models import (
-    SCHEMA_VERSION,
+from absicht.models.design import (
+    FORMAT_VERSION,
     Component,
+    ComponentLevel,
     Design,
-    External,
-    ExternalKind,
+    ExternalService,
     Resource,
     ResourceKind,
-    System,
 )
 
 runner = CliRunner()
@@ -54,20 +54,23 @@ FIXTURES = Path(__file__).parent / "fixtures" / "systems"
 CLEAN = FIXTURES / "clean"
 
 CLEAN_NODES = {
+    "component:acme",
     "component:cancellation",
     "component:catalog",
     "component:orders",
-    "seam:order-events",
+    "interface:order-events",
     "resource:order-cache",
+    "resource:order-stream",
 }
-"""Every diagram node in ``clean/``: three components, one seam and the one
-resource the store depends on. No externals, and the prose kinds are not
-diagram nodes — that boundary is itself under test."""
+"""Every diagram node in ``clean/``: four components, one interface and the two
+resources the store depends on. No external services, and the prose kinds are
+not diagram nodes — that boundary is itself under test."""
 
 _NEW_COMPONENT = """---
 id: component:new-thing
 title: New thing
 state: specified
+level: container
 ---
 """
 
@@ -119,17 +122,17 @@ def test_positions_cover_exactly_the_diagram_kinds(store: Path) -> None:
     assert set(_positions(store)) == CLEAN_NODES
 
 
-def test_the_layout_is_layered_contains_below_parents_seams_below_components(
+def test_the_layout_is_layered_children_below_parents_interfaces_below_components(
     store: Path,
 ) -> None:
-    """``component:orders`` contains ``component:catalog``; the seam sits
+    """``component:orders`` nests ``component:cancellation``; the interface sits
     under the components it connects. These two inequalities are the whole
     legibility claim of the algorithm — everything else is placement."""
     assert runner.invoke(app, ["--store", str(store), "layout"]).exit_code == ExitCode.OK
     positions = _positions(store)
-    assert positions["component:catalog"][1] > positions["component:orders"][1]
+    assert positions["component:cancellation"][1] > positions["component:orders"][1]
     deepest_component = max(y for ref, (_, y) in positions.items() if ref.startswith("component:"))
-    assert positions["seam:order-events"][1] > deepest_component
+    assert positions["interface:order-events"][1] > deepest_component
 
 
 @pytest.mark.parametrize("recompute", [[], ["--recompute"]], ids=["bare", "--recompute"])
@@ -164,7 +167,7 @@ def test_recompute_all_discards_the_pinned_positions(store: Path) -> None:
 
 
 def test_check_names_the_element_without_a_position(store: Path) -> None:
-    covered, uncovered = sorted(CLEAN_NODES)[:4], sorted(CLEAN_NODES)[4]
+    covered, uncovered = sorted(CLEAN_NODES)[:-1], sorted(CLEAN_NODES)[-1]
     _pin(store, dict.fromkeys(covered, (1.0, 1.0)))
 
     result = runner.invoke(app, ["--store", str(store), "layout", "--check"])
@@ -220,23 +223,35 @@ def test_json_envelopes_the_written_file(store: Path) -> None:
 
     assert result.exit_code == ExitCode.OK
     document = json.loads(result.stdout)
-    assert document["schema_version"] == SCHEMA_VERSION
+    assert document["format_version"] == FORMAT_VERSION
     assert document["out"].endswith("layout.yaml")
     assert document["total"] == len(CLEAN_NODES)
     assert document["added"] == len(CLEAN_NODES)
 
 
-def test_a_contains_cycle_still_lays_out_deterministically() -> None:
+def test_a_nesting_cycle_still_lays_out_deterministically() -> None:
     """``broken/`` cannot reach this command (its unreadable files are
     ``build``'s refusal), so the cycle case is a hand-built design: whatever
-    the ``contains`` walk cannot reach from a root is appended in id order
+    the ``parent`` walk cannot reach from a root is appended in id order
     rather than hanging — placing a broken graph is layout's job, reporting
     it is ``check``'s."""
     design = Design(
-        system=System(id="system:cycle", title="Cycle"),
+        id="design:cycle",
+        title="Cycle",
+        version="0.1.0",
         components=(
-            Component(id="component:loop-a", title="A", contains=("component:loop-b",)),
-            Component(id="component:loop-b", title="B", contains=("component:loop-a",)),
+            Component(
+                id="component:loop-a",
+                title="A",
+                level=ComponentLevel.CONTAINER,
+                parent="component:loop-b",
+            ),
+            Component(
+                id="component:loop-b",
+                title="B",
+                level=ComponentLevel.CONTAINER,
+                parent="component:loop-a",
+            ),
         ),
     )
 
@@ -258,18 +273,17 @@ def test_a_resource_in_the_store_gets_a_position_like_every_node(store: Path) ->
     assert "resource:order-cache" in _positions(store)
 
 
-def test_resources_rank_below_the_externals_at_the_boundary() -> None:
+def test_resources_rank_below_the_external_services_at_the_boundary() -> None:
     """A resource is outside the design boundary (addendum §1), and the
     picture says so spatially: resources take the outermost rank, below the
-    externals, which sit below the seams, which sit below every component."""
+    external services, which sit below the interfaces, which sit below every
+    component."""
     design = Design(
-        system=System(id="system:edge", title="Edge"),
-        components=(Component(id="component:core", title="Core"),),
-        externals=(
-            External(
-                id="external:payment-api", title="Payment API", external_kind=ExternalKind.SERVICE
-            ),
-        ),
+        id="design:edge",
+        title="Edge",
+        version="0.1.0",
+        components=(Component(id="component:core", title="Core", level=ComponentLevel.SYSTEM),),
+        external_services=(ExternalService(id="external:payment-api", title="Payment API"),),
         resources=(
             Resource(
                 id="resource:order-cache",

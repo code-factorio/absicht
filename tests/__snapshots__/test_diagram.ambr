@@ -3,22 +3,31 @@
   '''
   direction: right
   
-  component_legacy_billing: "Legacy billing" {
+  component_legacy: "Legacy billing" {
     shape: rectangle
   }
-  component_shadow_report: "Shadow reporting" {
+  component_legacy_billing: "Billing engine" {
     shape: rectangle
   }
-  external_payment_api: "Payment provider API" {
+  component_shadow_report: "Shadow report" {
+    shape: rectangle
+  }
+  external_payment_api: "Payment API" {
     shape: rectangle
   }
   
+  component_legacy -> component_legacy_billing: contains
+  component_legacy -> component_shadow_report: contains
+  component_legacy_billing -> external_payment_api: calls
   '''
 # ---
 # name: test_each_format_is_snapshotted_per_fixture[d2-clean]
   '''
   direction: right
   
+  component_acme: "ACME" {
+    shape: rectangle
+  }
   component_cancellation: "Cancellation" {
     shape: rectangle
   }
@@ -28,22 +37,32 @@
   component_orders: "Orders" {
     shape: rectangle
   }
+  interface_order_events: "Order events" {
+    shape: rectangle
+  }
   resource_order_cache: "Order cache" {
     shape: cylinder
   }
-  seam_order_events: "Order events" {
-    shape: rectangle
+  resource_order_stream: "Order stream" {
+    shape: cylinder
   }
   
-  component_cancellation -> seam_order_events: consumes
-  component_orders -> component_catalog: contains
-  component_orders -> seam_order_events: provides
+  component_orders -> component_cancellation: contains
+  component_acme -> component_catalog: contains
+  component_acme -> component_orders: contains
+  component_orders -> interface_order_events: declares
+  component_cancellation -> interface_order_events: calls
+  component_orders -> resource_order_cache: depends_on
+  component_orders -> resource_order_stream: depends_on
   '''
 # ---
 # name: test_each_format_is_snapshotted_per_fixture[d2-composite]
   '''
   direction: right
   
+  component_acme: "ACME" {
+    shape: rectangle
+  }
   component_billing_worker: "Billing worker" {
     shape: rectangle
   }
@@ -53,128 +72,177 @@
   external_payment_provider: "Payment provider" {
     shape: rectangle
   }
-  seam_invoice_events: "Invoice events" {
+  interface_invoice_events: "Invoice events" {
     shape: rectangle
   }
   
-  component_billing_worker -> seam_invoice_events: consumes
-  component_orders_api -> seam_invoice_events: provides
+  component_acme -> component_billing_worker: contains
+  component_acme -> component_orders_api: contains
+  component_orders_api -> interface_invoice_events: declares
+  component_billing_worker -> interface_invoice_events: calls
+  component_orders_api -> external_payment_provider: calls
   '''
 # ---
 # name: test_each_format_is_snapshotted_per_fixture[mermaid-brownfield]
   '''
   graph TD
+    component_legacy["component:legacy"]
     component_legacy_billing["component:legacy-billing"]
     component_shadow_report["component:shadow-report"]
     external_payment_api["external:payment-api"]
+    component_legacy -->|contains| component_legacy_billing
+    component_legacy -->|contains| component_shadow_report
+    component_legacy_billing -->|calls| external_payment_api
   '''
 # ---
 # name: test_each_format_is_snapshotted_per_fixture[mermaid-clean]
   '''
   graph TD
+    component_acme["component:acme"]
     component_cancellation["component:cancellation"]
     component_catalog["component:catalog"]
     component_orders["component:orders"]
+    interface_order_events["interface:order-events"]
     resource_order_cache{{"resource:order-cache"}}
-    seam_order_events["seam:order-events"]
-    component_cancellation -->|consumes| seam_order_events
-    component_orders -->|contains| component_catalog
-    component_orders -->|provides| seam_order_events
+    resource_order_stream{{"resource:order-stream"}}
+    component_orders -->|contains| component_cancellation
+    component_acme -->|contains| component_catalog
+    component_acme -->|contains| component_orders
+    component_orders -->|declares| interface_order_events
+    component_cancellation -->|calls| interface_order_events
+    component_orders -->|depends_on| resource_order_cache
+    component_orders -->|depends_on| resource_order_stream
   '''
 # ---
 # name: test_each_format_is_snapshotted_per_fixture[mermaid-composite]
   '''
   graph TD
+    component_acme["component:acme"]
     component_billing_worker["component:billing-worker"]
     component_orders_api["component:orders-api"]
     external_payment_provider["external:payment-provider"]
-    seam_invoice_events["seam:invoice-events"]
-    component_billing_worker -->|consumes| seam_invoice_events
-    component_orders_api -->|provides| seam_invoice_events
+    interface_invoice_events["interface:invoice-events"]
+    component_acme -->|contains| component_billing_worker
+    component_acme -->|contains| component_orders_api
+    component_orders_api -->|declares| interface_invoice_events
+    component_billing_worker -->|calls| interface_invoice_events
+    component_orders_api -->|calls| external_payment_provider
   '''
 # ---
 # name: test_each_format_is_snapshotted_per_fixture[svg-brownfield]
   '''
   <?xml version="1.0" encoding="UTF-8"?>
-  <svg xmlns="http://www.w3.org/2000/svg" viewBox="-2.29 -1.94 8.51 11.55">
-  <rect x="-2.29" y="-1.94" width="8.51" height="11.55" fill="#fcfcfb"/>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="-2.02 -1.44 12.33 14.95">
+  <rect x="-2.02" y="-1.44" width="12.33" height="14.95" fill="#fcfcfb"/>
   <defs>
   <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
   <path d="M 0 0 L 10 5 L 0 10 z" fill="#52514e"/>
   </marker>
   </defs>
-  <rect x="-0.96" y="-0.44" width="2.60" height="1.40" rx="0.12" data-ref="component:legacy-billing" fill="#fcfcfb" stroke="#c3c2b7" stroke-width="0.05"/>
+  <line x1="1.06" y1="0.96" x2="3.21" y2="3.06" stroke="#c3c2b7" stroke-width="0.06" marker-end="url(#arrow)"/>
+  <text x="2.13" y="1.89" text-anchor="middle" font-size="0.22" fill="#c3c2b7" paint-order="stroke" stroke="#fcfcfb" stroke-width="0.08">contains</text>
+  <line x1="1.64" y1="0.88" x2="6.71" y2="3.29" stroke="#c3c2b7" stroke-width="0.06" marker-end="url(#arrow)"/>
+  <text x="4.18" y="1.96" text-anchor="middle" font-size="0.22" fill="#c3c2b7" paint-order="stroke" stroke="#fcfcfb" stroke-width="0.08">contains</text>
+  <line x1="3.60" y1="4.46" x2="0.60" y2="11.10" stroke="#c3c2b7" stroke-width="0.06" marker-end="url(#arrow)"/>
+  <text x="2.10" y="7.66" text-anchor="middle" font-size="0.22" fill="#c3c2b7" paint-order="stroke" stroke="#fcfcfb" stroke-width="0.08">calls</text>
+  <rect x="-0.96" y="-0.44" width="2.60" height="1.40" rx="0.12" data-ref="component:legacy" fill="#fcfcfb" stroke="#c3c2b7" stroke-width="0.05"/>
   <text x="0.34" y="0.14" text-anchor="middle" font-size="0.32" font-weight="600" fill="#0b0b0b" textLength="2.40" lengthAdjust="spacingAndGlyphs">Legacy billing</text>
-  <text x="0.34" y="0.50" text-anchor="middle" font-size="0.24" fill="#0b0b0b" textLength="2.40" lengthAdjust="spacingAndGlyphs">component:legacy-billing</text>
-  <rect x="2.62" y="-0.94" width="2.60" height="1.40" rx="0.12" data-ref="component:shadow-report" fill="#fcfcfb" stroke="#c3c2b7" stroke-width="0.05"/>
-  <text x="3.92" y="-0.36" text-anchor="middle" font-size="0.32" font-weight="600" fill="#0b0b0b" textLength="2.40" lengthAdjust="spacingAndGlyphs">Shadow reporting</text>
-  <text x="3.92" y="-0.00" text-anchor="middle" font-size="0.24" fill="#0b0b0b" textLength="2.40" lengthAdjust="spacingAndGlyphs">component:shadow-report</text>
-  <rect x="-1.29" y="7.20" width="2.60" height="1.40" rx="0.12" data-ref="external:payment-api" fill="#fcfcfb" stroke="#c3c2b7" stroke-width="0.05"/>
-  <text x="0.01" y="7.78" text-anchor="middle" font-size="0.32" font-weight="600" fill="#0b0b0b" textLength="2.40" lengthAdjust="spacingAndGlyphs">Payment provider API</text>
-  <text x="0.01" y="8.14" text-anchor="middle" font-size="0.24" fill="#0b0b0b" textLength="2.40" lengthAdjust="spacingAndGlyphs">external:payment-api</text>
+  <text x="0.34" y="0.50" text-anchor="middle" font-size="0.24" fill="#0b0b0b">component:legacy</text>
+  <rect x="2.62" y="3.06" width="2.60" height="1.40" rx="0.12" data-ref="component:legacy-billing" fill="#fcfcfb" stroke="#c3c2b7" stroke-width="0.05"/>
+  <text x="3.92" y="3.64" text-anchor="middle" font-size="0.32" font-weight="600" fill="#0b0b0b" textLength="2.40" lengthAdjust="spacingAndGlyphs">Billing engine</text>
+  <text x="3.92" y="4.00" text-anchor="middle" font-size="0.24" fill="#0b0b0b" textLength="2.40" lengthAdjust="spacingAndGlyphs">component:legacy-billing</text>
+  <rect x="6.71" y="3.20" width="2.60" height="1.40" rx="0.12" data-ref="component:shadow-report" fill="#fcfcfb" stroke="#c3c2b7" stroke-width="0.05"/>
+  <text x="8.01" y="3.78" text-anchor="middle" font-size="0.32" font-weight="600" fill="#0b0b0b" textLength="2.40" lengthAdjust="spacingAndGlyphs">Shadow report</text>
+  <text x="8.01" y="4.14" text-anchor="middle" font-size="0.24" fill="#0b0b0b" textLength="2.40" lengthAdjust="spacingAndGlyphs">component:shadow-report</text>
+  <rect x="-1.02" y="11.10" width="2.60" height="1.40" rx="0.12" data-ref="external:payment-api" fill="#fcfcfb" stroke="#c3c2b7" stroke-width="0.05"/>
+  <text x="0.28" y="11.68" text-anchor="middle" font-size="0.32" font-weight="600" fill="#0b0b0b">Payment API</text>
+  <text x="0.28" y="12.04" text-anchor="middle" font-size="0.24" fill="#0b0b0b" textLength="2.40" lengthAdjust="spacingAndGlyphs">external:payment-api</text>
   </svg>
   '''
 # ---
 # name: test_each_format_is_snapshotted_per_fixture[svg-clean]
   '''
   <?xml version="1.0" encoding="UTF-8"?>
-  <svg xmlns="http://www.w3.org/2000/svg" viewBox="-2.32 -1.80 12.54 19.30">
-  <rect x="-2.32" y="-1.80" width="12.54" height="19.30" fill="#fcfcfb"/>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="-2.32 -1.44 16.54 23.40">
+  <rect x="-2.32" y="-1.44" width="16.54" height="23.40" fill="#fcfcfb"/>
   <defs>
   <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
   <path d="M 0 0 L 10 5 L 0 10 z" fill="#52514e"/>
   </marker>
   </defs>
-  <line x1="0.31" y1="0.96" x2="0.01" y2="7.38" stroke="#c3c2b7" stroke-width="0.06" marker-end="url(#arrow)"/>
-  <text x="0.16" y="4.05" text-anchor="middle" font-size="0.22" fill="#c3c2b7" paint-order="stroke" stroke="#fcfcfb" stroke-width="0.08">consumes</text>
-  <line x1="4.72" y1="0.60" x2="7.21" y2="3.06" stroke="#c3c2b7" stroke-width="0.06" marker-end="url(#arrow)"/>
-  <text x="5.97" y="1.71" text-anchor="middle" font-size="0.22" fill="#c3c2b7" paint-order="stroke" stroke="#fcfcfb" stroke-width="0.08">contains</text>
-  <line x1="3.67" y1="0.60" x2="0.32" y2="7.38" stroke="#c3c2b7" stroke-width="0.06" marker-end="url(#arrow)"/>
-  <text x="1.99" y="3.87" text-anchor="middle" font-size="0.22" fill="#c3c2b7" paint-order="stroke" stroke="#fcfcfb" stroke-width="0.08">provides</text>
-  <rect x="-0.96" y="-0.44" width="2.60" height="1.40" rx="0.12" data-ref="component:cancellation" fill="#fcfcfb" stroke="#c3c2b7" stroke-width="0.05"/>
-  <text x="0.34" y="0.14" text-anchor="middle" font-size="0.32" font-weight="600" fill="#0b0b0b">Cancellation</text>
-  <text x="0.34" y="0.50" text-anchor="middle" font-size="0.24" fill="#0b0b0b" textLength="2.40" lengthAdjust="spacingAndGlyphs">component:cancellation</text>
-  <rect x="6.62" y="3.06" width="2.60" height="1.40" rx="0.12" data-ref="component:catalog" fill="#fcfcfb" stroke="#c3c2b7" stroke-width="0.05"/>
-  <text x="7.92" y="3.64" text-anchor="middle" font-size="0.32" font-weight="600" fill="#0b0b0b">Catalog</text>
-  <text x="7.92" y="4.00" text-anchor="middle" font-size="0.24" fill="#0b0b0b" textLength="2.40" lengthAdjust="spacingAndGlyphs">component:catalog</text>
-  <rect x="2.71" y="-0.80" width="2.60" height="1.40" rx="0.12" data-ref="component:orders" fill="#fcfcfb" stroke="#c3c2b7" stroke-width="0.05"/>
-  <text x="4.01" y="-0.22" text-anchor="middle" font-size="0.32" font-weight="600" fill="#0b0b0b">Orders</text>
-  <text x="4.01" y="0.14" text-anchor="middle" font-size="0.24" fill="#0b0b0b">component:orders</text>
-  <rect x="-1.02" y="15.10" width="2.60" height="1.40" rx="0.12" data-ref="resource:order-cache" fill="#fcfcfb" stroke="#c3c2b7" stroke-width="0.05" stroke-dasharray="0.16 0.12"/>
-  <text x="0.28" y="15.68" text-anchor="middle" font-size="0.32" font-weight="600" fill="#0b0b0b">Order cache</text>
-  <text x="0.28" y="16.04" text-anchor="middle" font-size="0.24" fill="#0b0b0b" textLength="2.40" lengthAdjust="spacingAndGlyphs">resource:order-cache</text>
-  <rect x="-1.32" y="7.38" width="2.60" height="1.40" rx="0.12" data-ref="seam:order-events" fill="#fcfcfb" stroke="#c3c2b7" stroke-width="0.05"/>
-  <text x="-0.02" y="7.96" text-anchor="middle" font-size="0.32" font-weight="600" fill="#0b0b0b">Order events</text>
-  <text x="-0.02" y="8.32" text-anchor="middle" font-size="0.24" fill="#0b0b0b" textLength="2.40" lengthAdjust="spacingAndGlyphs">seam:order-events</text>
+  <line x1="8.93" y1="4.50" x2="11.28" y2="7.06" stroke="#c3c2b7" stroke-width="0.06" marker-end="url(#arrow)"/>
+  <text x="10.10" y="5.66" text-anchor="middle" font-size="0.22" fill="#c3c2b7" paint-order="stroke" stroke="#fcfcfb" stroke-width="0.08">contains</text>
+  <line x1="1.05" y1="0.96" x2="3.31" y2="3.20" stroke="#c3c2b7" stroke-width="0.06" marker-end="url(#arrow)"/>
+  <text x="2.18" y="1.96" text-anchor="middle" font-size="0.22" fill="#c3c2b7" paint-order="stroke" stroke="#fcfcfb" stroke-width="0.08">contains</text>
+  <line x1="1.64" y1="0.84" x2="6.98" y2="3.22" stroke="#c3c2b7" stroke-width="0.06" marker-end="url(#arrow)"/>
+  <text x="4.31" y="1.91" text-anchor="middle" font-size="0.22" fill="#c3c2b7" paint-order="stroke" stroke="#fcfcfb" stroke-width="0.08">contains</text>
+  <line x1="7.58" y1="4.50" x2="0.68" y2="11.38" stroke="#c3c2b7" stroke-width="0.06" marker-end="url(#arrow)"/>
+  <text x="4.13" y="7.82" text-anchor="middle" font-size="0.22" fill="#c3c2b7" paint-order="stroke" stroke="#fcfcfb" stroke-width="0.08">declares</text>
+  <line x1="10.62" y1="8.23" x2="1.28" y2="11.61" stroke="#c3c2b7" stroke-width="0.06" marker-end="url(#arrow)"/>
+  <text x="5.95" y="9.80" text-anchor="middle" font-size="0.22" fill="#c3c2b7" paint-order="stroke" stroke="#fcfcfb" stroke-width="0.08">calls</text>
+  <line x1="7.94" y1="4.50" x2="0.75" y2="19.30" stroke="#c3c2b7" stroke-width="0.06" marker-end="url(#arrow)"/>
+  <text x="4.35" y="11.78" text-anchor="middle" font-size="0.22" fill="#c3c2b7" paint-order="stroke" stroke="#fcfcfb" stroke-width="0.08">depends_on</text>
+  <line x1="8.09" y1="4.50" x2="3.97" y2="19.56" stroke="#c3c2b7" stroke-width="0.06" marker-end="url(#arrow)"/>
+  <text x="6.03" y="11.91" text-anchor="middle" font-size="0.22" fill="#c3c2b7" paint-order="stroke" stroke="#fcfcfb" stroke-width="0.08">depends_on</text>
+  <rect x="-0.96" y="-0.44" width="2.60" height="1.40" rx="0.12" data-ref="component:acme" fill="#fcfcfb" stroke="#c3c2b7" stroke-width="0.05"/>
+  <text x="0.34" y="0.14" text-anchor="middle" font-size="0.32" font-weight="600" fill="#0b0b0b">ACME</text>
+  <text x="0.34" y="0.50" text-anchor="middle" font-size="0.24" fill="#0b0b0b">component:acme</text>
+  <rect x="10.62" y="7.06" width="2.60" height="1.40" rx="0.12" data-ref="component:cancellation" fill="#fcfcfb" stroke="#c3c2b7" stroke-width="0.05"/>
+  <text x="11.92" y="7.64" text-anchor="middle" font-size="0.32" font-weight="600" fill="#0b0b0b">Cancellation</text>
+  <text x="11.92" y="8.00" text-anchor="middle" font-size="0.24" fill="#0b0b0b" textLength="2.40" lengthAdjust="spacingAndGlyphs">component:cancellation</text>
+  <rect x="2.71" y="3.20" width="2.60" height="1.40" rx="0.12" data-ref="component:catalog" fill="#fcfcfb" stroke="#c3c2b7" stroke-width="0.05"/>
+  <text x="4.01" y="3.78" text-anchor="middle" font-size="0.32" font-weight="600" fill="#0b0b0b">Catalog</text>
+  <text x="4.01" y="4.14" text-anchor="middle" font-size="0.24" fill="#0b0b0b" textLength="2.40" lengthAdjust="spacingAndGlyphs">component:catalog</text>
+  <rect x="6.98" y="3.10" width="2.60" height="1.40" rx="0.12" data-ref="component:orders" fill="#fcfcfb" stroke="#c3c2b7" stroke-width="0.05"/>
+  <text x="8.28" y="3.68" text-anchor="middle" font-size="0.32" font-weight="600" fill="#0b0b0b">Orders</text>
+  <text x="8.28" y="4.04" text-anchor="middle" font-size="0.24" fill="#0b0b0b">component:orders</text>
+  <rect x="-1.32" y="11.38" width="2.60" height="1.40" rx="0.12" data-ref="interface:order-events" fill="#fcfcfb" stroke="#c3c2b7" stroke-width="0.05"/>
+  <text x="-0.02" y="11.96" text-anchor="middle" font-size="0.32" font-weight="600" fill="#0b0b0b">Order events</text>
+  <text x="-0.02" y="12.32" text-anchor="middle" font-size="0.24" fill="#0b0b0b" textLength="2.40" lengthAdjust="spacingAndGlyphs">interface:order-events</text>
+  <rect x="-0.89" y="19.30" width="2.60" height="1.40" rx="0.12" data-ref="resource:order-cache" fill="#fcfcfb" stroke="#c3c2b7" stroke-width="0.05" stroke-dasharray="0.16 0.12"/>
+  <text x="0.41" y="19.88" text-anchor="middle" font-size="0.32" font-weight="600" fill="#0b0b0b">Order cache</text>
+  <text x="0.41" y="20.24" text-anchor="middle" font-size="0.24" fill="#0b0b0b" textLength="2.40" lengthAdjust="spacingAndGlyphs">resource:order-cache</text>
+  <rect x="2.48" y="19.56" width="2.60" height="1.40" rx="0.12" data-ref="resource:order-stream" fill="#fcfcfb" stroke="#c3c2b7" stroke-width="0.05" stroke-dasharray="0.16 0.12"/>
+  <text x="3.78" y="20.14" text-anchor="middle" font-size="0.32" font-weight="600" fill="#0b0b0b">Order stream</text>
+  <text x="3.78" y="20.50" text-anchor="middle" font-size="0.24" fill="#0b0b0b" textLength="2.40" lengthAdjust="spacingAndGlyphs">resource:order-stream</text>
   </svg>
   '''
 # ---
 # name: test_each_format_is_snapshotted_per_fixture[svg-composite]
   '''
   <?xml version="1.0" encoding="UTF-8"?>
-  <svg xmlns="http://www.w3.org/2000/svg" viewBox="-2.29 -1.94 8.51 11.55">
-  <rect x="-2.29" y="-1.94" width="8.51" height="11.55" fill="#fcfcfb"/>
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="-2.32 -1.44 12.63 14.95">
+  <rect x="-2.32" y="-1.44" width="12.63" height="14.95" fill="#fcfcfb"/>
   <defs>
   <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
   <path d="M 0 0 L 10 5 L 0 10 z" fill="#52514e"/>
   </marker>
   </defs>
-  <line x1="0.33" y1="0.96" x2="0.30" y2="3.10" stroke="#c3c2b7" stroke-width="0.06" marker-end="url(#arrow)"/>
-  <text x="0.31" y="1.91" text-anchor="middle" font-size="0.22" fill="#c3c2b7" paint-order="stroke" stroke="#fcfcfb" stroke-width="0.08">consumes</text>
-  <line x1="3.29" y1="0.46" x2="0.91" y2="3.10" stroke="#c3c2b7" stroke-width="0.06" marker-end="url(#arrow)"/>
-  <text x="2.10" y="1.66" text-anchor="middle" font-size="0.22" fill="#c3c2b7" paint-order="stroke" stroke="#fcfcfb" stroke-width="0.08">provides</text>
-  <rect x="-0.96" y="-0.44" width="2.60" height="1.40" rx="0.12" data-ref="component:billing-worker" fill="#fcfcfb" stroke="#c3c2b7" stroke-width="0.05"/>
-  <text x="0.34" y="0.14" text-anchor="middle" font-size="0.32" font-weight="600" fill="#0b0b0b" textLength="2.40" lengthAdjust="spacingAndGlyphs">Billing worker</text>
-  <text x="0.34" y="0.50" text-anchor="middle" font-size="0.24" fill="#0b0b0b" textLength="2.40" lengthAdjust="spacingAndGlyphs">component:billing-worker</text>
-  <rect x="2.62" y="-0.94" width="2.60" height="1.40" rx="0.12" data-ref="component:orders-api" fill="#fcfcfb" stroke="#c3c2b7" stroke-width="0.05"/>
-  <text x="3.92" y="-0.36" text-anchor="middle" font-size="0.32" font-weight="600" fill="#0b0b0b">Orders API</text>
-  <text x="3.92" y="-0.00" text-anchor="middle" font-size="0.24" fill="#0b0b0b" textLength="2.40" lengthAdjust="spacingAndGlyphs">component:orders-api</text>
-  <rect x="-1.29" y="7.20" width="2.60" height="1.40" rx="0.12" data-ref="external:payment-provider" fill="#fcfcfb" stroke="#c3c2b7" stroke-width="0.05"/>
-  <text x="0.01" y="7.78" text-anchor="middle" font-size="0.32" font-weight="600" fill="#0b0b0b" textLength="2.40" lengthAdjust="spacingAndGlyphs">Payment provider</text>
-  <text x="0.01" y="8.14" text-anchor="middle" font-size="0.24" fill="#0b0b0b" textLength="2.40" lengthAdjust="spacingAndGlyphs">external:payment-provider</text>
-  <rect x="-1.02" y="3.10" width="2.60" height="1.40" rx="0.12" data-ref="seam:invoice-events" fill="#fcfcfb" stroke="#c3c2b7" stroke-width="0.05"/>
-  <text x="0.28" y="3.68" text-anchor="middle" font-size="0.32" font-weight="600" fill="#0b0b0b" textLength="2.40" lengthAdjust="spacingAndGlyphs">Invoice events</text>
-  <text x="0.28" y="4.04" text-anchor="middle" font-size="0.24" fill="#0b0b0b" textLength="2.40" lengthAdjust="spacingAndGlyphs">seam:invoice-events</text>
+  <line x1="1.06" y1="0.96" x2="3.21" y2="3.06" stroke="#c3c2b7" stroke-width="0.06" marker-end="url(#arrow)"/>
+  <text x="2.13" y="1.89" text-anchor="middle" font-size="0.22" fill="#c3c2b7" paint-order="stroke" stroke="#fcfcfb" stroke-width="0.08">contains</text>
+  <line x1="1.64" y1="0.88" x2="6.71" y2="3.29" stroke="#c3c2b7" stroke-width="0.06" marker-end="url(#arrow)"/>
+  <text x="4.18" y="1.96" text-anchor="middle" font-size="0.22" fill="#c3c2b7" paint-order="stroke" stroke="#fcfcfb" stroke-width="0.08">contains</text>
+  <line x1="6.71" y1="4.58" x2="1.28" y2="7.41" stroke="#c3c2b7" stroke-width="0.06" marker-end="url(#arrow)"/>
+  <text x="3.99" y="5.87" text-anchor="middle" font-size="0.22" fill="#c3c2b7" paint-order="stroke" stroke="#fcfcfb" stroke-width="0.08">declares</text>
+  <line x1="3.28" y1="4.46" x2="0.62" y2="7.38" stroke="#c3c2b7" stroke-width="0.06" marker-end="url(#arrow)"/>
+  <text x="1.95" y="5.80" text-anchor="middle" font-size="0.22" fill="#c3c2b7" paint-order="stroke" stroke="#fcfcfb" stroke-width="0.08">calls</text>
+  <line x1="7.33" y1="4.60" x2="0.97" y2="11.10" stroke="#c3c2b7" stroke-width="0.06" marker-end="url(#arrow)"/>
+  <text x="4.15" y="7.73" text-anchor="middle" font-size="0.22" fill="#c3c2b7" paint-order="stroke" stroke="#fcfcfb" stroke-width="0.08">calls</text>
+  <rect x="-0.96" y="-0.44" width="2.60" height="1.40" rx="0.12" data-ref="component:acme" fill="#fcfcfb" stroke="#c3c2b7" stroke-width="0.05"/>
+  <text x="0.34" y="0.14" text-anchor="middle" font-size="0.32" font-weight="600" fill="#0b0b0b">ACME</text>
+  <text x="0.34" y="0.50" text-anchor="middle" font-size="0.24" fill="#0b0b0b">component:acme</text>
+  <rect x="2.62" y="3.06" width="2.60" height="1.40" rx="0.12" data-ref="component:billing-worker" fill="#fcfcfb" stroke="#c3c2b7" stroke-width="0.05"/>
+  <text x="3.92" y="3.64" text-anchor="middle" font-size="0.32" font-weight="600" fill="#0b0b0b" textLength="2.40" lengthAdjust="spacingAndGlyphs">Billing worker</text>
+  <text x="3.92" y="4.00" text-anchor="middle" font-size="0.24" fill="#0b0b0b" textLength="2.40" lengthAdjust="spacingAndGlyphs">component:billing-worker</text>
+  <rect x="6.71" y="3.20" width="2.60" height="1.40" rx="0.12" data-ref="component:orders-api" fill="#fcfcfb" stroke="#c3c2b7" stroke-width="0.05"/>
+  <text x="8.01" y="3.78" text-anchor="middle" font-size="0.32" font-weight="600" fill="#0b0b0b">Orders API</text>
+  <text x="8.01" y="4.14" text-anchor="middle" font-size="0.24" fill="#0b0b0b" textLength="2.40" lengthAdjust="spacingAndGlyphs">component:orders-api</text>
+  <rect x="-1.02" y="11.10" width="2.60" height="1.40" rx="0.12" data-ref="external:payment-provider" fill="#fcfcfb" stroke="#c3c2b7" stroke-width="0.05"/>
+  <text x="0.28" y="11.68" text-anchor="middle" font-size="0.32" font-weight="600" fill="#0b0b0b" textLength="2.40" lengthAdjust="spacingAndGlyphs">Payment provider</text>
+  <text x="0.28" y="12.04" text-anchor="middle" font-size="0.24" fill="#0b0b0b" textLength="2.40" lengthAdjust="spacingAndGlyphs">external:payment-provider</text>
+  <rect x="-1.32" y="7.38" width="2.60" height="1.40" rx="0.12" data-ref="interface:invoice-events" fill="#fcfcfb" stroke="#c3c2b7" stroke-width="0.05"/>
+  <text x="-0.02" y="7.96" text-anchor="middle" font-size="0.32" font-weight="600" fill="#0b0b0b" textLength="2.40" lengthAdjust="spacingAndGlyphs">Invoice events</text>
+  <text x="-0.02" y="8.32" text-anchor="middle" font-size="0.24" fill="#0b0b0b" textLength="2.40" lengthAdjust="spacingAndGlyphs">interface:invoice-events</text>
   </svg>
   '''
 # ---

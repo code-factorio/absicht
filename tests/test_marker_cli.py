@@ -10,7 +10,7 @@ composite fixture (the multi-repo system it was built for):
 - a watermark already in the marker survives a resync;
 - a ``.absicht/`` directory at the repo root is ``USAGE``: sync never converts
   a store's own repo into a marker-holding one;
-- ``--json`` is the ``schema_version`` envelope of docs/tasks/00-conventions.md,
+- ``--json`` is the ``format_version`` envelope of docs/tasks/00-conventions.md,
   on either side of the command name (docs/adr/0001).
 
 What the check tests pin, per docs/tasks/45-marker-check.md:
@@ -29,7 +29,7 @@ come from a repo that is not this repository's own history):
   head at invocation time, with the rest of the marker untouched;
 - an untracked unit, a repo with no marker, a milestone the store does not
   have: each ``USAGE``, in its own words;
-- ``--json`` is the same ``schema_version`` envelope sync writes.
+- ``--json`` is the same ``format_version`` envelope sync writes.
 """
 
 from __future__ import annotations
@@ -46,20 +46,16 @@ from absicht.cli import app
 from absicht.cli._common import ExitCode
 from absicht.codec import dump_singleton, parse_singleton
 from absicht.load import resolve_store
-from absicht.models import SCHEMA_VERSION, Marker, UnitWatermark
+from absicht.models.design import FORMAT_VERSION
+from absicht.models.marker import Marker, Watermark
 
 runner = CliRunner()
 
 STORE = Path(__file__).parent / "fixtures" / "systems" / "composite"
 
-_MILESTONE = """---
-id: milestone:m1
-title: Orders v1
-state: specified
----
-"""
-"""The milestone the stamp tests land at: the composite fixture ships none,
-and a stamp needs a milestone the store actually has."""
+MILESTONE = "milestone:invoicing"
+"""The milestone the stamp tests land at: a stamp needs a milestone the store
+actually has, and this is the composite fixture's own."""
 
 
 def _repo(tmp_path: Path, name: str) -> Path:
@@ -91,7 +87,7 @@ def _at_a_stale_path(repo: Path, path: str) -> None:
         dump_singleton(
             Marker(
                 design=_marker(repo).design,
-                units=(UnitWatermark(id="component:orders-api", path=path),),
+                units=(Watermark(id="component:orders-api", path=path),),
             )
         ),
         encoding="utf-8",
@@ -110,13 +106,11 @@ def _run_git(repo: Path, *args: str) -> str:
 
 
 def _store_under_git(tmp_path: Path) -> Path:
-    """The composite fixture in a throwaway git repo, with the stamp tests'
-    milestone added: `design_rev` is the design store's HEAD, so the store
-    must sit in a repository that is not this repository's own."""
+    """The composite fixture in a throwaway git repo: `design_rev` is the
+    design store's HEAD, so the store must sit in a repository that is not
+    this repository's own."""
     store = tmp_path / "design"
     shutil.copytree(STORE, store)
-    (store / "milestones").mkdir()
-    (store / "milestones" / "m1.md").write_text(_MILESTONE, encoding="utf-8")
     _run_git(store, "init", "-q", "-b", "main")
     # Commits must work with no global git identity (a bare CI machine) and
     # must not try to sign.
@@ -128,7 +122,7 @@ def _store_under_git(tmp_path: Path) -> Path:
     return store
 
 
-def _stamp(store: Path, repo: Path, unit: str, *flags: str, milestone: str = "milestone:m1") -> Any:
+def _stamp(store: Path, repo: Path, unit: str, *flags: str, milestone: str = MILESTONE) -> Any:
     return runner.invoke(
         app,
         [
@@ -158,7 +152,7 @@ def test_sync_writes_a_marker_that_leads_back_to_the_store(tmp_path: Path) -> No
 
     assert result.exit_code == ExitCode.OK
     assert result.stdout.splitlines() == [f"wrote {repo / '.absicht'} (1 unit)"]
-    assert _marker(repo).units == (UnitWatermark(id="component:orders-api", path="api"),)
+    assert _marker(repo).units == (Watermark(id="component:orders-api", path="api"),)
     assert resolve_store(repo / ".absicht") == STORE
 
 
@@ -168,9 +162,7 @@ def test_a_watermark_in_the_marker_survives_a_resync(tmp_path: Path) -> None:
     stamped = Marker(
         design=_marker(repo).design,
         units=(
-            UnitWatermark(
-                id="component:orders-api", path="api", at="milestone:m1", design_rev="deadbeef"
-            ),
+            Watermark(id="component:orders-api", path="api", at=MILESTONE, design_rev="deadbeef"),
         ),
     )
     (repo / ".absicht").write_text(dump_singleton(stamped), encoding="utf-8")
@@ -199,7 +191,7 @@ def test_json_envelopes_the_units_written(tmp_path: Path) -> None:
     result = _sync(repo, "--json")
 
     assert json.loads(result.stdout) == {
-        "schema_version": SCHEMA_VERSION,
+        "format_version": FORMAT_VERSION,
         "out": str(repo / ".absicht"),
         "units": [{"id": "component:orders-api", "path": "api", "at": None, "design_rev": None}],
     }
@@ -211,9 +203,17 @@ def test_json_is_accepted_on_either_side_of_the_command(tmp_path: Path) -> None:
     in test_cli.py, which only covers commands without a body."""
     ahead = runner.invoke(
         app,
-        ["--json", "--store", str(STORE), "marker", "sync", "--repo", str(_repo(tmp_path, "a"))],
+        [
+            "--json",
+            "--store",
+            str(STORE),
+            "marker",
+            "sync",
+            "--repo",
+            str(_repo(tmp_path, "a/orders")),
+        ],
     )
-    behind = _sync(_repo(tmp_path, "b"), "--json")
+    behind = _sync(_repo(tmp_path, "b/orders"), "--json")
 
     assert ahead.exit_code == ExitCode.OK
     assert behind.exit_code == ExitCode.OK
@@ -242,7 +242,7 @@ def test_a_unit_the_store_gained_is_a_finding(tmp_path: Path) -> None:
     component = store / "components" / "orders-api.md"
     component.write_text(
         component.read_text(encoding="utf-8").replace(
-            "- acme/orders#api\n", "- acme/orders#api\n- acme/orders#api/v2\n"
+            "- orders#api\n", "- orders#api\n- orders#api/v2\n"
         ),
         encoding="utf-8",
     )
@@ -297,7 +297,7 @@ def test_json_envelopes_the_findings(tmp_path: Path) -> None:
     result = _check(repo, "--json")
 
     payload = json.loads(result.stdout)
-    assert payload["schema_version"] == SCHEMA_VERSION
+    assert payload["format_version"] == FORMAT_VERSION
     assert [f["rule_id"] for f in payload["findings"]] == ["marker/moved-unit"]
     assert payload["findings"][0]["ref"] == "component:orders-api"
 
@@ -320,10 +320,10 @@ def test_stamp_moves_the_watermark_to_the_design_head_at_invocation_time(
 
     assert result.exit_code == ExitCode.OK
     assert result.stdout.splitlines() == [
-        f"stamped component:orders-api at milestone:m1 in {repo / '.absicht'}"
+        f"stamped component:orders-api at {MILESTONE} in {repo / '.absicht'}"
     ]
     assert _marker(repo).units == (
-        UnitWatermark(id="component:orders-api", path="api", at="milestone:m1", design_rev=head),
+        Watermark(id="component:orders-api", path="api", at=MILESTONE, design_rev=head),
     )
 
 
@@ -377,13 +377,13 @@ def test_stamp_json_envelopes_the_watermark(tmp_path: Path) -> None:
     result = _stamp(store, repo, "component:orders-api", "--json")
 
     assert json.loads(result.stdout) == {
-        "schema_version": SCHEMA_VERSION,
+        "format_version": FORMAT_VERSION,
         "out": str(repo / ".absicht"),
         "units": [
             {
                 "id": "component:orders-api",
                 "path": "api",
-                "at": "milestone:m1",
+                "at": MILESTONE,
                 "design_rev": head,
             }
         ],

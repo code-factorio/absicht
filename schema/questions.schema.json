@@ -10,7 +10,72 @@
       "title": "Confidence",
       "type": "string"
     },
+    "Lifecycle": {
+      "description": "Whether an element is still how the system works.\n\nA second axis to `state`, which says how well specified it is: an\ninterface can be perfectly `specified` and no longer true.",
+      "enum": [
+        "active",
+        "superseded"
+      ],
+      "title": "Lifecycle",
+      "type": "string"
+    },
+    "Relates": {
+      "additionalProperties": false,
+      "description": "One outgoing edge, as the element that owns it spells it.\n\nNo `source_id`: the file the edge is written in is the source, and saying\nso twice invites the two to disagree.",
+      "properties": {
+        "to": {
+          "pattern": "^[a-z]+:[a-z0-9][a-z0-9-]*$",
+          "title": "To",
+          "type": "string"
+        },
+        "type": {
+          "$ref": "#/$defs/RelationshipType"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        },
+        "technology": {
+          "default": "",
+          "title": "Technology",
+          "type": "string"
+        }
+      },
+      "required": [
+        "to",
+        "type"
+      ],
+      "title": "Relates",
+      "type": "object"
+    },
+    "RelationshipType": {
+      "description": "The edge kinds a checker branches on. Add one only if it does.\n\nThe architecture side owns the trace: a component says which requirement\nit implements, never the reverse. The architecture changes more often, so\nthe edge moves with the side that moves.",
+      "enum": [
+        "relates_to",
+        "implements",
+        "satisfies",
+        "constrained_by",
+        "realizes",
+        "calls",
+        "depends_on",
+        "specifies",
+        "derives_from",
+        "refines",
+        "conflicts_with"
+      ],
+      "title": "RelationshipType",
+      "type": "string"
+    },
     "ResolutionMethod": {
+      "description": "The way out. A question without one is a wish.",
       "enum": [
         "ask",
         "spike",
@@ -20,8 +85,18 @@
       "title": "ResolutionMethod",
       "type": "string"
     },
+    "Reversibility": {
+      "description": "The cost of being wrong. It sets how far an agent may go alone.",
+      "enum": [
+        "cheap",
+        "costly",
+        "one_way"
+      ],
+      "title": "Reversibility",
+      "type": "string"
+    },
     "State": {
-      "description": "How complete an element is, and what an agent may do about it.",
+      "description": "How complete an element is, and what an agent may do about it.\n\nThis is the field that lets a gap be deliberate. `specified` and\n`unknown` are both legal, and they instruct the agent differently, so\nsilence never has to stand for either one.",
       "enum": [
         "specified",
         "constrained",
@@ -35,7 +110,6 @@
     }
   },
   "additionalProperties": false,
-  "description": "An `unknown` with an owner and a way out. Without those it is a wish.",
   "properties": {
     "id": {
       "pattern": "^[a-z]+:[a-z0-9][a-z0-9-]*$",
@@ -49,11 +123,38 @@
     },
     "state": {
       "$ref": "#/$defs/State",
-      "default": "unknown"
+      "default": "unknown",
+      "description": "`unknown` by default, so an element nobody finished never reads as\nsettled. Saying nothing and saying \"implement as written\" must differ."
     },
     "confidence": {
       "$ref": "#/$defs/Confidence",
       "default": "assumed"
+    },
+    "reversibility": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Reversibility"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Set it where the agent decides. `check` warns on a `constrained` or\n`delegated` element without one: the agent cannot judge how far to go."
+    },
+    "lifecycle": {
+      "$ref": "#/$defs/Lifecycle",
+      "default": "active"
+    },
+    "supersedes": {
+      "default": [],
+      "description": "Recorded on the replacement only. A stored `superseded_by` would be a\nsecond copy of one fact, and the two would disagree.",
+      "items": {
+        "pattern": "^[a-z]+:[a-z0-9][a-z0-9-]*$",
+        "type": "string"
+      },
+      "title": "Supersedes",
+      "type": "array"
     },
     "owner": {
       "anyOf": [
@@ -77,7 +178,7 @@
     },
     "source": {
       "default": "",
-      "description": "Path within the store. Written by the loader.",
+      "description": "Path within the store.",
       "title": "Source",
       "type": "string"
     },
@@ -87,31 +188,24 @@
       "title": "Body",
       "type": "string"
     },
+    "question": {
+      "minLength": 1,
+      "title": "Question",
+      "type": "string"
+    },
     "method": {
       "$ref": "#/$defs/ResolutionMethod",
       "default": "ask"
     },
     "blocks": {
       "default": [],
+      "description": "What waits on the answer. Urgency is read from here, not from a date\nsomebody guessed and nobody revisits.",
       "items": {
         "pattern": "^[a-z]+:[a-z0-9][a-z0-9-]*$",
         "type": "string"
       },
       "title": "Blocks",
       "type": "array"
-    },
-    "due_on": {
-      "anyOf": [
-        {
-          "format": "date",
-          "type": "string"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "default": null,
-      "title": "Due On"
     },
     "resolved_by": {
       "anyOf": [
@@ -125,11 +219,20 @@
       ],
       "default": null,
       "title": "Resolved By"
+    },
+    "relates": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/Relates"
+      },
+      "title": "Relates",
+      "type": "array"
     }
   },
   "required": [
     "id",
-    "title"
+    "title",
+    "question"
   ],
   "title": "Question",
   "type": "object"

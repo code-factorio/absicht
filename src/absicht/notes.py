@@ -1,8 +1,8 @@
 """The capture channel: add, list, promote and drop the notes under ``notes/``.
 
-A note is deliberately not an element (addendum §6): not part of the
-``Design``, no state, referenced by nothing, never packet input — an agent
-never sees a note. This module is the whole lifecycle around that exclusion:
+A note is deliberately not an element: not part of the ``Design``, no state,
+referenced by nothing, never packet input — an agent never sees a note. This
+module is the whole lifecycle around that exclusion:
 
 - ``add`` captures with near-zero friction: no title, no owner, no kind —
   the moment authoring a note asks for classification it stops being used;
@@ -13,16 +13,15 @@ never sees a note. This module is the whole lifecycle around that exclusion:
 - ``drop`` deletes a note that never mattered, and refuses a promoted one.
 
 The inbox's *reading* lives here too — ``age_text`` and ``inbox_headline``,
-the pressure vocabulary addendum §6 asks for ("age is surfaced, not just
-count") — so the terminal list and the site's inbox page spell one answer,
-never two that drift.
+the pressure vocabulary a bare count is not — so the terminal list and the
+site's inbox page spell one answer, never two that drift.
 
 Identity is the one place in the store not derived from a slug: ``note:`` +
 six lowercase base36 characters, drawn at random and collision-checked
 against the store, never asked for — editing a note must not change its
-identity, and asking for a name at capture time is the friction the addendum
-forbids. The draw is injectable because a test must be able to watch a
-collision re-draw; ids are identity, not secrets.
+identity, and asking for a name at capture time is the friction that stops
+notes being written at all. The draw is injectable because a test must be
+able to watch a collision re-draw; ids are identity, not secrets.
 """
 
 from __future__ import annotations
@@ -36,8 +35,12 @@ from pydantic import ValidationError
 
 from absicht.codec import dump_element
 from absicht.load import StoreResolutionError, load_store, resolve_store
-from absicht.models import Element, Note, Ref
+from absicht.models.design import Element, Note, Ref
 from absicht.new import NewError, create, editor_argv, run_editor, scaffold
+
+_DIRECTORY = "notes"
+"""Where a note file lives. A note's path is its id, so nothing has to store
+one: `notes/<slug>.md` for `note:<slug>`."""
 
 _ALPHABET = "0123456789abcdefghijklmnopqrstuvwxyz"
 """Base36, lowercase — the character set a note id's slug draws from."""
@@ -65,8 +68,8 @@ def add(
     randomness reads — the clock belongs to the caller the way it does for
     every authoring command, and an injectable ``rng`` is what lets a test
     watch a collision re-draw. ``ref`` is validated as a ``Ref`` and never
-    resolved: capture first (§6's friction rule), the reader can judge an
-    anchor that names nothing yet.
+    resolved: capture first, the reader can judge an anchor that names
+    nothing yet.
     """
     root = _root(store)
     try:
@@ -77,17 +80,16 @@ def add(
     try:
         note = Note(
             id=f"note:{slug}",
-            created=created,
-            ref=ref,
-            body=body,
-            source=f"notes/{slug}.md",
+            created_on=created,
+            about=(ref,) if ref else (),
+            text=body,
         )
     except ValidationError as exc:
         problems = "; ".join(
             f"{error['loc'][0]}: {error['msg']}" for error in exc.errors(include_url=False)
         )
         raise NoteError(f"cannot add note: {problems}") from exc
-    path = root / "notes" / f"{slug}.md"
+    path = _path(root, note)
     # The two drift halves `ab new` guards: an id the loaded store holds, and
     # a file sitting at the path about to be written — the same condition in
     # a healthy store, different ones once the two have drifted apart.
@@ -119,7 +121,7 @@ def select(
     chosen = [
         note
         for note in _notes(root)
-        if (include_promoted or note.promoted_to is None) and (ref is None or note.ref == ref)
+        if (include_promoted or note.promoted_to is None) and (ref is None or ref in note.about)
     ]
     return tuple(sorted(chosen, key=inbox_order))
 
@@ -142,9 +144,8 @@ def promote(store: Path, note_id: str, kind: str, slug: str) -> Element:
         create(root, element)
     except NewError as exc:
         raise NoteError(str(exc)) from exc
-    assert note.source, "a loaded note always carries its store-relative path"
     updated = note.model_copy(update={"promoted_to": element.id})
-    (root / note.source).write_text(dump_element(updated), encoding="utf-8")
+    _path(root, note).write_text(dump_element(updated), encoding="utf-8")
     return element
 
 
@@ -159,7 +160,7 @@ def drop(store: Path, note_id: str) -> None:
             f"{note.id} was promoted to {note.promoted_to} and cannot be dropped: "
             "the record of what it became must survive"
         )
-    (root / note.source).unlink()
+    _path(root, note).unlink()
 
 
 # --- the inbox's reading -----------------------------------------------------------
@@ -169,7 +170,7 @@ def inbox_order(note: Note) -> tuple[date, str]:
     """The inbox's deterministic order: oldest first, the id as tiebreak —
     the one spelling of "oldest first" both readers (`ab note list`, the
     site's inbox page) sort by, so they cannot disagree."""
-    return (note.created, note.id)
+    return (note.created_on, note.id)
 
 
 def age_text(created: date, today: date) -> str:
@@ -195,14 +196,15 @@ def age_text(created: date, today: date) -> str:
 
 def inbox_headline(selected: Sequence[Note], today: date) -> str:
     """`N notes, oldest X`: the count and the age of the oldest, nothing else
-    — §6's "useful pressure", shared by the terminal list and the site's
-    inbox page so the two spell one headline. ``selected`` arrives already in
-    ``inbox_order`` (both callers sort with it), so the first entry *is* the
-    oldest."""
+    — the useful pressure a bare count is not, shared by the terminal list
+    and the site's inbox page so the two spell one headline. ``selected``
+    arrives already in ``inbox_order`` (both callers sort with it), so the
+    first entry *is* the oldest."""
     if not selected:
         return "0 notes"
     count = len(selected)
-    return f"{count} note{'s' if count != 1 else ''}, oldest {age_text(selected[0].created, today)}"
+    oldest = age_text(selected[0].created_on, today)
+    return f"{count} note{'s' if count != 1 else ''}, oldest {oldest}"
 
 
 def _plural(count: int, unit: str) -> str:
@@ -215,6 +217,12 @@ def _root(store: Path) -> Path:
         return resolve_store(store)
     except StoreResolutionError as exc:
         raise NoteError(str(exc)) from exc
+
+
+def _path(root: Path, note: Note) -> Path:
+    """Where a note's file is. Derived, never stored: a note has no `source`
+    because its id already says where it lives."""
+    return root / _DIRECTORY / f"{note.id.removeprefix('note:')}.md"
 
 
 def _notes(root: Path) -> tuple[Note, ...]:

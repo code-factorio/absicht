@@ -1,15 +1,16 @@
 ---
 id: behavior:order-placed
-title: Order placed
+title: Placing an order (the first cut)
 state: specified
+confidence: reviewed
+owner: dana
 lifecycle: superseded
-trigger: A customer places an order.
-realizes:
-- requirement:cancel-orders
+trigger: The customer confirms a basket.
 observations:
 - id: behavior:order-placed#obs-1
-  statement: The order appears in the order cache
-  at: resource:order-cache
+  statement: The order is written with state placed.
+  at: component:orders
   outcome: must
-  timing: immediate
 ---
+Kept because it is the record of what was expected before. It is not how the
+system works any more.

@@ -18,7 +18,7 @@ from absicht.findings import (
     Severity,
     finding,
 )
-from absicht.models import SCHEMA_VERSION
+from absicht.models.design import FORMAT_VERSION
 
 
 def _finding(
@@ -139,7 +139,7 @@ def test_the_three_filters_compose() -> None:
 def test_render_json_is_the_versioned_envelope_over_plain_findings() -> None:
     rendered = MIXED.render_json()
 
-    assert rendered["schema_version"] == SCHEMA_VERSION
+    assert rendered["format_version"] == FORMAT_VERSION
     assert rendered["findings"][0] == {
         "rule_id": "a/error",
         "severity": "error",

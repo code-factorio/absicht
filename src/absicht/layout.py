@@ -9,20 +9,19 @@ The algorithm is a hand-rolled layered layout, and that is a deliberate call
 rather than thrift. The alternative was ``networkx.spring_layout``, which
 would pull NumPy in for a bar the spec itself sets at "stable and legible
 enough for a generated diagram"; the graphs here are small and mostly
-hierarchical via ``contains``, which a layered layout states directly.
-Components are ranked by ``contains`` depth and spread along columns by a
-depth-first walk of the ``contains`` forest in id order; seams sit one rank
-below the deepest component, externals one below that, resources one below
-the externals — the boundary the diagram's own shapes underline. Determinism
-is by
-construction — no iteration order a dict could choose differently, no clock —
-and the only input beyond the graph is ``random.Random(seed)``, drawn once
-per node in id order: that is what makes ``--seed`` honest (same seed, same
-picture; another seed, a differently wobbled one) while the wobble stays far
-too small to move a box anywhere near its neighbours.
+hierarchical via component nesting, which a layered layout states directly.
+Components are ranked by nesting depth and spread along columns by a
+depth-first walk of the nesting forest in id order; interfaces sit one rank
+below the deepest component, external services one below that, resources one
+below those — the boundary the diagram's own shapes underline. Determinism is
+by construction — no iteration order a dict could choose differently, no
+clock — and the only input beyond the graph is ``random.Random(seed)``, drawn
+once per node in id order: that is what makes ``--seed`` honest (same seed,
+same picture; another seed, a differently wobbled one) while the wobble stays
+far too small to move a box anywhere near its neighbours.
 
 This module owns reading and writing ``layout.yaml`` through the codec, the
-same way ``absicht.init`` owns ``system.yaml``: the file is a singleton the
+same way ``absicht.init`` owns ``design.yaml``: the file is a singleton the
 command produces, not an element collection ``absicht.load`` walks.
 """
 
@@ -33,7 +32,8 @@ from collections.abc import Iterable
 from pathlib import Path
 
 from absicht.codec import CodecError, dump_singleton, parse_singleton
-from absicht.models import Design, Layout, Position, Ref
+from absicht.models.design import Design, Ref
+from absicht.models.layout import Layout, Position
 
 _LAYOUT_FILE = "layout.yaml"
 
@@ -54,23 +54,21 @@ class LayoutError(Exception):
 
 
 def nodes(design: Design) -> tuple[Ref, ...]:
-    """The diagram node set: components, seams, externals and resources, in
-    id order.
+    """The diagram node set: components, interfaces, external services and
+    resources, in id order.
 
     The same boxes `docs/tasks/27-render-diagrams.md` draws, no more: data
-    entities and the prose kinds are not diagram nodes, and `--check` asks
-    exactly "does every one of these have a position". Resources joined the
-    set with `docs/tasks/60-addendum-render.md` — they are drawn at the
-    boundary, outside the design boundary the addendum's §1 argues them into,
-    and `ab layout` positions them like every other node because this one
-    function is the whole node set.
+    entities, libraries and the prose kinds are not diagram nodes, and
+    `--check` asks exactly "does every one of these have a position". A
+    library is drawn nowhere for the reason C4 gives — it crosses no runtime
+    boundary — while a resource is drawn at the boundary, outside the design.
     """
     return tuple(
         sorted(
             (
                 *(component.id for component in design.components),
-                *(seam.id for seam in design.seams),
-                *(external.id for external in design.externals),
+                *(interface.id for interface in design.interfaces),
+                *(service.id for service in design.external_services),
                 *(resource.id for resource in design.resources),
             )
         )
@@ -89,7 +87,7 @@ def compute(design: Design, *, seed: int = 0) -> Layout:
         ref: (rng.uniform(-_JITTER, _JITTER), rng.uniform(-_JITTER, _JITTER))
         for ref in nodes(design)
     }
-    columns, depths = _contains_columns(design)
+    columns, depths = _nesting_columns(design)
     positions = [
         Position(
             ref=ref,
@@ -98,16 +96,19 @@ def compute(design: Design, *, seed: int = 0) -> Layout:
         )
         for ref in sorted(columns)
     ]
-    seam_rank = max(depths.values(), default=-1) + 1
-    positions += _row((seam.id for seam in design.seams), rank=seam_rank, wobble=wobble)
+    boundary = max(depths.values(), default=-1) + 1
     positions += _row(
-        (external.id for external in design.externals), rank=seam_rank + 1, wobble=wobble
+        (interface.id for interface in design.interfaces), rank=boundary, wobble=wobble
     )
-    # Resources take the outermost rank: outside the design boundary, past the
-    # externals — the spatial form of addendum §1's argument, which the
-    # diagram half of `ab render` underlines with their own shape.
     positions += _row(
-        (resource.id for resource in design.resources), rank=seam_rank + 2, wobble=wobble
+        (service.id for service in design.external_services), rank=boundary + 1, wobble=wobble
+    )
+    # Resources take the outermost rank: outside the design boundary, past
+    # the external services — the spatial form of the argument that we do not
+    # design them, which the diagram half of `ab render` underlines with
+    # their own shape.
+    positions += _row(
+        (resource.id for resource in design.resources), rank=boundary + 2, wobble=wobble
     )
     return Layout(positions=tuple(sorted(positions, key=lambda position: position.ref)))
 
@@ -158,23 +159,23 @@ def write_layout(root: Path, pinned: Layout) -> Path:
     return path
 
 
-def _contains_columns(design: Design) -> tuple[dict[Ref, int], dict[Ref, int]]:
-    """Column and depth per component, from a depth-first walk of the
-    ``contains`` forest in id order.
+def _nesting_columns(design: Design) -> tuple[dict[Ref, int], dict[Ref, int]]:
+    """Column and depth per component, from a depth-first walk of the nesting
+    forest in id order.
 
-    A component nothing contains is a root; children are visited in id
+    Nesting is a `parent` on the child, so the forest is built by inverting
+    it. A component with no parent is a root; children are visited in id
     order, so the same forest always yields the same columns. Whatever the
-    walk cannot reach — a ``contains`` cycle, or a child whose parent is not
-    a component in this design — is appended at depth 0 in id order:
-    `check` is the layer that reports a broken graph, layout just has to
-    place it deterministically anyway.
+    walk cannot reach — a nesting cycle, or a child whose parent is not a
+    component in this design — is appended at depth 0 in id order: `check` is
+    the layer that reports a broken graph, layout just has to place it
+    deterministically anyway.
     """
     component_ids = {component.id for component in design.components}
-    children = {
-        component.id: tuple(sorted(child for child in component.contains if child in component_ids))
-        for component in sorted(design.components, key=lambda component: component.id)
-    }
-    contained = {child for kids in children.values() for child in kids}
+    children: dict[Ref, list[Ref]] = {component.id: [] for component in design.components}
+    for component in sorted(design.components, key=lambda component: component.id):
+        if component.parent in component_ids:
+            children[component.parent].append(component.id)
     columns: dict[Ref, int] = {}
     depths: dict[Ref, int] = {}
 
@@ -183,9 +184,10 @@ def _contains_columns(design: Design) -> tuple[dict[Ref, int], dict[Ref, int]]:
             return
         columns[ref] = len(columns)
         depths[ref] = depth
-        for child in children[ref]:
+        for child in sorted(children[ref]):
             place(child, depth + 1)
 
+    contained = {child for kids in children.values() for child in kids}
     for root in sorted(ref for ref in children if ref not in contained):
         place(root, 0)
     for leftover in sorted(set(children) - set(columns)):
@@ -197,8 +199,8 @@ def _row(
     refs: Iterable[Ref], *, rank: int, wobble: dict[Ref, tuple[float, float]]
 ) -> list[Position]:
     """One kind along a single rank, in id order — the flat rows of the
-    layout: nothing in a seam or an external nests, so its place in the row
-    is just its place in the id order."""
+    layout: nothing in an interface or an external service nests, so its
+    place in the row is just its place in the id order."""
     return [
         Position(
             ref=ref,

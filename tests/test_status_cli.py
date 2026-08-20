@@ -5,24 +5,25 @@ fixture in a throwaway git repo (the pattern of tests/test_marker_cli.py:
 watermarks name design revs, so the design must sit in a repository that is
 not this repository's own history):
 
-- a unit with a stale watermark reports the decision and seam changes that
-  landed since it, and one stamped at design head reports clean;
+- a unit with a stale watermark reports the decision and interface changes
+  that landed since it, and one stamped at design head reports clean;
 - a never-stamped watermark is behind by everything: the empty tree is the
   base, not an error;
-- a seam whose consumer's watermark predates the change while the provider's
-  does not is reported as a consumer that has not caught up;
+- an interface whose caller's watermark predates the change while the
+  declaring side's does not is reported as a consumer that has not caught up;
 - ``--behind-only`` drops the clean units, ``--unit`` restricts to one (an
   unknown one is ``USAGE``), ``--since`` compares against the named rev rather
   than head;
 - ``--fail-on-drift`` flips the exit code exactly when drift exists;
-- reference mode without ``--repo`` is ``USAGE``: ``System.units`` names repos
-  by suffix and cannot enumerate them;
+- reference mode without ``--repo`` is ``USAGE``: a marker names repos by
+  suffix and cannot enumerate them;
 - embedded mode, against the clean fixture: implementation coverage and unmet
   ``done_when``, never watermarks, with the reference-mode flags no-ops that
   say so on stderr rather than silently;
-- the store's own files are not evidence of a claim (a story names its own
-  criteria), while a file in an implementing repo that references a criterion
-  is — the weaker, claim-shaped half of ``ab verify``'s done-when rule.
+- the store's own files are not evidence of a claim (a behavior names its own
+  observations), while a file in an implementing repo that references an
+  observation is — the weaker, claim-shaped half of ``ab verify``'s done-when
+  rule.
 """
 
 from __future__ import annotations
@@ -39,44 +40,19 @@ from typer.testing import CliRunner
 from absicht.cli import app
 from absicht.cli._common import ExitCode
 from absicht.codec import dump_singleton, parse_singleton
-from absicht.models import SCHEMA_VERSION, Marker, UnitWatermark
+from absicht.models.design import FORMAT_VERSION
+from absicht.models.marker import Marker, Watermark
 
 runner = CliRunner()
 
 COMPOSITE = Path(__file__).parent / "fixtures" / "systems" / "composite"
 CLEAN = Path(__file__).parent / "fixtures" / "systems" / "clean"
 
-_MILESTONE = """---
-id: milestone:m1
-title: Invoicing v1
-state: specified
-done_when:
-- story:invoice-on-charge#ac-1
----
-"""
-"""The milestone whose ``done_when`` the report judges: the composite fixture
-ships no milestones, and a stamp needs one the store actually has."""
-
-_STORY = """---
-id: story:invoice-on-charge
-title: Invoice on charge
-state: specified
-actor: billing
-outcome: an invoice is emitted when an order is charged
-acceptance:
-- id: story:invoice-on-charge#ac-1
-  when: an order is charged
-  then:
-  - an invoice is emitted
----
-"""
-"""The criterion ``done_when`` points at: the composite fixture ships no
-stories, and a criterion is anchored to one."""
-
 _FIRST_DECISION = """---
 id: decision:invoice-format
 title: Invoice format
 state: specified
+choice: An invoice is a PDF with a machine-readable header.
 applies_to:
 - component:billing-worker
 ---
@@ -86,6 +62,7 @@ _LATER_DECISION = """---
 id: decision:invoice-cadence
 title: Invoice cadence
 state: specified
+choice: One invoice per settled order, never batched.
 applies_to:
 - component:billing-worker
 ---
@@ -106,20 +83,16 @@ def reference(tmp_path: Path) -> tuple[Path, Path, dict[str, str]]:
     commits, and the two implementing repos it names, each synced a marker and
     one of them stamped a rev behind head.
 
-    c1 holds the store as copied; c2 rewrites the seam's front matter; c3 adds
-    the later decision. ``billing``'s watermark is stamped at c1 — stale by
-    both later commits — while ``orders``'s is stamped at head, so the report's
-    two halves (behind, clean) and its consumer lag (provider current,
-    consumer behind) all exist at once.
+    c1 holds the store as copied; c2 rewrites the interface's front matter; c3
+    adds the later decision. ``billing``'s watermark is stamped at c1 — stale
+    by both later commits — while ``orders``'s is stamped at head, so the
+    report's two halves (behind, clean) and its consumer lag (declaring side
+    current, caller behind) all exist at once.
     """
     design = tmp_path / "design"
     shutil.copytree(COMPOSITE, design)
-    (design / "stories").mkdir()
-    (design / "stories" / "invoice-on-charge.md").write_text(_STORY, encoding="utf-8")
     (design / "decisions").mkdir()
     (design / "decisions" / "invoice-format.md").write_text(_FIRST_DECISION, encoding="utf-8")
-    (design / "milestones").mkdir()
-    (design / "milestones" / "m1.md").write_text(_MILESTONE, encoding="utf-8")
     _git(design, "init", "-q", "-b", "main")
     # A bare CI machine has no git identity, and commits must not try to sign.
     _git(design, "config", "user.email", "tests@absicht.invalid")
@@ -137,15 +110,15 @@ def reference(tmp_path: Path) -> tuple[Path, Path, dict[str, str]]:
         assert _sync(design, repo).exit_code == ExitCode.OK
     assert _stamp(design, billing, "component:billing-worker").exit_code == ExitCode.OK
 
-    seam = design / "seams" / "invoice-events.md"
-    seam.write_text(
-        seam.read_text(encoding="utf-8").replace(
-            "carries:", "failure_modes:\n- at-least-once redelivery\ncarries:"
+    interface = design / "interfaces" / "invoice-events.md"
+    interface.write_text(
+        interface.read_text(encoding="utf-8").replace(
+            "implemented_by:", "failure_modes:\n- at-least-once redelivery\nimplemented_by:"
         ),
         encoding="utf-8",
     )
     _git(design, "add", "-A")
-    _git(design, "commit", "-qm", "the seam moved")
+    _git(design, "commit", "-qm", "the interface moved")
     revs["second"] = _git(design, "rev-parse", "HEAD").strip()
 
     (design / "decisions" / "invoice-cadence.md").write_text(_LATER_DECISION, encoding="utf-8")
@@ -173,7 +146,7 @@ def _stamp(design: Path, repo: Path, unit: str) -> Any:
             "--unit",
             unit,
             "--milestone",
-            "milestone:m1",
+            "milestone:invoicing",
         ],
     )
 
@@ -198,10 +171,10 @@ def _reference_status(orders: Path, billing: Path, *flags: str) -> Any:
 def test_a_stale_watermark_reports_what_landed_since_it_and_a_current_one_is_clean(
     reference: tuple[Path, Path, dict[str, str]],
 ) -> None:
-    """The stale unit lists the decision and seam changes that landed since
-    its watermark — only those touching it, which is why the decision already
-    in the store at the watermark does not appear — while the unit stamped at
-    head reports current."""
+    """The stale unit lists the decision and interface changes that landed
+    since its watermark — only those touching it, which is why the decision
+    already in the store at the watermark does not appear — while the unit
+    stamped at head reports current."""
     orders, billing, revs = reference
 
     result = _reference_status(orders, billing)
@@ -210,11 +183,13 @@ def test_a_stale_watermark_reports_what_landed_since_it_and_a_current_one_is_cle
     assert result.stdout.splitlines() == [
         f"current: component:orders-api in {orders}",
         "behind: component:billing-worker in "
-        f"{billing}: decision:invoice-cadence, seam:invoice-events "
+        f"{billing}: decision:invoice-cadence, interface:invoice-events "
         f"since {revs['first'][:7]}",
-        "consumer behind: seam:invoice-events: component:billing-worker in "
+        "consumer behind: interface:invoice-events: component:billing-worker in "
         f"{billing} has not caught up; provider component:orders-api is current",
-        "done_when unmet: milestone:m1 story:invoice-on-charge#ac-1: nothing claims to verify it",
+        "no implementation: component:acme",
+        "done_when unmet: milestone:invoicing behavior:order-settles#obs-2: "
+        "nothing claims to verify it",
     ]
 
 
@@ -222,14 +197,14 @@ def test_a_never_stamped_watermark_is_behind_by_everything(
     reference: tuple[Path, Path, dict[str, str]],
 ) -> None:
     """A marker fresh from sync carries no rev: nothing has landed, so the
-    comparison base is the empty tree and every decision and seam change ever
-    is unlanded — not an error, and spelled as never stamped."""
+    comparison base is the empty tree and every decision and interface change
+    ever is unlanded — not an error, and spelled as never stamped."""
     orders, billing, _ = reference
     (billing / ".absicht").write_text(
         dump_singleton(
             Marker(
                 design=_marker(billing).design,
-                units=(UnitWatermark(id="component:billing-worker", path="worker"),),
+                units=(Watermark(id="component:billing-worker", path="worker"),),
             )
         ),
         encoding="utf-8",
@@ -240,7 +215,7 @@ def test_a_never_stamped_watermark_is_behind_by_everything(
     assert result.exit_code == ExitCode.OK
     assert (
         f"behind: component:billing-worker in {billing}: decision:invoice-cadence, "
-        "decision:invoice-format, seam:invoice-events (never stamped)"
+        "decision:invoice-format, interface:invoice-events (never stamped)"
     ) in result.stdout.splitlines()
 
 
@@ -269,12 +244,14 @@ def test_unit_restricts_to_one_watermark(
     assert result.exit_code == ExitCode.OK
     assert result.stdout.splitlines() == [
         "behind: component:billing-worker in "
-        f"{billing}: decision:invoice-cadence, seam:invoice-events "
+        f"{billing}: decision:invoice-cadence, interface:invoice-events "
         f"since {revs['first'][:7]}",
-        "consumer behind: seam:invoice-events: component:billing-worker in "
+        "consumer behind: interface:invoice-events: component:billing-worker in "
         f"{billing} has not caught up; provider component:orders-api is current",
         # Coverage stays store-wide: --unit restricts the watermark half.
-        "done_when unmet: milestone:m1 story:invoice-on-charge#ac-1: nothing claims to verify it",
+        "no implementation: component:acme",
+        "done_when unmet: milestone:invoicing behavior:order-settles#obs-2: "
+        "nothing claims to verify it",
     ]
     assert ghost.exit_code == ExitCode.USAGE
     assert "component:ghost" in ghost.stderr
@@ -293,7 +270,7 @@ def test_since_compares_against_the_named_rev_not_head(
     assert result.exit_code == ExitCode.OK
     assert (
         f"behind: component:billing-worker in {billing}: "
-        f"seam:invoice-events since {revs['first'][:7]}"
+        f"interface:invoice-events since {revs['first'][:7]}"
     ) in result.stdout.splitlines()
     assert "decision:invoice-cadence" not in result.stdout
 
@@ -322,7 +299,7 @@ def test_json_envelopes_the_report(reference: tuple[Path, Path, dict[str, str]])
 
     assert result.exit_code == ExitCode.OK
     assert json.loads(result.stdout) == {
-        "schema_version": SCHEMA_VERSION,
+        "format_version": FORMAT_VERSION,
         "mode": "reference",
         "against": revs["head"],
         "units": [
@@ -330,32 +307,32 @@ def test_json_envelopes_the_report(reference: tuple[Path, Path, dict[str, str]])
                 "repo": str(orders),
                 "id": "component:orders-api",
                 "path": "api",
-                "at": "milestone:m1",
+                "at": "milestone:invoicing",
                 "design_rev": revs["head"],
                 "decisions": [],
-                "seams": [],
+                "interfaces": [],
             },
             {
                 "repo": str(billing),
                 "id": "component:billing-worker",
                 "path": "worker",
-                "at": "milestone:m1",
+                "at": "milestone:invoicing",
                 "design_rev": revs["first"],
                 "decisions": ["decision:invoice-cadence"],
-                "seams": ["seam:invoice-events"],
+                "interfaces": ["interface:invoice-events"],
             },
         ],
         "consumers_behind": [
             {
-                "seam": "seam:invoice-events",
+                "interface": "interface:invoice-events",
                 "consumer": "component:billing-worker",
                 "repo": str(billing),
                 "provider": "component:orders-api",
             }
         ],
-        "no_implementation": [],
+        "no_implementation": ["component:acme"],
         "done_when_unmet": [
-            {"milestone": "milestone:m1", "criterion": "story:invoice-on-charge#ac-1"}
+            {"milestone": "milestone:invoicing", "observation": "behavior:order-settles#obs-2"}
         ],
     }
 
@@ -363,8 +340,8 @@ def test_json_envelopes_the_report(reference: tuple[Path, Path, dict[str, str]])
 def test_reference_mode_without_repo_is_a_usage_error(
     reference: tuple[Path, Path, dict[str, str]],
 ) -> None:
-    """``System.units`` names repos by suffix, which cannot locate them on
-    disk: reference mode needs the repos named outright."""
+    """A marker names repos by suffix, which cannot locate them on disk:
+    reference mode needs the repos named outright."""
     orders, _, _ = reference
 
     result = _status(orders / ".absicht")
@@ -393,10 +370,8 @@ def test_embedded_reports_coverage_and_done_when_without_watermarks(
 
     assert result.exit_code == ExitCode.OK
     assert result.stdout.splitlines() == [
-        "no implementation: component:cancellation",
-        "no implementation: component:catalog",
-        "no implementation: component:orders",
-        "done_when unmet: milestone:m1 story:cancel-order#ac-1: nothing claims to verify it",
+        "no implementation: component:acme",
+        "done_when unmet: milestone:m1 behavior:order-cancelled#obs-1: nothing claims to verify it",
     ]
     assert "watermark" not in result.stdout
     assert flagged.exit_code == ExitCode.OK
@@ -409,26 +384,27 @@ def test_embedded_reports_coverage_and_done_when_without_watermarks(
 
 def test_claims_are_looked_for_outside_the_store(tmp_path: Path) -> None:
     """The weaker half of ``ab verify``'s done-when rule: a claim is a file in
-    the repo referencing the criterion id. The store's own files do not count
-    — a story names its own criteria, and counting that would make ``done_when``
-    vacuously pass — while a step-definition-shaped file beside it does."""
+    the repo referencing the observation id. The store's own files do not count
+    — a behavior names its own observations, and counting that would make
+    ``done_when`` vacuously pass — while a step-definition-shaped file beside
+    it does."""
     repo = tmp_path / "repo"
     store = repo / "store"
     shutil.copytree(CLEAN, store)
     _git(repo, "init", "-q")
 
     bare = _status(store)
-    (repo / "test_cancellation.py").write_text('"""story:cancel-order#ac-1"""\n', encoding="utf-8")
+    (repo / "test_cancellation.py").write_text(
+        '"""behavior:order-cancelled#obs-1"""\n', encoding="utf-8"
+    )
     claimed = _status(store)
 
     assert bare.exit_code == ExitCode.OK
-    assert "done_when unmet: milestone:m1 story:cancel-order#ac-1" in bare.stdout
+    assert "done_when unmet: milestone:m1 behavior:order-cancelled#obs-1" in bare.stdout
     assert claimed.exit_code == ExitCode.OK
     assert "done_when unmet" not in claimed.stdout
     assert claimed.stdout.splitlines() == [
-        "no implementation: component:cancellation",
-        "no implementation: component:catalog",
-        "no implementation: component:orders",
+        "no implementation: component:acme",
     ]
 
 
@@ -438,10 +414,10 @@ def test_the_store_skip_holds_for_a_relative_store_path_too(
     """The default invocation spells ``--store`` relatively (``.absicht``, or a
     bare directory name), and the claim scan walks files git spells absolutely:
     a skip compared across those two spellings never fires, so the store claims
-    its own criteria and ``done_when`` reads vacuously met — absicht's own store
-    reported every criterion met the first time ``ab status`` ran against it.
-    The skip has to hold for the relative spelling, not just the absolute one
-    the tests happened to use."""
+    its own observations and ``done_when`` reads vacuously met — absicht's own
+    store reported every observation met the first time ``ab status`` ran
+    against it. The skip has to hold for the relative spelling, not just the
+    absolute one the tests happened to use."""
     repo = tmp_path / "repo"
     shutil.copytree(CLEAN, repo / "store")
     _git(repo, "init", "-q")
@@ -450,17 +426,17 @@ def test_the_store_skip_holds_for_a_relative_store_path_too(
     result = runner.invoke(app, ["--store", "store", "status"])
 
     assert result.exit_code == ExitCode.OK
-    assert "done_when unmet: milestone:m1 story:cancel-order#ac-1" in result.stdout
+    assert "done_when unmet: milestone:m1 behavior:order-cancelled#obs-1" in result.stdout
 
 
-def test_a_criterion_claimed_in_an_implementing_repo_is_met(
+def test_an_observation_claimed_in_an_implementing_repo_is_met(
     reference: tuple[Path, Path, dict[str, str]],
 ) -> None:
     """Reference mode looks for claims where the code lives: the implementing
     repos, not the design store."""
     orders, billing, _ = reference
     (billing / "test_invoicing.py").write_text(
-        '"""story:invoice-on-charge#ac-1"""\n', encoding="utf-8"
+        '"""behavior:order-settles#obs-2"""\n', encoding="utf-8"
     )
 
     result = _reference_status(orders, billing)

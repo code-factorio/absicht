@@ -1,6 +1,12 @@
 ---
 id: component:shadow-report
-title: Shadow reporting
+title: Shadow report
 state: observed
-responsibility: Mirror billing events into the reporting warehouse.
+confidence: assumed
+owner: sam
+level: container
+responsibility: Nobody knows who reads this, only that it runs nightly.
+parent: component:legacy
+implemented_by:
+- acme#reports/shadow
 ---

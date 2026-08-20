@@ -1,11 +1,17 @@
 ---
-id: requirement:capture-notes
+id: req:capture-notes
 title: Capture thoughts at near-zero friction
 state: specified
 confidence: verified
 owner: vfeenstr
-realized_by:
-- component:notes
+statement: A designer must be able to capture a thought as a note with
+  near-zero friction.
+priority: must
+actors:
+- actor:designer
+relates:
+- to: goal:intent-survives
+  type: derives_from
 ---
 
 Notes are committed under .absicht/notes/, carry no classification, and are

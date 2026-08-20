@@ -3,23 +3,31 @@
   '''
   component:orders — Orders
     state: specified
-    confidence: assumed
+    confidence: reviewed
+    lifecycle: active
+    owner: dana
+    level: container
     responsibility: Take orders and record what happened to them.
-    contains: component:catalog
-    provides: seam:order-events
-    owns_data: data:order
+    technology: Python 3.14
+    parent: component:acme
+    implemented_by: acme#src/orders
   
   points at:
-    component:catalog (contains)
-    seam:order-events (provides)
-    data:order (owns_data)
+    component:acme (parent)
+    req:cancel-orders (implements)
+    constraint:gdpr-erasure (constrained_by)
+    library:pydantic (depends_on)
+    resource:order-cache (depends_on)
+    resource:order-stream (depends_on)
   
   referenced by:
-    seam:order-events (provider)
+    behavior:order-cancelled (at)
+    behavior:order-placed [superseded] (at)
+    component:cancellation (parent)
+    interface:order-events (declared_by)
     data:order (owner_component)
-    behavior:order-placed-v2 (at)
-    behavior:order-placed-v2 (at)
     decision:event-log (applies_to)
+    milestone:m1 (scope)
   
   '''
 # ---

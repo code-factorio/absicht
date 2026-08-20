@@ -50,7 +50,9 @@ from pathlib import Path
 from absicht.git import GitError, changed_between, current_rev, repo_root, resolve_rev
 from absicht.load import LocatedStore, StoreMode
 from absicht.markers import read as read_marker
-from absicht.models import SCHEMA_VERSION, Design, Ref, UnitWatermark
+from absicht.models.design import FORMAT_VERSION, Design, Ref, RelationshipType
+from absicht.models.marker import Watermark
+from absicht.resolve import Index
 
 
 class StatusUsageError(Exception):
@@ -69,34 +71,34 @@ class UnitReport:
     """One watermark, judged: what landed in the design since it."""
 
     repo: Path
-    watermark: UnitWatermark
+    watermark: Watermark
     decisions: tuple[Ref, ...]
-    seams: tuple[Ref, ...]
+    interfaces: tuple[Ref, ...]
 
     @property
     def behind(self) -> bool:
-        return bool(self.decisions or self.seams)
+        return bool(self.decisions or self.interfaces)
 
 
 @dataclass(frozen=True, slots=True)
 class ConsumerLag:
-    """A seam whose contract moved past a consumer's watermark while the
-    provider's own watermark covers the change — the asymmetric case worth
-    naming beyond the per-unit lists, where both sides being behind would make
-    the seam just one line among that unit's drift."""
+    """An interface whose contract moved past a caller's watermark while the
+    declaring side's own watermark covers the change — the asymmetric case
+    worth naming beyond the per-unit lists, where both sides being behind
+    would make the interface just one line among that unit's drift."""
 
-    seam: Ref
+    interface: Ref
     consumer: Ref
     repo: Path
     provider: Ref
 
 
 @dataclass(frozen=True, slots=True)
-class UnmetCriterion:
-    """A `done_when` criterion nothing claims to verify."""
+class UnmetObservation:
+    """A `done_when` observation nothing claims to verify."""
 
     milestone: Ref
-    criterion: str
+    observation: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -111,13 +113,13 @@ class StatusReport:
     units: tuple[UnitReport, ...]
     consumers_behind: tuple[ConsumerLag, ...]
     no_implementation: tuple[Ref, ...]
-    done_when_unmet: tuple[UnmetCriterion, ...]
+    done_when_unmet: tuple[UnmetObservation, ...]
 
     @property
     def drift(self) -> bool:
         """Whether any unit is behind or any consumer has not caught up —
         what ``--fail-on-drift`` turns into an exit code. Coverage gaps are
-        not drift: an unimplemented component or an unmet criterion is the
+        not drift: an unimplemented component or an unmet observation is the
         design's own unfinished business, not the code falling behind it."""
         return any(unit.behind for unit in self.units) or bool(self.consumers_behind)
 
@@ -134,18 +136,19 @@ class StatusReport:
             ),
             *(
                 f"behind: {unit.watermark.id} in {unit.repo}: "
-                f"{', '.join([*unit.decisions, *unit.seams])} {_since(unit.watermark)}"
+                f"{', '.join([*unit.decisions, *unit.interfaces])} {_since(unit.watermark)}"
                 for unit in self.units
                 if unit.behind
             ),
             *(
-                f"consumer behind: {lag.seam}: {lag.consumer} in {lag.repo} has not "
+                f"consumer behind: {lag.interface}: {lag.consumer} in {lag.repo} has not "
                 f"caught up; provider {lag.provider} is current"
                 for lag in self.consumers_behind
             ),
             *(f"no implementation: {ref}" for ref in self.no_implementation),
             *(
-                f"done_when unmet: {unmet.milestone} {unmet.criterion}: nothing claims to verify it"
+                f"done_when unmet: {unmet.milestone} {unmet.observation}: "
+                "nothing claims to verify it"
                 for unmet in self.done_when_unmet
             ),
         ]
@@ -154,7 +157,7 @@ class StatusReport:
     def render_json(self) -> dict[str, object]:
         """The ``--format json`` envelope from docs/tasks/00-conventions.md."""
         return {
-            "schema_version": SCHEMA_VERSION,
+            "format_version": FORMAT_VERSION,
             "mode": self.mode.value,
             "against": self.against,
             "units": [
@@ -165,13 +168,13 @@ class StatusReport:
                     "at": unit.watermark.at,
                     "design_rev": unit.watermark.design_rev,
                     "decisions": list(unit.decisions),
-                    "seams": list(unit.seams),
+                    "interfaces": list(unit.interfaces),
                 }
                 for unit in self.units
             ],
             "consumers_behind": [
                 {
-                    "seam": lag.seam,
+                    "interface": lag.interface,
                     "consumer": lag.consumer,
                     "repo": str(lag.repo),
                     "provider": lag.provider,
@@ -180,13 +183,13 @@ class StatusReport:
             ],
             "no_implementation": list(self.no_implementation),
             "done_when_unmet": [
-                {"milestone": unmet.milestone, "criterion": unmet.criterion}
+                {"milestone": unmet.milestone, "observation": unmet.observation}
                 for unmet in self.done_when_unmet
             ],
         }
 
 
-def _since(watermark: UnitWatermark) -> str:
+def _since(watermark: Watermark) -> str:
     """The tail of a behind line: which rev the unit landed at, or that it
     never did."""
     if watermark.design_rev is None:
@@ -224,7 +227,7 @@ def _embedded(design: Design, location: LocatedStore) -> StatusReport:
     The store's own repository is where claims are looked for — that is what
     design and code sharing a repo means. A store outside any repository has
     nowhere to look, so nothing claims anything and every `done_when`
-    criterion reports unmet: honest, and no crash over a store git has never
+    observation reports unmet: honest, and no crash over a store git has never
     seen."""
     try:
         roots: tuple[Path, ...] = (repo_root(location.root),)
@@ -253,7 +256,7 @@ def _reference(
     if not repos:
         raise StatusUsageError(
             "reference mode: pass --repo PATH for every implementing repo — "
-            "System.units names repos by suffix, which cannot locate them on disk"
+            "a marker names repos by suffix, which cannot locate them on disk"
         )
     against = resolve_rev(since, location.root) if since is not None else current_rev(location.root)
     # dict.fromkeys keeps the first spelling of a repeated --repo, the same
@@ -272,14 +275,15 @@ def _reference(
         (repo, watermark, _refs_since(location.root, watermark, against))
         for repo, watermark in watermarks
     ]
+    index = Index(design)
     units = tuple(
-        _unit_report(design, repo, watermark, changed) for repo, watermark, changed in judged
+        _unit_report(design, index, repo, watermark, changed) for repo, watermark, changed in judged
     )
     if unit is not None:
         units = tuple(unit_report for unit_report in units if unit_report.watermark.id == unit)
     if behind_only:
         units = tuple(unit_report for unit_report in units if unit_report.behind)
-    consumers_behind = _consumer_lag(design, judged)
+    consumers_behind = _consumer_lag(design, index, judged)
     if unit is not None:
         consumers_behind = tuple(lag for lag in consumers_behind if lag.consumer == unit)
     return StatusReport(
@@ -289,7 +293,7 @@ def _reference(
         consumers_behind=consumers_behind,
         no_implementation=_no_implementation(design),
         # Claims live where the code lives: the implementing repos, never the
-        # design store (its stories name their own criteria).
+        # design store (its behaviors name their own observations).
         done_when_unmet=_unmet(design, resolved, skip=None),
     )
 
@@ -300,15 +304,15 @@ def _no_implementation(design: Design) -> tuple[Ref, ...]:
     return tuple(component.id for component in design.components if not component.implemented_by)
 
 
-def _refs_since(root: Path, watermark: UnitWatermark, against: str) -> frozenset[Ref]:
-    """The decision and seam refs the design store changed between the
+def _refs_since(root: Path, watermark: Watermark, against: str) -> frozenset[Ref]:
+    """The decision and interface refs the design store changed between the
     watermark's rev and `against`.
 
     The diff runs in the design store's own repository, restricted to the
     store's kind directories (a store may sit in a subdirectory of the repo,
     so the paths are joined onto the store's repo-relative prefix — the same
-    join `absicht.build` makes for `--rev`). Only the two kinds the spec names
-    are walked: decisions and seams are what a unit can be behind on. A
+    join `absicht.build` makes for `--rev`). Only the two kinds a unit can be
+    behind on are walked: what was decided, and what it has to talk through. A
     changed file whose slug names nothing in the design — renamed or deleted
     since — cannot be attributed and is dropped rather than reported as a ref
     nobody can act on.
@@ -316,8 +320,10 @@ def _refs_since(root: Path, watermark: UnitWatermark, against: str) -> frozenset
     base = watermark.design_rev if watermark.design_rev is not None else _EMPTY_TREE
     repo = repo_root(root)
     prefix = root.resolve().relative_to(repo.resolve())
-    changed = changed_between(base, against, repo, paths=(prefix / "decisions", prefix / "seams"))
-    kinds = {"decisions": "decision", "seams": "seam"}
+    changed = changed_between(
+        base, against, repo, paths=(prefix / "decisions", prefix / "interfaces")
+    )
+    kinds = {"decisions": "decision", "interfaces": "interface"}
     return frozenset(
         f"{kinds[path.parts[-2]]}:{path.stem}"
         for path in changed
@@ -326,10 +332,13 @@ def _refs_since(root: Path, watermark: UnitWatermark, against: str) -> frozenset
 
 
 def _unit_report(
-    design: Design, repo: Path, watermark: UnitWatermark, changed: frozenset[Ref]
+    design: Design, index: Index, repo: Path, watermark: Watermark, changed: frozenset[Ref]
 ) -> UnitReport:
     """The watermark's drift: which changed decisions apply to it and which
-    changed seams it provides or consumes, in the design's own order."""
+    changed interfaces it declares or calls, in the design's own order."""
+    called = {
+        target for source, target in index.edges(RelationshipType.CALLS) if source == watermark.id
+    }
     return UnitReport(
         repo=repo,
         watermark=watermark,
@@ -338,76 +347,85 @@ def _unit_report(
             for decision in design.decisions
             if decision.id in changed and watermark.id in decision.applies_to
         ),
-        seams=tuple(
-            seam.id
-            for seam in design.seams
-            if seam.id in changed
-            and (seam.provider == watermark.id or watermark.id in seam.consumers)
+        interfaces=tuple(
+            interface.id
+            for interface in design.interfaces
+            if interface.id in changed
+            and (interface.declared_by == watermark.id or interface.id in called)
         ),
     )
 
 
 def _consumer_lag(
     design: Design,
-    judged: list[tuple[Path, UnitWatermark, frozenset[Ref]]],
+    index: Index,
+    judged: list[tuple[Path, Watermark, frozenset[Ref]]],
 ) -> tuple[ConsumerLag, ...]:
-    """Seams whose consumers have not caught up while their provider has.
+    """Interfaces whose callers have not caught up while the declaring side has.
 
-    A seam is lagged when it changed since a consumer unit's watermark but
-    not since the provider's — the provider has landed the new contract, the
-    consumer is still running the old one. Both behind is ordinary drift (the
-    per-unit lists say it); a provider with no watermark at all cannot be
-    said to have moved past anything, so its seams are not lagged here. The
-    first watermark seen per component speaks for it: a component implemented
-    across repos is one unit with one contract."""
+    An interface is lagged when it changed since a calling unit's watermark
+    but not since the declaring one's — the declaring side has landed the new
+    contract, the caller is still running the old one. Both behind is ordinary
+    drift (the per-unit lists say it); a declaring side with no watermark at
+    all cannot be said to have moved past anything, so its interfaces are not
+    lagged here. The first watermark seen per component speaks for it: a
+    component implemented across repos is one unit with one contract."""
     by_component: dict[Ref, tuple[Path, frozenset[Ref]]] = {}
     for repo, watermark, changed in judged:
         by_component.setdefault(watermark.id, (repo, changed))
+    callers: dict[Ref, list[Ref]] = {}
+    for source, target in index.edges(RelationshipType.CALLS):
+        callers.setdefault(target, []).append(source)
     lags: list[ConsumerLag] = []
-    for seam in design.seams:
-        if seam.provider is None:
+    for interface in design.interfaces:
+        if interface.declared_by is None:
             continue
-        provider = by_component.get(seam.provider)
-        if provider is None or seam.id in provider[1]:
+        provider = by_component.get(interface.declared_by)
+        if provider is None or interface.id in provider[1]:
             continue
         lags.extend(
-            ConsumerLag(seam=seam.id, consumer=consumer, repo=entry[0], provider=seam.provider)
-            for consumer in seam.consumers
-            if (entry := by_component.get(consumer)) is not None and seam.id in entry[1]
+            ConsumerLag(
+                interface=interface.id,
+                consumer=consumer,
+                repo=entry[0],
+                provider=interface.declared_by,
+            )
+            for consumer in callers.get(interface.id, ())
+            if (entry := by_component.get(consumer)) is not None and interface.id in entry[1]
         )
     return tuple(lags)
 
 
 def _unmet(
     design: Design, roots: tuple[Path, ...], *, skip: Path | None
-) -> tuple[UnmetCriterion, ...]:
-    """Every `done_when` criterion nothing claims to verify, milestone by
+) -> tuple[UnmetObservation, ...]:
+    """Every `done_when` observation nothing claims to verify, milestone by
     milestone."""
-    criteria = [
-        (milestone.id, criterion)
+    wanted = [
+        (milestone.id, observation)
         for milestone in design.milestones
-        for criterion in milestone.done_when
+        for observation in milestone.done_when
     ]
-    claimed = _claimed_ids(roots, tuple(criterion for _, criterion in criteria), skip=skip)
+    claimed = _claimed_ids(roots, tuple(observation for _, observation in wanted), skip=skip)
     return tuple(
-        UnmetCriterion(milestone=milestone, criterion=criterion)
-        for milestone, criterion in criteria
-        if criterion not in claimed
+        UnmetObservation(milestone=milestone, observation=observation)
+        for milestone, observation in wanted
+        if observation not in claimed
     )
 
 
 def _claimed_ids(
-    roots: tuple[Path, ...], criteria: tuple[str, ...], *, skip: Path | None
+    roots: tuple[Path, ...], observations: tuple[str, ...], *, skip: Path | None
 ) -> frozenset[str]:
-    """Which criteria some file in `roots` references — the working
+    """Which observations some file in `roots` references — the working
     definition of a claim, searched as bytes so a binary or oddly-encoded
     file is a non-match rather than a crash."""
     # `skip` arrives as the caller spelled the store — `.absicht` by default —
     # while the walk's paths share `repo_root`'s absolute spelling. Resolved
     # once here, the two spellings compare; left alone, `is_relative_to` would
-    # be False for every file and the store would claim its own criteria.
+    # be False for every file and the store would claim its own observations.
     resolved_skip = skip.resolve() if skip is not None else None
-    needles = tuple((criterion, criterion.encode()) for criterion in criteria)
+    needles = tuple((observation, observation.encode()) for observation in observations)
     claimed: set[str] = set()
     for root in roots:
         for path in sorted(root.glob("**/*")):
@@ -424,7 +442,7 @@ def _claimed_ids(
 
 def _scannable(path: Path, skip: Path | None) -> bool:
     """A file the claim scan reads: not a directory, not git's own tree, not
-    a generated scenario (a `.feature` header names its criterion), and not
+    a generated scenario (a `.feature` header names its observation), and not
     the store — the same exclusions `ab verify`'s step scan makes, with the
     store skipped by where it actually is rather than by name, since
     `--store` need not spell it `.absicht`."""
