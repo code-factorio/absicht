@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import sqlite3
 import subprocess
@@ -409,7 +410,8 @@ def test_include_and_exclude_are_gone(tmp_path: Path) -> None:
         result = _packet("--out", str(tmp_path / "out"), flag, "component:catalog")
 
         assert result.exit_code == ExitCode.USAGE
-        assert flag in result.stderr
+        # Rich can insert color codes inside the flag name on CI.
+        assert flag in re.sub(r"\x1b\[[0-9;]*m", "", result.stderr)
 
 
 def test_a_negative_horizon_is_a_usage_error(tmp_path: Path) -> None:
